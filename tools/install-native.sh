@@ -630,9 +630,15 @@ else
     # One secret per file also means `cat` reads a credential without parsing,
     # which is what the docs and the printed RH_TOKEN hint assume.
     #
-    # rhorizon.env-secrets is still READ above for installs made before this,
-    # and is rewritten below so their re-runs keep converging; new installs get
-    # the shared layout.
+    # rhorizon.env-secrets is READ above so an install made before this keeps
+    # working, and refreshed below ONLY IF IT ALREADY EXISTS.
+    #
+    # It must never be created on a fresh install. Writing it unconditionally
+    # turned two secrets into three files -- master-password, root-token, AND a
+    # third holding both -- which is more exposure than the single file this
+    # was meant to replace, not less. One extra copy of a credential that grants
+    # full control is one extra thing to find, back up by accident, or miss when
+    # deleting.
     [ "$DRY_RUN" = 1 ] || { umask 077
         run mkdir -p "$SECRET_DIR"
         run chmod 700 "$SECRET_DIR"
@@ -642,10 +648,13 @@ else
             printf '%s' "$ROOT_TOKEN" > "$SECRET_DIR/root-token"
             chmod 0400 "$SECRET_DIR/root-token"
         fi
-        {
-            printf 'MASTER_PASSWORD=%s\n' "$MASTER_PW"
-            [ -n "$ROOT_TOKEN" ] && printf 'ROOT_TOKEN=%s\n' "$ROOT_TOKEN"
-        } > "$SECRET_FILE"
+        if [ -f "$SECRET_FILE" ]; then
+            {
+                printf 'MASTER_PASSWORD=%s\n' "$MASTER_PW"
+                [ -n "$ROOT_TOKEN" ] && printf 'ROOT_TOKEN=%s\n' "$ROOT_TOKEN"
+            } > "$SECRET_FILE"
+            _legacy_secret_file=1
+        fi
     }
     if [ -n "$ROOT_TOKEN" ]; then log "done. master password + admin root token saved in $SECRET_DIR/ (mode 0400)"
     else log "done. master password saved in $SECRET_DIR/master-password (mode 0400; no root token minted -- reuse an existing admin token)"; fi
@@ -654,7 +663,16 @@ else
     log "SECURITY: $SECRET_DIR/ now holds credentials sufficient for full control"
     log "  of this instance. Move them into a password manager and delete them,"
     log "  or keep them and accept that anyone who can read them can unseal this vault."
-    log "  (a compatibility copy is also written to $SECRET_FILE)"
+    if [ -n "${_legacy_secret_file:-}" ]; then
+        # Pre-existing install: it has been mirrored into the new layout, so the
+        # old file is now a REDUNDANT third copy of the same two secrets. Say so
+        # and let the operator delete it -- removing a credential file on their
+        # behalf is not this script's call.
+        log "NOTE: $SECRET_FILE predates the shared layout and still holds both"
+        log "  secrets. They are now in $SECRET_DIR/ as well, so that file is a"
+        log "  redundant copy -- delete it once you have checked the new one:"
+        log "      rm $SECRET_FILE"
+    fi
 fi
 log "vault: https://$LOCAL_HOST:$API_PORT"
 log "clients need the CA file -- add to your shell profile:"

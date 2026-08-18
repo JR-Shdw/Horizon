@@ -75,5 +75,10 @@ CONTACT
 ================================================================================
 
 shdw <horizon@resurgamus.com>
-Source of truth: github.com/JR-Shdw/Horizon (canonical).
-Public mirror: github.com/JR-Shdw/Horizon (read-only).
+Canonical development repository: private.
+Public source repository: github.com/JR-Shdw/Horizon
+
+(The first line is deliberately not a URL. It used to name the private forge,
+which the publish sanitizer rewrites to the GitHub address -- leaving the
+public NOTICE claiming one repository was both the canonical source and a
+read-only mirror of itself.)

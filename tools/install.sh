@@ -43,10 +43,26 @@ if [ -n "$TIER" ]; then
 fi
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-has_docker() { command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; }
+# A usable container runtime is a runtime PLUS a compose implementation.
+# Checked in both shapes for each: the v2 plugin ("<bin> compose") and the
+# standalone binary ("<bin>-compose"). podman-compose is commonly installed
+# without `podman compose` working, and vice versa.
+#
+# Podman was missing here entirely: auto only ever looked for docker, so a host
+# with podman + podman-compose and no docker shim -- which is the normal Arch /
+# EndeavourOS / Fedora setup -- silently fell through to the NATIVE installer.
+# That is the heavier, more invasive path (packages, PostgreSQL, a boot
+# service, sysctl on BSD), chosen not because it fit but because detection was
+# blind. install-container.sh has supported podman all along.
+has_runtime() {  # has_runtime <docker|podman>
+    command -v "$1" >/dev/null 2>&1 || return 1
+    "$1" compose version >/dev/null 2>&1 && return 0
+    command -v "$1-compose" >/dev/null 2>&1
+}
 
 if [ "$MODE" = auto ]; then
-    if has_docker; then MODE=docker
+    # Docker first: it is the more common target and the better-tested lane.
+    if has_runtime docker || has_runtime podman; then MODE=docker
     elif [ "$(id -u)" = 0 ]; then MODE=system
     else MODE=user; fi
 fi

@@ -86,9 +86,9 @@ password. The first unseal creates the master key from your password.
 > backup is verified. Note the value also lands in your shell history and, for
 > the life of the process, in `/proc/<pid>/cmdline`.
 >
-> The native installer (`tools/install-native.sh`) keeps its equivalent at
-> `~/.config/rhorizon/rhorizon.env-secrets` and prompts you about it at the end
-> of the run.
+> The native installer (`tools/install-native.sh`) uses the same layout under
+> its own config directory, `~/.config/rhorizon/secrets/` in user mode, and
+> warns you about it at the end of the run.
 
 ```bash
 cd cli
@@ -241,13 +241,22 @@ runtimes.
 
 ### Podman
 
+Pass `-f tools/docker-compose.quickstart.podman.yml`. Without `-f`, compose
+picks up `docker-compose.yml` from the current directory -- the cluster file
+that binds VPN addresses, which this guide told you not to use on a laptop.
+The Podman variant targets localhost and uses the portable `tmpfs` and plain
+`depends_on` forms that rootless Podman needs.
+
 ```bash
 # Either invoke podman-compose directly:
-podman-compose up -d
+podman-compose -f tools/docker-compose.quickstart.podman.yml up -d
 
 # Or generate Quadlet units for systemd (recommended on EL/Fedora):
-podman compose --in-pod=true up -d
+podman compose -f tools/docker-compose.quickstart.podman.yml --in-pod=true up -d
 ```
+
+`sh tools/install.sh` selects that file for you when it detects Podman; the
+commands above are for driving compose by hand.
 
 ### Docker rootless
 
