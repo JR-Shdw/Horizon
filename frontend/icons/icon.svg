@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#0a0a0f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#7c3aed" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#0a0a0f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="jet-top" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="jet-bottom" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#0a0a0f"/>
+
+  <!-- Accretion disk glow -->
+  <ellipse cx="256" cy="256" rx="180" ry="50" fill="none" stroke="#7c3aed" stroke-width="1.5" opacity="0.2" transform="rotate(-15 256 256)"/>
+  <ellipse cx="256" cy="256" rx="160" ry="44" fill="none" stroke="#7c3aed" stroke-width="2" opacity="0.3" transform="rotate(-15 256 256)"/>
+  <ellipse cx="256" cy="256" rx="140" ry="38" fill="none" stroke="#7c3aed" stroke-width="3" opacity="0.5" transform="rotate(-15 256 256)"/>
+  <ellipse cx="256" cy="256" rx="120" ry="32" fill="none" stroke="#a855f7" stroke-width="3.5" opacity="0.6" transform="rotate(-15 256 256)"/>
+  <ellipse cx="256" cy="256" rx="100" ry="26" fill="none" stroke="#c084fc" stroke-width="2.5" opacity="0.5" transform="rotate(-15 256 256)"/>
+
+  <!-- Cyan accretion highlights -->
+  <ellipse cx="256" cy="256" rx="130" ry="35" fill="none" stroke="#06b6d4" stroke-width="1" opacity="0.3" transform="rotate(-15 256 256)"/>
+  <ellipse cx="256" cy="256" rx="110" ry="29" fill="none" stroke="#06b6d4" stroke-width="1.5" opacity="0.25" transform="rotate(-15 256 256)"/>
+
+  <!-- Relativistic jets (top and bottom) -->
+  <line x1="256" y1="190" x2="256" y2="60" stroke="url(#jet-top)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="256" y1="322" x2="256" y2="452" stroke="url(#jet-bottom)" stroke-width="6" stroke-linecap="round"/>
+  <!-- Jet spread -->
+  <line x1="254" y1="190" x2="250" y2="75" stroke="#06b6d4" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+  <line x1="258" y1="190" x2="262" y2="75" stroke="#06b6d4" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+  <line x1="254" y1="322" x2="250" y2="437" stroke="#06b6d4" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+  <line x1="258" y1="322" x2="262" y2="437" stroke="#06b6d4" stroke-width="2" opacity="0.3" stroke-linecap="round"/>
+
+  <!-- Photon ring -->
+  <circle cx="256" cy="256" r="58" fill="none" stroke="#e9d5ff" stroke-width="2" opacity="0.6"/>
+  <circle cx="256" cy="256" r="60" fill="none" stroke="#7c3aed" stroke-width="1" opacity="0.3"/>
+
+  <!-- Event horizon (black hole core) -->
+  <circle cx="256" cy="256" r="45" fill="#0a0a0f"/>
+  <circle cx="256" cy="256" r="45" fill="url(#core)" opacity="0.4"/>
+
+  <!-- Central singularity -->
+  <circle cx="256" cy="256" r="6" fill="#c084fc" opacity="0.8"/>
+  <circle cx="256" cy="256" r="3" fill="#e9d5ff"/>
+</svg>

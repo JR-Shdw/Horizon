@@ -1,0 +1,16 @@
+# Resurgamus Horizon - fail2ban jail.
+# Install: cp to /etc/fail2ban/jail.d/rhorizon.conf and set logpath to where
+# authfail.log is reachable on the host.
+#   Docker volume path:
+#     docker volume inspect rhorizon_audit_logs | grep Mountpoint
+[rhorizon]
+enabled  = true
+filter   = rhorizon
+logpath  = /var/lib/docker/volumes/rhorizon_audit_logs/_data/authfail.log
+maxretry = 5
+findtime = 300
+bantime  = 3600
+# iptables (default):
+action   = iptables-multiport[name=rhorizon, port="8200,8443", protocol=tcp]
+# nftables alternative -- replace the action above with:
+# banaction = nftables-multiport

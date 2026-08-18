@@ -1,0 +1,12 @@
+key	relation	value	check	notes
+arch.x86_64	tested	yes	uname -m	Leap 15.6 full suite target
+arch.aarch64	supported	yes	uname -m	aarch64 Linux stack validated on Raspberry Pi 4
+cpu.bits	required	64	getconf LONG_BIT	32-bit unsupported
+cpu.endian	required	little	python3 -c 'import sys; print(sys.byteorder)'	crypto vectors assume normal supported targets
+ram.workers1.min_mb	min	2048	awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo	API+PG native practical floor
+ram.workers1.recommended_mb	min	4096	awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo	recommended for full test suite
+memlock.workers1.required_mb	exact	608	echo $((1*160+256+192))	service LimitMEMLOCK floor
+disk.min_gb	min	8	df -BG .	build + venv + PostgreSQL data
+disk.recommended_gb	min	16	df -BG .	full tests and wheel builds
+entropy.required	required	yes	test -r /dev/urandom	master keys and tokens
+network.loopback.required	required	yes	curl -fsS http://127.0.0.1:8200/health after start	local API validation

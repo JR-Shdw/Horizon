@@ -1,0 +1,60 @@
+# Secrets
+.env
+.vault_pass
+*.key
+# Local operator note: GitHub publication window (never publish/commit)
+.publish-window.local.md
+*.pem
+
+# Notes privées (revues de code, brouillons, todo perso)
+.private/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+# OS
+.DS_Store
+Thumbs.db
+# Docker
+postgres_data/
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+# C build
+*.o
+*.so
+*.dylib
+core/build/
+# Rust build artifacts, only target/ is ignored.
+# Cargo.lock IS tracked (supply-chain): without it, --locked
+# fails in Docker builds because the lockfile would be regenerated at
+# install time, defeating the reproducibility lock.
+api/rust/target/
+agent/rust/target/
+# Sortie wheel local (maturin build hors target/, ex: --out api/rust/wheel-out)
+api/rust/wheel-out/
+/helm/rhorizon/schema.sql
+/docs/site/
+# Materiel de sortie publique (drafts launch, prospects, contenu non technique).
+# Reste local-only jusqu'a decision de publication.
+outreach/
+# Claude Code -- machine-local settings (permission allowlists)
+.claude/settings.local.json
+
+# Local DB dumps (make db-dump). Never commit vault data.
+backups/
+
+# Custody throughput bench output (host-specific measurements, not artefacts).
+.bench-custody*/

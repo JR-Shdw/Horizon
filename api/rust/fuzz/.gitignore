@@ -1,0 +1,5 @@
+# Local fuzz target output, never committed.
+target/
+corpus/
+artifacts/
+coverage/

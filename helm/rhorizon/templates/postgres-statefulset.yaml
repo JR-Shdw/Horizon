@@ -1,0 +1,95 @@
+{{- if not .Values.postgres.external.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ printf "%s-postgres" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  replicas: 1
+  serviceName: {{ printf "%s-postgres" (include "rhorizon.fullname" .) }}
+  selector:
+    matchLabels:
+      {{- include "rhorizon.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "rhorizon.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      serviceAccountName: {{ include "rhorizon.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: {{ include "rhorizon.image.postgres" . }}
+          imagePullPolicy: {{ .Values.image.postgres.pullPolicy }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: {{ include "rhorizon.postgres.database" . }}
+            - name: POSTGRES_USER
+              value: {{ include "rhorizon.postgres.username" . }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rhorizon.postgres.secretName" . }}
+                  key: postgres-password
+            # PG default mountpoint refuses to init when subdir already
+            # exists, give it its own subdir on the PVC.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: schema
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ include "rhorizon.postgres.username" . }}
+                - -d
+                - {{ include "rhorizon.postgres.database" . }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ include "rhorizon.postgres.username" . }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.postgres.containerSecurityContext | nindent 12 }}
+      volumes:
+        - name: schema
+          configMap:
+            name: {{ printf "%s-schema" (include "rhorizon.fullname" .) }}
+            items:
+              - key: schema.sql
+                path: 01_schema.sql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgres.storage.storageClass }}
+        storageClassName: {{ .Values.postgres.storage.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size }}
+{{- end -}}

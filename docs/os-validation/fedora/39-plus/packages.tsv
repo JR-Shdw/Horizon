@@ -1,0 +1,22 @@
+key	relation	value	check	notes
+os.name	exact	Fedora	. /etc/os-release; echo "$ID"	Fedora native lane
+os.version	min	39	. /etc/os-release; echo "$VERSION_ID"	project floor from install guide
+python.version	min	3.12	python3 --version	Fedora should satisfy with distro Python
+python.package	required	python3 python3-devel python3-pip	dnf list installed python3	venv and headers required
+rust.version	min	1.79	rustc --version	use pinned rustup if distro rust is older
+cargo.lockfile	min	4	cargo --version	Cargo >=1.78 hard floor
+rust.toolchain_source	target	rustup-stable	rustup show active-toolchain	distro rust is acceptable only when locked gates pass
+rust.vault_gate	required	tools-check-rust	bash tools/check-rust.sh --skip-miri	locked vault crypto test/build on target OS/arch
+rust.agent_gate	required	cargo-agent-build	cd agent/rust && cargo build --release --locked --bins	locked rh-fetch/rh-inject/rh-watch/rh-podman build on target OS/arch
+postgresql.version	exact	18	psql --version	postgresql18-server preferred when available
+postgresql.package	required	postgresql18-server postgresql18	dnf list installed 'postgresql*18*'	local DB lane only
+openssl.core	min	3.0	openssl version	core TLS and Python cryptography
+openssl.pq_tls	min	3.5	openssl list -tls-groups 2>/dev/null | grep X25519MLKEM768	required only for native PQ TLS endpoint
+nginx.version	min	distro-supported	nginx -v 2>&1	optional native frontend/reverse-proxy lane
+nginx.openssl.pq_tls	min	3.5	nginx -V 2>&1 | grep -o 'OpenSSL[^)]*'	required if nginx serves X25519MLKEM768
+libsodium.version	min	1.0.18	pkg-config --modversion libsodium	runtime dep of PyNaCl
+libsodium.package	required	libsodium-devel	dnf list installed libsodium-devel	build headers required
+ldap.package	required	openldap-devel cyrus-sasl-devel	dnf list installed openldap-devel	for LDAP/AD auth via bonsai
+ffi.package	required	libffi-devel	dnf list installed libffi-devel	cffi/cryptography build support
+build.package	required	gcc pkgconf curl git cargo	command -v gcc; command -v pkgconf	native build support
+age.version	min	1.1	age --version	optional backup CLI local decrypt/test

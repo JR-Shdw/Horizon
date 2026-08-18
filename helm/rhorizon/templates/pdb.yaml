@@ -1,0 +1,31 @@
+{{- if .Values.pdb.api.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ printf "%s-api" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.api.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "rhorizon.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+{{- end -}}
+{{- if .Values.pdb.frontend.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ printf "%s-frontend" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.frontend.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "rhorizon.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+{{- end -}}

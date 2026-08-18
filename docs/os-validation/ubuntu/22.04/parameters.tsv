@@ -1,0 +1,14 @@
+key	relation	value	check	notes
+service.manager	required	systemd	command -v systemctl	native system service lane
+service.unit	required	rhorizon.service	systemctl cat rhorizon.service	created by tools/install-native.sh
+memlock.formula_mb	formula	workers*160+256+192	grep RH_MEM_MB tools/install-native.sh	worker RSS + Argon2id + headroom
+memlock.workers1.bytes	exact	637534208	systemctl show rhorizon.service -p LimitMEMLOCK	608 MiB in bytes
+capability.required	required	CAP_IPC_LOCK	systemctl show rhorizon.service -p AmbientCapabilities	needed for mlockall
+core_dump_limit	required	0	ulimit -c	core dumps must be disabled by app hardening
+postgresql.service	required	postgresql	systemctl status postgresql	Ubuntu service name
+postgresql.initdb	note	auto-created by postgresql-common	pg_lsclusters	Debian/Ubuntu create main cluster on install
+postgresql.auth.required	required	scram-or-local	psql -tAc 'show password_encryption'	local rhorizon DB connection must auth
+runtime_dir.path	default	/run/rhorizon	test -d /run/rhorizon || true	filesystem AF_UNIX sockets
+listen_addr.default	exact	127.0.0.1	grep RHORIZON_DATABASE_URL -n rhorizon.env	front with nginx/reverse proxy for remote access
+selinux.required	required	no	getenforce 2>/dev/null || true	Ubuntu lane does not use SELinux
+apparmor.note	optional	manual-profile	aa-status 2>/dev/null || true	no shipped AppArmor profile

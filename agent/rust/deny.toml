@@ -1,0 +1,53 @@
+# cargo-deny config for rhorizon-agent (rh-fetch / rh-inject / rh-watch /
+# rh-podman / rh-mcp-gateway).
+#
+# Mirrors api/rust/deny.toml -- same purpose: on every `cargo deny check`,
+# refuse to compile if a transitive dependency:
+#   - has a known security advisory (RUSTSEC),
+#   - has a license incompatible with rhorizon's AGPL-3.0,
+#   - was yanked from crates.io,
+#   - comes from an unknown source (e.g. a local path override).
+#
+# The allow-list below was derived by running `cargo deny check licenses`
+# against this crate's actual resolved dependency graph (reqwest -> aws-lc-rs
+# -> rustls -> the ICU/idna stack for URL parsing) and adding every atomic
+# license term the compound SPDX expressions bottom out in. ISC is the one
+# addition over api/rust's list (aws-lc-rs's own license, dual Apache-2.0/ISC).
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/RustSec/advisory-db"]
+yanked = "deny"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+# Only license names actually present in this dependency graph are listed
+# here; cargo-deny warns on entries it doesn't encounter, which is noise.
+allow = [
+    "AGPL-3.0-or-later",                # rhorizon-agent itself
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",   # rust stdlib + a few crates
+    "BSD-3-Clause",
+    "ISC",                              # aws-lc-rs (dual Apache-2.0/ISC)
+    "Unicode-3.0",                      # ICU / unicode-ident (via reqwest -> idna)
+    "CDLA-Permissive-2.0",              # webpki-roots: Mozilla CA-bundle dataset, not code;
+                                         # permissive, no viral/copyleft terms.
+]
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

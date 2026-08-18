@@ -1,0 +1,3 @@
+# LDAP dynamic-engine driver.
+# Also required by the optional external LDAP login provider.
+bonsai==1.5.3

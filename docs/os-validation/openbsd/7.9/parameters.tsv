@@ -1,0 +1,16 @@
+key	relation	value	check	notes
+service.manager	required	rc.d	rcctl ls on | grep rhorizon	native service lane
+service.unit	required	/etc/rc.d/rhorizon	test -x /etc/rc.d/rhorizon	created by tools/install-native.sh
+memlock.formula_mb	formula	workers*160+256+192	grep RH_MEM_MB tools/install-native.sh	worker RSS + Argon2id + headroom
+memlock.workers1.kb	exact	622592	grep ulimit run-app.sh	608 MiB in KiB
+ulimit.memlock.required	required	at-least-622592	ulimit -l	OpenBSD default is too small
+tmpdir.required	required	/usr/local/rh-build	echo "$TMPDIR"	avoid small /tmp during Rust/Python builds
+core_dump_limit	required	0	ulimit -c	core dumps should be disabled by app hardening
+postgresql.service	required	postgresql	rcctl check postgresql	OpenBSD service name
+postgresql.data_dir	path	/var/postgresql/data	test -d /var/postgresql/data	OpenBSD PG data path
+postgresql.sysctl.required	required	kern.seminfo.semmni=256	sysctl kern.seminfo.semmni	PG18 semaphore floor
+postgresql.sysctl.required	required	kern.seminfo.semmns=2048	sysctl kern.seminfo.semmns	PG18 semaphore floor
+postgresql.sysctl.required	required	kern.seminfo.semmnu=256	sysctl kern.seminfo.semmnu	PG18 semaphore floor
+postgresql.sysctl.persist	required	/etc/sysctl.conf	grep kern.seminfo /etc/sysctl.conf	reboot-safe PG
+runtime_dir.path	default	workdir/run	test -d "$RHORIZON_RUNTIME_DIR"	filesystem AF_UNIX sockets
+peer_cred.required	required	getpeereid	/opt/rhorizon-python/bin/python3.12 -c 'import platform; print(platform.system())'	BSD peer UID shim

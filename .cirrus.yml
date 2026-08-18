@@ -1,0 +1,246 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+#
+# Cirrus CI, FreeBSD + OpenBSD test pipeline.
+#
+# Why Cirrus rather than Woodpecker (the project's main CI): Cirrus is the
+# only major CI provider with native FreeBSD VMs (and OpenBSD via custom
+# images) and is free for open source projects. Woodpecker on Linux self-
+# hosted runners cannot validate the BSD code paths in api/app/peer_cred.py
+# and api/rust/src/key_share.rs.
+#
+# This pipeline targets the BSD-only validation surface :
+#   - Python 3.12 + Rust toolchain installation from pkg / pkg_add
+#   - rhorizon_crypto Rust extension build (mlock + zeroize on BSD)
+#   - peer_cred shim runtime exercise (getpeereid via libc)
+#   - Filesystem-path multi-worker IPC (UnixListener::bind on a path)
+#   - Pytest suite (the cluster_real subset) against a real BSD libc
+#
+# Linux validation continues to live in .woodpecker/validate.yml.
+
+# ---------------------------------------------------------------------------
+# FreeBSD 14.x, full pytest suite
+# ---------------------------------------------------------------------------
+
+freebsd_test_task:
+  name: FreeBSD 14.2 pytest
+  freebsd_instance:
+    image_family: freebsd-14-2
+    cpu: 2
+    memory: 4G
+
+  env:
+    # Rust extension builds with maturin, set SOURCE_DATE_EPOCH for
+    # reproducible wheels (matches the project's reproducibility plan).
+    SOURCE_DATE_EPOCH: "1735689600"
+    PATH: "/root/.cargo/bin:${PATH}"
+    LANG: "en_US.UTF-8"
+    LC_ALL: "en_US.UTF-8"
+    # Tell socket_paths to use /var/run (tmpfs by default on FreeBSD)
+    # rather than /run (which doesn't exist).
+    RHORIZON_RUNTIME_DIR: "/tmp/rhorizon-cirrus"
+
+  install_dependencies_script:
+    - pkg update -q
+    - pkg install -y python312 py312-pip py312-virtualenv py312-sqlite3 rust
+        libsodium openldap-client cyrus-sasl postgresql17-server
+        postgresql17-client git pkgconf gcc
+
+  postgres_setup_script:
+    - sysrc postgresql_enable=YES
+    - service postgresql initdb
+    - service postgresql start
+    - sleep 3
+    - su - postgres -c "psql -c \"CREATE USER rhorizon_test WITH PASSWORD 'rhorizon_test' SUPERUSER;\""
+    - su - postgres -c "psql -c \"CREATE DATABASE rhorizon_test OWNER rhorizon_test;\""
+
+  venv_setup_script:
+    - python3.12 -m venv .venv
+    - . .venv/bin/activate
+    - pip install --upgrade pip wheel
+    - pip install --require-hashes -r api/requirements.txt
+    - pip install -r tools/test-requirements.txt
+    - pip install maturin
+
+  build_rust_extension_script:
+    - . .venv/bin/activate
+    - cd api/rust
+    - RUSTFLAGS="--remap-path-prefix=$(pwd)=." maturin build --release --strip
+    - pip install --force-reinstall target/wheels/*.whl
+
+  test_script:
+    - . .venv/bin/activate
+    - mkdir -p ${RHORIZON_RUNTIME_DIR}
+    - chmod 0700 ${RHORIZON_RUNTIME_DIR}
+    - export TEST_DATABASE_URL=postgresql+asyncpg://rhorizon_test:rhorizon_test@127.0.0.1:5432/rhorizon_test
+    - export RHORIZON_DATABASE_URL=$TEST_DATABASE_URL
+    - export RHORIZON_DATABASE_SSL=false
+    - python -m pytest tests/ --no-header -q --no-cov
+
+  always:
+    journal_artifacts:
+      path: "/var/log/messages"
+      type: text/plain
+
+# ---------------------------------------------------------------------------
+# OpenBSD 7.6, full pytest suite
+# ---------------------------------------------------------------------------
+#
+# OpenBSD support in Cirrus uses the cirruslabs/openbsd-builder community
+# image. Less polished than FreeBSD ; package names + rcctl idioms differ.
+
+openbsd_test_task:
+  name: OpenBSD 7.6 pytest
+  compute_engine_instance:
+    image_project: pg-ci-images
+    image: family/pg-ci-openbsd-postgres
+    platform: openbsd
+    cpu: 2
+    memory: 4G
+
+  env:
+    PATH: "${HOME}/.cargo/bin:${PATH}"
+    RHORIZON_RUNTIME_DIR: "/tmp/rhorizon-cirrus"
+
+  install_dependencies_script:
+    - doas pkg_add -v python-3.12 rust libsodium openldap-client cyrus-sasl
+        postgresql-server postgresql-client git curl
+
+  postgres_setup_script:
+    - doas su - _postgresql -c "initdb -D /var/postgresql/data --locale=en_US.UTF-8"
+    - doas rcctl enable postgresql
+    - doas rcctl start postgresql
+    - sleep 3
+    - doas su - _postgresql -c "psql -c \"CREATE USER rhorizon_test WITH PASSWORD 'rhorizon_test' SUPERUSER;\""
+    - doas su - _postgresql -c "psql -c \"CREATE DATABASE rhorizon_test OWNER rhorizon_test;\""
+
+  venv_setup_script:
+    - python3.12 -m venv .venv
+    - . .venv/bin/activate
+    - pip install --upgrade pip wheel
+    - pip install --require-hashes -r api/requirements.txt
+    - pip install -r tools/test-requirements.txt
+    - pip install maturin
+
+  build_rust_extension_script:
+    - . .venv/bin/activate
+    - cd api/rust
+    - maturin build --release --strip
+    - pip install --force-reinstall target/wheels/*.whl
+
+  test_script:
+    - . .venv/bin/activate
+    - mkdir -p ${RHORIZON_RUNTIME_DIR}
+    - chmod 0700 ${RHORIZON_RUNTIME_DIR}
+    - export TEST_DATABASE_URL=postgresql+asyncpg://rhorizon_test:rhorizon_test@127.0.0.1:5432/rhorizon_test
+    - export RHORIZON_DATABASE_URL=$TEST_DATABASE_URL
+    - export RHORIZON_DATABASE_SSL=false
+    - python -m pytest tests/ --no-header -q --no-cov
+
+# ---------------------------------------------------------------------------
+# OpenBSD: nginx built against eopenssl (HTTP/2 AND post-quantum)
+# ---------------------------------------------------------------------------
+#
+# The packaged nginx links base LibreSSL, which has no ML-KEM, so adopting it
+# would trade X25519MLKEM768 away for HTTP/2 -- and install-native.sh refuses
+# that trade (RH_NGINX_REQUIRE_PQ), leaving this lane on uvicorn/HTTP1.1.
+# Building nginx against the eopenssl port breaks the tie.
+#
+# This is the ONLY machine in the project that can produce this artifact: a
+# Linux container cannot cross-build an OpenBSD binary, signable or otherwise.
+# The source is pinned by SHA-256 and by the signer's PGP fingerprint; see
+# tools/build-nginx-bsd.sh for why the fingerprint pin matters (the release
+# signer's key is not in nginx_signing.key).
+
+openbsd_nginx_task:
+  name: OpenBSD nginx (eopenssl, h2 + PQ)
+  compute_engine_instance:
+    image_project: pg-ci-images
+    image: family/pg-ci-openbsd-postgres
+    platform: openbsd
+    cpu: 2
+    memory: 4G
+
+  install_dependencies_script:
+    # openssl = the eopenssl port the API already builds CPython against; the
+    # build script locates it the same way tools/drivers/openbsd.sh does.
+    - doas pkg_add -I gmake curl gnupg pcre2
+    - doas sh -c 'pkg_add -I openssl%3.5 || pkg_add -I openssl%3.6 || pkg_add -I openssl'
+
+  build_script:
+    # Self-verifying: fails if the tarball hash or signature is wrong, if the
+    # link silently fell back to LibreSSL, or if http_v2 is missing.
+    - sh tools/build-nginx-bsd.sh --prefix /usr/local/rhorizon/nginx
+
+  verify_script:
+    # Prove the built binary actually serves what it was built for, rather than
+    # trusting `nginx -V`. render_nginx_conf picks the group list by asking the
+    # binary, so a PQ-capable build is what makes it select the ML-KEM list.
+    - . tools/lib/common.sh
+    - ensure_tls_cert /tmp/rhnginx-certs 127.0.0.1
+    - mkdir -p /tmp/rhnginx/web /tmp/rhnginx/log
+    - echo ok > /tmp/rhnginx/web/index.html
+    - export RH_NGINX_BIN=/usr/local/rhorizon/nginx/sbin/nginx
+    - export RH_NGINX_PREFIX=/tmp/rhnginx RH_NGINX_CONF=/tmp/rhnginx/nginx.conf
+    - export RH_NGINX_WEB_ROOT=/tmp/rhnginx/web RH_NGINX_LOG_DIR=/tmp/rhnginx/log
+    - export RH_NGINX_CERT=/tmp/rhnginx-certs/cert.pem RH_NGINX_KEY=/tmp/rhnginx-certs/key.pem
+    - export RH_NGINX_PORT=127.0.0.1:8443 RH_NGINX_UPSTREAM=127.0.0.1:8201
+    - export RH_NGINX_TPL=frontend/nginx-tls.conf
+    - GROUPS=$(render_nginx_conf) || { echo "render failed"; exit 1; }
+    - echo "selected groups $GROUPS"
+    - echo "$GROUPS" | grep -q MLKEM || { echo "FAIL: no ML-KEM after an eopenssl build"; exit 1; }
+    - $RH_NGINX_BIN -p /tmp/rhnginx -c /tmp/rhnginx/nginx.conf
+    - sleep 2
+    # ALPN h2 is the whole point of the exercise; assert it explicitly.
+    - |
+      set -e
+      EOSSL=$(ls /usr/local/bin/eopenssl* 2>/dev/null | head -1)
+      [ -n "$EOSSL" ] || { echo "FAIL: no eopenssl binary to probe with"; exit 1; }
+      echo | "$EOSSL" s_client -connect 127.0.0.1:8443 -alpn h2 \
+          -CAfile /tmp/rhnginx-certs/cert.pem 2>/dev/null \
+          | grep -q "ALPN protocol: h2" || { echo "FAIL: no HTTP/2 via ALPN"; exit 1; }
+      echo | "$EOSSL" s_client -connect 127.0.0.1:8443 -tls1_3 -groups X25519MLKEM768 \
+          -CAfile /tmp/rhnginx-certs/cert.pem 2>/dev/null \
+          | grep -q "Negotiated TLS1.3 group: X25519MLKEM768" \
+          || { echo "FAIL: PQ group not negotiated"; exit 1; }
+      echo "OK: HTTP/2 via ALPN + X25519MLKEM768 negotiated"
+    - $RH_NGINX_BIN -p /tmp/rhnginx -c /tmp/rhnginx/nginx.conf -s quit
+
+  package_script:
+    - mkdir -p dist
+    - cp /usr/local/rhorizon/nginx/sbin/nginx dist/nginx-openbsd-$(uname -r)-$(uname -m)
+    - cd dist && sha256 -q nginx-openbsd-* > nginx-openbsd-$(uname -r)-$(uname -m).sha256
+
+  # Signing happens in Woodpecker (release.yml, cosign sign-blob) -- Cirrus has
+  # no access to the cosign key. Drop this artifact into dist/ on a release tag
+  # and the existing loop picks it up.
+  nginx_artifacts:
+    path: "dist/nginx-openbsd-*"
+
+# ---------------------------------------------------------------------------
+# Notes
+#
+# 1. Cirrus needs a `.cirrus.yml` at repo root + sync from Gitea (no native
+#    support) OR a webhook bridge. Two viable options :
+#      a) Mirror the repo to GitHub/Codeberg, enable Cirrus on the mirror.
+#         Push to Gitea triggers a sync via gitea-webhook → mirror push.
+#      b) Self-host Cirrus runner agent on a FreeBSD/OpenBSD host the user
+#         owns (cirrus-ci/persistent-worker pattern).
+#    Until the bridge is wired up, the pipeline above can be exercised
+#    locally via `cirrus run --task freebsd_test_task` (cirrus-cli) on a
+#    machine that has FreeBSD VM imaging.
+#
+# 2. The `cluster_real` pytest marker stays opt-in : the autouse fixture
+#    in tests/conftest.py mocks multi-worker IPC for non-cluster_real tests
+#    so the BSD CI doesn't have to deal with /var/run permissions for
+#    every test, only the cluster_setup tests bind real sockets.
+#
+# 3. Current status (2026-05-04) : pipeline NOT yet exercised end-to-end.
+#    The expected first-run failures are :
+#      - ldap auth tests on OpenBSD : bonsai pkg may not have the same
+#        SSL build options ; if so, mark `cluster_real` adjacent skip
+#        markers.
+#      - WebAuthn fido2 wheel may be Linux-only on PyPI for some
+#        versions ; check pip output. Workaround : pip install fido2
+#        --no-binary :all:
+# ---------------------------------------------------------------------------

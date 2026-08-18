@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+[project]
+name = "rhorizon-cli"
+version = "1.0.0b1"
+description = "CLI for rhorizon secrets manager"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+dependencies = [
+    "cryptography>=44.0",
+    "typer>=0.12",
+    "httpx>=0.27",
+    "tomlkit>=0.13",
+]
+
+[project.scripts]
+rhorizon = "rhorizon.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rhorizon"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+# This file declares [tool.ruff], which makes it the config root for cli/ --
+# so these files do NOT inherit the repo-root `select` and fall through to
+# ruff's defaults instead. That is how cli/ ended up held to a stricter set
+# (B, BLE, FURB, SIM, UP) than api/ (E, F, W, I). Keeping the stricter set:
+# this is shipped, operator-facing code. Documented so the divergence is a
+# decision rather than an accident.
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer's API *is* calling Option()/Argument() in parameter defaults -- that
+# is how a command declares its interface. B008 exists to catch mutable or
+# side-effecting defaults; these are neither. Rewriting 22 signatures to
+# appease it would fight the framework and make the commands harder to read.
+extend-immutable-calls = [
+    "typer.Option",
+    "typer.Argument",
+]

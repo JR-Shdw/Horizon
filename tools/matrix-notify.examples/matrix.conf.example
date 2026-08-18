@@ -1,0 +1,9 @@
+# matrix-notify configuration, copy to ~/.config/rhorizon/matrix.conf (mode 0600)
+
+homeserver   = https://matrix.example.com
+token_secret = matrix-bot-token
+room_secret  = matrix-alerts-room
+
+# All three fields can be overridden at the CLI:
+#   matrix-notify --homeserver ... --token-secret ... --room-secret ... "msg"
+# or via env vars MATRIX_HOMESERVER / MATRIX_TOKEN_SECRET / MATRIX_ROOM_SECRET.

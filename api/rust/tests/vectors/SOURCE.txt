@@ -1,0 +1,36 @@
+NIST ACVP ML-DSA-65 sigVer known-answer vectors (FIPS 204 final).
+Source: usnistgov/ACVP-Server gen-val/json-files/ML-DSA-sigVer-FIPS204
+        (commit 65370b861b96efd30dfe0daae607bde26a78a5c8), tgId 2.
+  ml_dsa65_sigver_pk.hex        : group public key (1952 B)
+  ml_dsa65_sigver_pass_msg/sig  : tcId 20, testPassed=true  -> must verify
+  ml_dsa65_sigver_fail_msg/sig  : tcId 16, "too many hints" -> must be rejected
+Spec-conformance tripwire for the unaudited fips204 crate (no trusted Python
+ML-DSA exists for a parity test). See tests in api/rust/src/lib.rs.
+
+C2SP/Wycheproof ML-DSA-65 public-interface verification vectors.
+Source: C2SP/wycheproof testvectors_v1/mldsa_65_verify_test.json
+        (commit b61843a9a5115bb758134b6a1f5d5e502d445342), test group 0.
+  ml_dsa65_wycheproof_pk.hex                    : group public key (1952 B)
+  ml_dsa65_wycheproof_valid_msg/sig.hex         : tcId 1, baseline, valid
+  ml_dsa65_wycheproof_repeated_hint_msg/sig.hex : tcId 19, invalid repeated hint
+Both cases omit ctx, exercising Rhorizon's FIPS 204 external verifier with the
+empty context used for RFC 9881 PKI signatures. The valid case independently
+gates the external message/domain wrapper; tcId 19 gates canonical hint parsing.
+
+NIST ACVP ML-KEM-768 known-answer vectors (FIPS 203 final).
+Source: usnistgov/ACVP-Server gen-val/json-files
+        (commit 65370b861b96efd30dfe0daae607bde26a78a5c8)
+  ML-KEM-keyGen-FIPS203/internalProjection.json    tgId 2 (ML-KEM-768), tcId 26:
+    ml_kem768_keygen_d/z.hex   : keygen seeds (d, z), 32 B each
+    ml_kem768_keygen_ek/dk.hex : expected encaps key (1184 B) + decaps key (2400 B)
+  ML-KEM-encapDecap-FIPS203/internalProjection.json, tgId 2 encapsulation, tcId 26:
+    ml_kem768_encap_ek.hex     : encaps key input (1184 B)
+    ml_kem768_encap_m.hex      : encaps message randomness m (32 B)
+    ml_kem768_encap_c/k.hex    : expected ciphertext (1088 B) + shared secret (32 B)
+  ML-KEM-encapDecap-FIPS203/internalProjection.json, tgId 5 decapsulation (dk shared):
+    ml_kem768_decap_dk.hex        : group decaps key (2400 B)
+    ml_kem768_decap_valid_c/k.hex : tcId 88 "no modification"  -> Decaps == k
+    ml_kem768_decap_c/k.hex       : tcId 86 "modify ciphertext"-> implicit-reject k
+Spec-conformance tripwire for the unaudited fips203 crate: keyGen(d,z), Encaps(ek,m)
+and both Decaps paths (valid + implicit reject) are deterministic in these seeds, so
+a supply-chain swap or a non-conformant fips203 trips the KAT. See api/rust/src/lib.rs.

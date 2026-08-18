@@ -1,0 +1,20 @@
+key	relation	value	check	notes
+service.manager	required	rc.d	grep rhorizon /etc/rc.conf	native service lane
+service.unit	required	/etc/rc.d/rhorizon	test -x /etc/rc.d/rhorizon	created by tools/install-native.sh
+memlock.formula_mb	formula	workers*160+256+192	grep RH_MEM_MB tools/install-native.sh	worker RSS + Argon2id + headroom
+memlock.workers1.kb	exact	622592	grep ulimit run-app.sh	608 MiB in KiB
+ulimit.memlock.required	required	at-least-622592	ulimit -l	rc.d wrapper sets this
+tmpdir.required	required	/var/tmp	echo "$TMPDIR"	avoid small /tmp during Rust builds
+core_dump_limit	required	0	ulimit -c	core dumps should be disabled by app hardening
+openssl.cnf.required	required	/etc/openssl/openssl.cnf	test -f /etc/openssl/openssl.cnf	driver copies from examples if absent
+postgresql.service	required	pgsql	/etc/rc.d/pgsql status	NetBSD pkgsrc service
+postgresql.data_dir	path	/usr/pkg/pgsql/data	test -d /usr/pkg/pgsql/data	NetBSD PG data path
+postgresql.sysctl.required	required	kern.ipc.semmni=256	sysctl kern.ipc.semmni	PG18 semaphore floor
+postgresql.sysctl.required	required	kern.ipc.semmns=4096	sysctl kern.ipc.semmns	PG18 semaphore floor
+postgresql.sysctl.required	required	kern.ipc.semmnu=512	sysctl kern.ipc.semmnu	PG18 semaphore floor
+postgresql.sysctl.required	required	kern.ipc.shmmax=1073741824	sysctl kern.ipc.shmmax	PG18 shared memory floor
+postgresql.sysctl.required	required	kern.ipc.shmall=262144	sysctl kern.ipc.shmall	PG18 shared memory floor
+postgresql.sysctl.persist	required	/etc/sysctl.conf	grep 'kern.ipc.sem\\|kern.ipc.shm' /etc/sysctl.conf	reboot-safe PG
+pkgsrc.repo.note	unsigned	$PKG_PATH	echo "$PKG_PATH"	upstream pkgsrc binary repo is unsigned; HTTPS/known mirror only
+runtime_dir.path	default	workdir/run	test -d "$RHORIZON_RUNTIME_DIR"	filesystem AF_UNIX sockets
+peer_cred.required	required	getpeereid	/usr/pkg/bin/python3.12 -c 'import platform; print(platform.system())'	BSD peer UID shim

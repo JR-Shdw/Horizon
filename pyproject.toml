@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+[project]
+name = "rhorizon"
+version = "1.0.0b1"
+description = "Self-hosted secrets vault for infrastructure teams"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+authors = [{name = "shdw"}]
+readme = "README.md"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["api", "cli", "agent", "tests"]
+extend-exclude = ["mcp-lab"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# mcp-lab/ smoke tests are ops scripts -- long f-strings + occasional
+# unused-result placeholders are unavoidable / acceptable in throw-away code.
+"mcp-lab/**" = ["E501", "F841"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# mcp/ and mcp-hub/ are separate zero-dep distributions, but their tests are
+# collected here so a bare `pytest` runs them: the MCP policy allow-list and
+# the tool-catalog parity guard are security-relevant and were silently
+# uncollected. Each dir has a conftest.py putting its package on sys.path.
+testpaths = ["tests", "mcp/tests", "mcp-hub/tests"]
+addopts = "--cov=api/app --cov-report=term-missing --cov-report=html:htmlcov"
+markers = [
+    "cluster_real: skip the autouse cluster IPC bypass (real start/stop_master_services + attach_to_master)",
+]
+
+[tool.coverage.run]
+source = ["api/app"]
+omit = ["tests/*"]
+concurrency = ["greenlet"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 90

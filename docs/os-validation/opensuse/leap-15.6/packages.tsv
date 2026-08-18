@@ -1,0 +1,22 @@
+key	relation	value	check	notes
+os.name	exact	openSUSE Leap	. /etc/os-release; echo "$NAME"	Leap validation lane
+os.version	min	15.6	. /etc/os-release; echo "$VERSION_ID"	Leap 15.6 full-suite lane
+python.version	min	3.12	python3.12 --version	python312 package expected
+python.package	required	python312 python312-devel python312-pip	zypper se -i python312	venv and headers required
+rust.version	min	1.79	rustc --version	use pinned rustup if distro rust is older
+cargo.lockfile	min	4	cargo --version	Cargo >=1.78 hard floor
+rust.toolchain_source	target	rustup-stable	rustup show active-toolchain	distro rust is acceptable only when locked gates pass
+rust.vault_gate	required	tools-check-rust	bash tools/check-rust.sh --skip-miri	locked vault crypto test/build on target OS/arch
+rust.agent_gate	required	cargo-agent-build	cd agent/rust && cargo build --release --locked --bins	locked rh-fetch/rh-inject/rh-watch/rh-podman build on target OS/arch
+postgresql.version	exact	18	psql --version	postgresql18 packages
+postgresql.package	required	postgresql18-server postgresql18	zypper se -i postgresql18	local DB lane only
+openssl.core	min	3.0	openssl version	core TLS and Python cryptography
+openssl.pq_tls	min	3.5	openssl list -tls-groups 2>/dev/null | grep X25519MLKEM768	required only for native PQ TLS endpoint
+nginx.version	min	distro-supported	nginx -v 2>&1	optional native frontend/reverse-proxy lane
+nginx.openssl.pq_tls	min	3.5	nginx -V 2>&1 | grep -o 'OpenSSL[^)]*'	required if nginx serves X25519MLKEM768
+libsodium.version	min	1.0.18	pkg-config --modversion libsodium	runtime dep of PyNaCl
+libsodium.package	required	libsodium-devel	zypper se -i libsodium-devel	build headers required
+ldap.package	required	openldap2-devel cyrus-sasl-devel	zypper se -i openldap2-devel	for LDAP/AD auth via bonsai
+ffi.package	required	libffi-devel	zypper se -i libffi-devel	cffi/cryptography build support
+build.package	required	gcc pkg-config curl git cargo	command -v gcc; command -v pkg-config	native build support
+age.version	min	1.1	age --version	optional backup CLI local decrypt/test

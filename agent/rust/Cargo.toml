@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+[package]
+name = "rhorizon-agent"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Agent binaries (rh-fetch / rh-inject / rh-watch / rh-podman) that pull secrets from a Resurgamus Horizon vault into application containers."
+repository = "https://github.com/JR-Shdw/Horizon"
+authors = ["shdw <horizon@resurgamus.com>"]
+
+[lib]
+name = "rhorizon_agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rh-inject"
+path = "src/inject.rs"
+
+[[bin]]
+name = "rh-fetch"
+path = "src/fetch.rs"
+
+[[bin]]
+name = "rh-watch"
+path = "src/watch.rs"
+
+[[bin]]
+name = "rh-podman"
+path = "src/podman.rs"
+
+# rh-mcp-gateway: loopback unix-socket sidecar for the OPTIONAL MCP hub -- the
+# only leg that speaks HTTP/2 + PQ TLS 1.3 to the vault. Reuses build_client() +
+# SecureToken from the lib; zero new crates.
+[[bin]]
+name = "rh-mcp-gateway"
+path = "src/mcp_gateway.rs"
+
+[dependencies]
+# rustls provider = aws-lc-rs (NOT ring) so the TLS handshake offers the
+# post-quantum hybrid group X25519MLKEM768 (FIPS 203 ML-KEM-768 + X25519).
+# rustls-no-provider gives use_preconfigured_tls without selecting a provider
+# (so no ring). It replaces 0.12's rustls-tls-manual-roots, removed in 0.13.
+# "std" was previously enabled for us by reqwest. With reqwest gone the
+# dependency is explicit: ClientConnection and StreamOwned are std-gated.
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "tls12", "logging", "std"] }
+# No bindgen: aws-lc-sys ships pre-generated bindings for both musl targets
+# (x86_64 and aarch64), so libclang is not needed. bindgen's libclang panics on
+# a host/target mismatch under QEMU, which was the only thing keeping the agent
+# amd64-only; pre-gen bindings build cleanly on both arches, PQ TLS unchanged.
+aws-lc-rs = { version = "1" }
+webpki-roots = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = { version = "1.8", features = ["derive"] }
+memsec = "0.7"
+libc = "0.2"
+
+# opt-level "z" + strip + fat LTO: these binaries ship static-musl into
+# `scratch` containers (~5-8 MB), size is the optimization target, not speed.
+#
+# panic = "abort": these binaries hold a bearer token in a mlock'd
+# `SecureToken` (see lib.rs) whose `Drop` zeroes the buffer before
+# `munlock`+`dealloc`. With unwinding panics, a panic elsewhere on the stack
+# still runs `Drop` impls on the way down (Rust's normal unwind semantics),
+# so this isn't required for the zeroize-on-drop guarantee itself. It is
+# still the safer default here per ANSSI-PA-074 R49/R25: no unwinder tables
+# means no partial-unwind state to reason about, and the token-holding
+# `Drop` impl is itself required to be panic-free (see the SecureToken::drop
+# comment in lib.rs) so an abort-vs-unwind panic never race with teardown.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+strip = true
+codegen-units = 1
+panic = "abort"

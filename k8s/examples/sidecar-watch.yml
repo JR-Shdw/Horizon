@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+---
+# App avec sidecar rh-watch, rotation live sans restart
+#
+# Use case : secrets qui changent en prod (rotation credentials,
+# certificats, API keys), l'app relit les fichiers, zero downtime
+#
+# rh-watch poll le vault toutes les 30s (configurable),
+# atomic write sur tmpfs quand un secret change.
+# L'app voit le nouveau fichier sans restart.
+#
+# Secrets requis dans rhorizon :
+#   - db/url
+#   - app/api-key
+#
+# kubectl apply -f namespace.yml
+# kubectl apply -f examples/sidecar-watch.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-live
+  namespace: rhorizon
+  labels:
+    app: myapp-live
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: myapp-live
+  template:
+    metadata:
+      labels:
+        app: myapp-live
+    spec:
+      serviceAccountName: rhorizon-agent
+      volumes:
+        - name: secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+
+      containers:
+        # --- Sidecar : poll + atomic write ---
+        - name: rh-watch
+          image: git.example.com/shdw/rhorizon-agent:latest
+          command: ["/usr/local/bin/rh-watch"]
+          env:
+            - name: RH_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: rhorizon-token
+                  key: addr
+            - name: RH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: rhorizon-token
+                  key: token
+            - name: RH_SECRETS
+              value: >-
+                db/url:/secrets/database_url,
+                app/api-key:/secrets/api_key
+            - name: RH_POLL_SECS
+              value: "30"
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+          resources:
+            limits:
+              memory: 16Mi
+              cpu: 50m
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+        # --- App : lit les fichiers secrets ---
+        - name: app
+          image: git.example.com/shdw/myapp:latest
+          env:
+            - name: DATABASE_URL_FILE
+              value: /secrets/database_url
+            - name: API_KEY_FILE
+              value: /secrets/api_key
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              memory: 256Mi
+              cpu: 500m
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1500
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-live
+  namespace: rhorizon
+spec:
+  selector:
+    app: myapp-live
+  ports:
+    - port: 8000
+      targetPort: 8000

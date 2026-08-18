@@ -1,0 +1,58 @@
+# cargo-deny config for rhorizon_crypto.
+#
+# Purpose : on every `cargo deny check`, refuse to compile if a
+# transitive dependency :
+#   - has a known security advisory (RUSTSEC),
+#   - has a license incompatible with rhorizon's AGPL-3.0,
+#   - was yanked from crates.io,
+#   - comes from an unknown source (e.g. a local path override).
+#
+# Without this file, cargo-deny defaults to "deny everything" on
+# the license check, which is what produced the user's first run
+# failing on MIT and Apache-2.0 (both perfectly fine licenses).
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/RustSec/advisory-db"]
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Confidence threshold for SPDX scan : 0.93 (default) is fine. Below
+# that, cargo-deny refuses to assume a license match.
+confidence-threshold = 0.93
+# Licenses we explicitly accept on dependencies. All are
+# OSI-approved + FSF Free/Libre and compatible with AGPL-3.0
+# distribution. We REFUSE GPL-only (would force the consumer to
+# AGPL too, not our role) and proprietary.
+#
+# Only license names actually present in our dependency graph are
+# listed here ; cargo-deny warns on entries it doesn't encounter,
+# which is noise. When a new dep introduces a new license (e.g.
+# BSD-3-Clause, ISC), cargo-deny will refuse the build and we add
+# the entry then, after a one-second review of whether that license
+# is acceptable for our AGPL-3.0 consumer.
+allow = [
+    "AGPL-3.0-or-later",                # rhorizon_crypto itself
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",   # rust stdlib + a few crates
+    "BSD-3-Clause",                     # libloading + a handful of others
+    "Unicode-3.0",                      # ICU / unicode-ident
+]
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,0 +1,104 @@
+{
+  "uid": "rhorizon-cluster",
+  "title": "rhorizon, read & crypto",
+  "tags": ["rhorizon", "cluster"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 6,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "templating": {"list": [
+    {
+      "name": "instance", "type": "query", "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "query": {"query": "label_values(rhorizon_vault_sealed, instance)", "refId": "A"},
+      "current": {"text": "rhorizon-test", "value": "rhorizon-test"},
+      "includeAll": false, "refresh": 2, "sort": 1
+    }
+  ]},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Vault state",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_vault_sealed{instance=~\"$instance\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "UNSEALED", "color": "green"}, "1": {"text": "SEALED", "color": "red"}}}], "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green"}, {"color": "red", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Active tokens",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_active_tokens{instance=~\"$instance\"})", "refId": "A"}]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Secrets read/s",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(rhorizon_secrets_read_total{instance=~\"$instance\"}[1m]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"decimals": 0, "color": {"mode": "fixed", "fixedColor": "green"}}},
+      "options": {"graphMode": "area", "colorMode": "value"}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Total reads",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rhorizon_secrets_read_total{instance=~\"$instance\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}}},
+      "options": {"colorMode": "value", "graphMode": "area"}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Decrypt p50",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "histogram_quantile(0.50, sum by (le) (rate(rhorizon_secret_decrypt_duration_seconds_bucket{instance=~\"$instance\"}[1m])))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 4}}
+    },
+    {
+      "id": 6, "type": "stat", "title": "Decrypt p95",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(rhorizon_secret_decrypt_duration_seconds_bucket{instance=~\"$instance\"}[1m])))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 4}}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Secret decrypt latency",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(rhorizon_secret_decrypt_duration_seconds_bucket{instance=~\"$instance\"}[1m])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(rhorizon_secret_decrypt_duration_seconds_bucket{instance=~\"$instance\"}[1m])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(rhorizon_secret_decrypt_duration_seconds_bucket{instance=~\"$instance\"}[1m])))", "legendFormat": "p99", "refId": "C"}
+      ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Throughput (/s)",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum(rate(rhorizon_secrets_read_total{instance=~\"$instance\"}[1m]))", "legendFormat": "reads/s", "refId": "A"},
+        {"expr": "sum(rate(rhorizon_secret_decrypt_duration_seconds_count{instance=~\"$instance\"}[1m]))", "legendFormat": "decrypts/s", "refId": "B"},
+        {"expr": "sum(rate(rhorizon_secrets_write_total{instance=~\"$instance\"}[1m]))", "legendFormat": "writes/s", "refId": "C"}
+      ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Audit events/s (by category) & active tokens",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum by (category) (rate(rhorizon_audit_events_total{instance=~\"$instance\"}[1m]))", "legendFormat": "{{category}} events/s", "refId": "A"},
+        {"expr": "max(rhorizon_active_tokens{instance=~\"$instance\"})", "legendFormat": "active tokens", "refId": "B"}
+      ]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Token lifecycle (/s)",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum(rate(rhorizon_tokens_created_total{instance=~\"$instance\"}[5m]))", "legendFormat": "created", "refId": "A"},
+        {"expr": "sum(rate(rhorizon_tokens_revoked_total{instance=~\"$instance\"}[5m]))", "legendFormat": "revoked", "refId": "B"},
+        {"expr": "sum(rate(rhorizon_tokens_rotated_total{instance=~\"$instance\"}[5m]))", "legendFormat": "rotated", "refId": "C"}
+      ]
+    }
+  ]
+}

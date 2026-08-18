@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-dynamic-engines" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+data:
+  dynamic-engines.ini: |
+    [modules]
+    {{- if .Values.api.dynamicModules.postgresql }}
+    postgresql = enabled
+    {{- end }}
+    {{- if .Values.api.dynamicModules.mysql }}
+    mysql = enabled
+    {{- end }}
+    {{- if .Values.api.dynamicModules.ldap }}
+    ldap = enabled
+    {{- end }}
+    {{- if .Values.api.dynamicModules.redis }}
+    redis = enabled
+    {{- end }}
+    {{- if .Values.api.dynamicModules.cassandra }}
+    cassandra = enabled
+    {{- end }}

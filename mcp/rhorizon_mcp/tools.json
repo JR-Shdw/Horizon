@@ -1,0 +1,97 @@
+{
+  "_comment": [
+    "CANONICAL MCP tool catalog. Single source of truth for BOTH paths:",
+    "  - mcp/rhorizon_mcp/server.py        (stdio server, one operator token)",
+    "  - mcp-hub/rhorizon_mcp_hub/gateway.py (hub --daemon, per-agent bearer)",
+    "mcp-hub vendors a byte-identical copy at rhorizon_mcp_hub/tools.json,",
+    "because the two packages install independently and neither may import",
+    "the other. tests/test_tool_catalog_parity.py fails the build if the two",
+    "files diverge -- they previously drifted apart unnoticed.",
+    "Descriptions are PROMPT MATERIAL: the model reads them. They must be",
+    "true on BOTH paths, so do not name a control that only one path has.",
+    "The stdio path additionally enforces a local policy.toml allow-list;",
+    "the daemon path is bounded by the agent token's scopes + namespaces."
+  ],
+  "tools": [
+    {
+      "name": "vault_status",
+      "description": "Whether the vault is sealed/unsealed. No side effects.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "vault_whoami",
+      "description": "Show what the calling vault token can do -- scopes, allowed namespaces, expiry. Call once to learn your boundaries before reads.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "vault_list_namespaces",
+      "description": "Namespaces the calling token can see. May be further narrowed by the server's local allow-list.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "vault_list_secrets",
+      "description": "List secret NAMES (never values) in a namespace. Restricted to what the calling token may read, and further filtered by the server's local allow-list where one is configured.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "description": "Namespace, e.g. mcp"
+          }
+        },
+        "required": ["namespace"]
+      }
+    },
+    {
+      "name": "vault_get_secret",
+      "description": "Read a secret value. The namespace/name must be permitted by the calling token, and by the server's local allow-list where one is configured; refused with a policy-denied error otherwise.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Secret name (no namespace prefix)"
+          },
+          "namespace": {
+            "type": "string",
+            "default": "default",
+            "description": "Namespace, e.g. mcp"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "vault_audit_tail",
+      "description": "Recent audit entries (requires audit:r on the token).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "vault_cluster_health",
+      "description": "Cluster and PostgreSQL HA health: overall state, readiness, and per-component state with a short reason (database, node, cluster, database_ha). Read-only summary; requires cluster:r on the token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

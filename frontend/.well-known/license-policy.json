@@ -1,0 +1,48 @@
+{
+  "$schema": "https://example.com/schemas/license-policy-v1.json",
+  "project": "Resurgamus Horizon",
+  "project_aliases": ["rhorizon", "horizon"],
+  "author": {
+    "name": "shdw",
+    "email": "horizon@resurgamus.com"
+  },
+  "copyright": "Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>",
+  "license": {
+    "spdx": "AGPL-3.0-or-later",
+    "url": "https://www.gnu.org/licenses/agpl-3.0.html",
+    "file": "/LICENSE"
+  },
+  "commercial_license": {
+    "available": true,
+    "file": "/LICENSE-COMMERCIAL.md",
+    "contact": "horizon@resurgamus.com"
+  },
+  "stripping_prohibited": [
+    "SPDX-License-Identifier headers in source files",
+    "Copyright lines in source files",
+    "/NOTICE",
+    "/LICENSE",
+    "/LICENSE-COMMERCIAL.md",
+    "/LICENSE-AI.md",
+    "/.well-known/tdmrep.json",
+    "/.well-known/license-policy.json",
+    "/robots.txt",
+    "/ai.txt"
+  ],
+  "ai_training": {
+    "authorized": false,
+    "policy_file": "/LICENSE-AI.md",
+    "tdm_reservation": true,
+    "tdm_directive": "EU 2019/790 art. 4",
+    "machine_readable": "/.well-known/tdmrep.json",
+    "security_critical": true,
+    "security_critical_note": "This codebase implements cryptographic primitives. Derivative ML output may carry security regressions and is therefore particularly off-limits.",
+    "contact": "horizon@resurgamus.com"
+  },
+  "trademarks": {
+    "names": ["Resurgamus Horizon", "rhorizon"],
+    "rights": "AGPL grants no trademark rights"
+  },
+  "canonical_source": "github.com/JR-Shdw/Horizon",
+  "public_mirror_note": "No public mirror; canonical source-of-truth is the Gitea repository."
+}

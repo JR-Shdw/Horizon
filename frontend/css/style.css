@@ -1,0 +1,1153 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* Copyright (C) 2024-2026 shdw <horizon@resurgamus.com> */
+/* rhorizon, Event Horizon theme (black hole) */
+:root {
+  --bg:         #050508;
+  --bg-card:    #0d1117;
+  --bg-hover:   #161b22;
+  --border:     #21262d;
+  --text:       #e2e8f0;
+  --text-muted: #7c8496;
+  --accent:     #7c3aed;
+  --cyan:       #06b6d4;
+  --green:      #10b981;
+  --red:        #ef4444;
+  --amber:      #d97706;
+  --font:       'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  display: flex;
+}
+
+/* --- Layout --- */
+.sidebar {
+  width: 200px;
+  min-height: 100vh;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10;
+}
+
+.sidebar-header {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-header canvas {
+  border-radius: 4px;
+}
+
+/* Sidebar toggle */
+.sidebar-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.sidebar-toggle:hover { color: var(--text); }
+
+.sidebar-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-brand .name {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--accent);
+}
+
+.seal-badge {
+  font-size: 15px;
+  font-weight: 700;
+  padding: 5px 16px;
+  border-radius: 4px;
+  margin-top: 8px;
+  text-align: center;
+  letter-spacing: 2px;
+}
+.seal-badge.sealed { background: rgba(239,68,68,0.15); color: var(--red); }
+.seal-badge.unsealed { background: rgba(16,185,129,0.15); color: var(--green); }
+
+.nav-items {
+  flex: 1;
+  /* min-height:0 lets the icon list actually shrink + scroll when the rail
+     is short (mobile browser with a URL bar); without it the footer gets
+     pushed below the viewport instead. */
+  min-height: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  transition: all 0.15s;
+  border-left: 3px solid transparent;
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.nav-item.active {
+  color: var(--accent);
+  background: rgba(124,58,237,0.08);
+  border-left-color: var(--accent);
+}
+.nav-icon { font-size: 18px; width: 22px; text-align: center; }
+
+.content {
+  margin-left: 200px;
+  flex: 1;
+  min-height: 100vh;
+}
+
+.content-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#view-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 1px;
+}
+
+#main {
+  padding: 24px;
+}
+
+/* --- Cards --- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.cards-fixed .card {
+  min-height: 320px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.kv span:first-child { color: var(--text-muted); }
+
+/* Long unbreakable values (fingerprints, serials) wrap, not overflow. */
+.break { overflow-wrap: anywhere; word-break: break-all; }
+/* Stacked kv row: label on its own line, value full-width below. */
+.kv.stack { flex-direction: column; align-items: stretch; gap: 2px; }
+.kv.stack code { width: 100%; }
+
+/* Issued certificates as cards (no horizontal table overflow on mobile). */
+.cert-list { display: flex; flex-direction: column; gap: 8px; }
+.cert-card {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+}
+.cert-card .cert-serial { display: block; font-size: 12px; margin-bottom: 6px; }
+.cert-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
+/* Let a meta value (long CN, hybrid subject algo) shrink + wrap instead of
+   pushing the row past the viewport. */
+.cert-meta span { min-width: 0; overflow-wrap: anywhere; }
+.cert-meta b { color: var(--text-muted); font-weight: 600; margin-right: 4px; }
+.cert-actions { margin-top: 8px; }
+.cert-card.row-muted { opacity: 0.55; }
+
+/* --- Tables --- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.table th {
+  text-align: left;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  vertical-align: middle;
+}
+.table tr:hover td { background: var(--bg-hover); }
+.table tr.dimmed { opacity: 0.4; }
+.table tr.critical td {
+  background: rgba(239,68,68,0.08);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+.table tr.critical:hover td { background: rgba(239,68,68,0.14); }
+.table code { font-size: 11px; color: var(--cyan); }
+
+/* --- Badges --- */
+.badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.badge.sealed, .badge.revoked { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge.unsealed, .badge.active { background: rgba(16,185,129,0.15); color: var(--green); }
+.badge.green { background: rgba(16,185,129,0.15); color: var(--green); }
+.badge.orange { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.badge.red { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge.grey { background: rgba(148,163,184,0.15); color: #94a3b8; }
+
+/* HA health indicators: color is paired with a visible text label in the UI. */
+.ha-health-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ha-status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.04);
+}
+.ha-status-dot.green { background: var(--green); }
+.ha-status-dot.orange { background: #f59e0b; }
+.ha-status-dot.red { background: var(--red); }
+.ha-status-dot.black { background: #050508; }
+
+.database-ha-card { margin-bottom: 12px; }
+.database-ha-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  column-gap: 24px;
+}
+.database-ha-grid .kv { gap: 12px; }
+.database-ha-grid .kv > :last-child {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.database-ha-warnings { margin-bottom: 12px; }
+
+.cluster-host-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.cluster-host-card.me { border-color: rgba(6,182,212,0.45); }
+.cluster-host-header,
+.cluster-host-master,
+.cluster-follower {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cluster-host-header {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.cluster-host-master { margin-bottom: 8px; }
+.cluster-host-followers {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* --- Chain Integrity (audit) --- */
+.chain-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.chain-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+.chain-badge {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+.chain-badge.intact { background: rgba(16,185,129,0.15); color: var(--green); }
+.chain-badge.broken { background: rgba(239,68,68,0.15); color: var(--red); }
+
+/* --- KV inline group (audit archives toolbar) --- */
+.kv-group {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+.kv-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.kv-label { color: var(--text-muted); }
+.kv-value { font-weight: 600; }
+
+.tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(124,58,237,0.12);
+  color: var(--accent);
+}
+.tag.tiny { font-size: 9px; padding: 1px 4px; }
+
+/* Nebula, namespace state badges (CSP-compliant, no inline styles). */
+.tag.bad     { background: #7a3a3a; color: #fff; }
+.tag.good    { background: #3a7a3a; color: #fff; }
+.tag.neutral { background: #555; color: #fff; }
+
+/* Nebula form layout helpers. */
+.fieldset-2fa { border: 1px solid #444; padding: 8px; }
+.gap-half { gap: 8px; }
+.row-gap { display: flex; gap: 8px; align-items: center; }
+.spaced-top { margin-top: 8px; }
+.legend-block { margin-top: 16px; }
+.text-xs { font-size: 11px; }
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+.event-checkbox { display: flex; gap: 8px; align-items: center; font-size: 12px; }
+.event-checkbox code { color: var(--accent); font-family: monospace; }
+.honey-checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.honey-checkbox input { margin-top: 3px; }
+.honey-checkbox strong { color: #f59e0b; }
+
+/* --- Forms --- */
+.form-group { margin-bottom: 12px; }
+.form-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+input, select, textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+textarea { resize: vertical; min-height: 60px; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
+/* Themed select: strip the native OS chrome so the control matches our inputs,
+   and draw the caret in pure CSS (a rotated-border chevron) -- the strict CSP
+   (default-src 'self', no img-src) forbids a data: URI background image. The
+   native option popup itself stays browser-rendered (unavoidable, esp. mobile);
+   this only cleans up the closed control. Wrap a <select> in .select-wrap. */
+.select-wrap { position: relative; display: block; }
+.select-wrap select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 30px;         /* room for the caret */
+  cursor: pointer;
+}
+.select-wrap select::-ms-expand { display: none; }  /* legacy Edge/IE arrow */
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: translateY(-75%) rotate(45deg);
+  pointer-events: none;        /* clicks fall through to the select */
+  transition: border-color 0.2s;
+}
+.select-wrap:focus-within::after { border-color: var(--accent); }
+
+/* --- Buttons --- */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn:hover { opacity: 0.85; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.secondary { background: var(--bg-hover); color: var(--text); border: 1px solid var(--border); }
+.btn.danger { background: rgba(239,68,68,0.15); color: var(--red); }
+.btn.small { padding: 6px 12px; font-size: 11px; }
+.btn.tiny { padding: 4px 8px; font-size: 10px; }
+/* Prominent download CTA -- a full-width accent button so the link is obvious
+   on desktop (a tiny inline link is easy to miss). */
+.btn.download { display: block; text-align: center; padding: 12px 16px; font-size: 13px; margin-top: 12px; text-decoration: none; }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.toolbar-split {
+  justify-content: space-between;
+}
+
+/* --- Search input (compact, in toolbar) --- */
+.search-input {
+  width: 240px;
+  max-width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.search-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.actions { white-space: nowrap; }
+.actions .btn { margin-left: 4px; }
+
+/* --- Secret value --- */
+.secret-value {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  word-break: break-all;
+  margin: 8px 0;
+  color: var(--cyan);
+}
+
+.code-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 11px;
+  overflow-x: auto;
+  max-height: 400px;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
+/* --- Toast --- */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s;
+  z-index: 100;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.ok { background: rgba(16,185,129,0.9); color: #fff; }
+.toast.err { background: rgba(239,68,68,0.9); color: #fff; }
+
+/* --- Misc --- */
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 40px;
+}
+.spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error {
+  padding: 16px;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 8px;
+  color: var(--red);
+}
+
+.empty {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.dim { color: var(--text-muted); }
+/* De-emphasised helper text (form blurbs) + the "shown once" warning. Both were
+   used in markup but never defined, so they rendered at full text colour. */
+.muted { color: var(--text-muted); }
+.warn { color: var(--amber); }
+/* Section footnote: one small explanation at the bottom instead of a blurb per card. */
+.form-foot { color: var(--text-muted); font-size: 11px; line-height: 1.5; margin-top: 16px; }
+.refresh-stamp { font-size: 11px; align-self: center; }
+.help-tip { font-size: 11px; margin: 6px 0 8px; }
+/* wrap: a flex row defaults to nowrap, so a row with many inline items (the
+   cluster identity card packs cluster_id, version, min-version, primary,
+   ha_password and the conflict count into one) forces a width wider than a
+   phone viewport. .content sets overflow-y on mobile, which per spec makes
+   overflow-x compute to auto, so that overflow scrolled the whole page
+   sideways instead of staying inside the card. */
+.row-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.flex-1 { flex: 1; }
+.link-accent { color: var(--accent); }
+.info-notice {
+  background: rgba(6, 182, 212, 0.08);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.text-cyan { color: #06b6d4; }
+.badge-lg { font-size: 12px; padding: 6px 12px; }
+.form-card { margin-bottom: 16px; }
+.hidden { display: none !important; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.my-4 { margin: 4px 0; }
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-24 { margin-bottom: 24px; }
+.mt-card { margin: 16px 0; }
+.text-red { color: var(--red); }
+.text-left { text-align: left; }
+.lh-relaxed { line-height: 1.6; }
+.card-danger { border-color: var(--red, #ff8888); }
+
+/* --- Warning box (API docs) --- */
+.warning-box {
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.warning-label {
+  color: var(--red);
+}
+
+/* --- TOTP QR canvas --- */
+.totp-qr-canvas {
+  border-radius: 4px;
+  margin: 8px 0;
+}
+
+/* --- Shamir share values --- */
+.secret-share {
+  font-size: 10px;
+  margin: 4px 0;
+}
+
+/* --- Token overlay (first unseal) --- */
+.token-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(5,5,8,0.95);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.token-overlay-box {
+  max-width: 500px;
+  width: 100%;
+  text-align: center;
+}
+.token-overlay-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--green);
+  margin-bottom: 16px;
+}
+.token-overlay-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+}
+.token-overlay-value {
+  background: var(--bg-card);
+  border: 2px solid var(--green);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--cyan);
+  word-break: break-all;
+  margin-bottom: 24px;
+}
+.token-overlay-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.btn-overlay {
+  padding: 12px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-overlay.primary { background: var(--accent); color: #fff; }
+.btn-overlay.primary.copied { background: var(--green); }
+.btn-overlay.secondary { background: var(--bg-hover); color: var(--text); font-weight: 600; }
+
+/* --- Permissions help table --- */
+.perms-table { font-size: 11px; margin-bottom: 12px; }
+.perms-table td, .perms-table th { white-space: normal; }
+
+/* --- Pagination --- */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pagination .btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.pagination .btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pagination .pg-select {
+  padding: 4px 8px;
+  font-size: 12px;
+  margin-left: 8px;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* --- Visual area (black hole + key) --- */
+.sidebar-visual {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+.bh-canvas { display: block; }
+.key-canvas { display: none; width: 36px; height: 36px; }
+.mini-bh-canvas { display: none; }
+
+/* --- Collapsed sidebar --- */
+/* --- Sidebar footer (copyright + license) --- */
+.sidebar-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  /* Never compress the brand/license footer, it stays pinned + visible
+     while .nav-items scrolls instead. */
+  flex-shrink: 0;
+}
+.sidebar-footer .copyright {
+  margin-bottom: 4px;
+  letter-spacing: 0.3px;
+}
+.sidebar-footer .license-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.sidebar-footer .license-link:hover { text-decoration: underline; }
+
+.sidebar.collapsed { width: 56px; }
+.sidebar.collapsed .nav-label { display: none; }
+.sidebar.collapsed .sidebar-brand .name { display: none; }
+.sidebar.collapsed .seal-badge { font-size: 8px; padding: 2px 6px; letter-spacing: 0; }
+.sidebar.collapsed .bh-canvas { display: none; }
+.sidebar.collapsed .mini-bh-canvas { display: block; }
+.sidebar.collapsed .key-canvas { display: block; }
+.sidebar.collapsed .sidebar-visual {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 12px 0;
+  border-left: none;
+}
+.sidebar.collapsed .sidebar-toggle { text-align: center; }
+.content.sidebar-collapsed { margin-left: 56px; }
+
+/* --- Sidebar in 56px-narrow mode (desktop collapsed) ---
+   Footer kept visible with vertical-rl text. Three lines (columns) :
+   the <br> in .copyright makes "year" and "Resurgamus Informatique"
+   two columns side-by-side ; .license-link is the third column. Key
+   icon equidistant by dropping .sidebar-visual padding-bottom. */
+@media (min-width: 769px) {
+  .sidebar.collapsed .sidebar-brand { padding: 6px 0; }
+  .sidebar.collapsed .sidebar-visual { padding-bottom: 0; }
+  .sidebar.collapsed .sidebar-footer {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: center;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 7px;
+    line-height: 1;
+    text-align: center;
+  }
+  .sidebar.collapsed .sidebar-footer .copyright,
+  .sidebar.collapsed .sidebar-footer .license-link {
+    writing-mode: vertical-rl;
+    display: block;
+    margin: 2px auto;
+    padding: 0;
+    letter-spacing: 0;
+  }
+  .sidebar.collapsed .sidebar-footer .copyright { white-space: normal; }
+  .sidebar.collapsed .sidebar-footer .license-link { white-space: nowrap; }
+}
+
+
+/* SVG icons in nav */
+.nav-icon { display: flex; align-items: center; justify-content: center; }
+.nav-icon svg { width: 18px; height: 18px; }
+
+/* --- Sidebar backdrop (mobile overlay) --- */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 49;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* --- Mobile toolbar (hamburger + nav mode toggle) --- */
+.mobile-toolbar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mobile-hamburger {
+  background: none; border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 4px 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-nav-toggle {
+  background: none; border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 3px;
+  -webkit-tap-highlight-color: transparent;
+  display: flex; align-items: center;
+}
+.mobile-nav-toggle:active { opacity: 0.7; }
+
+/* Toggle icon: show grid (→icons) in dropdown mode, list (→dropdown) in icons mode */
+.mobile-nav-toggle .icon-grid { display: block; }
+.mobile-nav-toggle .icon-list { display: none; }
+[data-mobile-nav="icons"] .mobile-nav-toggle .icon-grid { display: none; }
+[data-mobile-nav="icons"] .mobile-nav-toggle .icon-list { display: block; }
+
+/* --- Responsive (tablet / mobile) --- */
+@media (max-width: 768px) {
+  /* App shell: the body does NOT scroll on mobile, .content is the scroll
+     container. A position:fixed sidebar then physically cannot ride along
+     with a long/wide view (Eclipse/Secrets table); every view behaves like
+     Core/Accretion. */
+  html, body { height: 100%; overflow: hidden; }
+  .content {
+    height: 100vh;
+    height: 100svh;
+    height: var(--app-height, 100svh);
+    min-height: 0;
+    overflow-y: auto;
+    /* Wide content scrolls inside its own box (.table gets overflow-x below);
+       the shell must not. Without this, overflow-x computes to auto (setting
+       one axis to non-visible does that to the other) and one too-wide child
+       drags the entire page sideways, taking the header with it. */
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Sidebar: hidden off-screen, slides in as overlay */
+  .sidebar, .sidebar.collapsed {
+    width: 220px;
+    /* Real visible height for the slide-in (text) sidebar too, so its footer
+       isn't pushed below the URL bar. min-height:0 overrides the 100vh base. */
+    min-height: 0;
+    height: var(--app-height, 100svh);
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 60;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+  .sidebar.mobile-open ~ .sidebar-backdrop { display: block; }
+
+  /* Show full labels when open on mobile (override collapsed state) */
+  .sidebar.mobile-open .nav-label { display: inline; }
+  .sidebar.mobile-open .sidebar-brand .name { display: inline; }
+  .sidebar.mobile-open .sidebar-brand { padding: 8px; }
+  .sidebar.mobile-open .seal-badge { font-size: 15px; padding: 5px 16px; letter-spacing: 2px; }
+  .sidebar.mobile-open .bh-canvas { display: block; }
+  .sidebar.mobile-open .mini-bh-canvas { display: none; }
+  .sidebar.mobile-open .key-canvas { display: none; }
+  .sidebar.mobile-open .sidebar-visual {
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+  }
+  .sidebar.mobile-open .nav-item {
+    justify-content: flex-start;
+    padding: 12px 16px;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+  }
+
+  /* Hide desktop toggle, show mobile toolbar */
+  .sidebar-toggle { display: none; }
+  .mobile-toolbar { display: flex; }
+
+  /* Content: full width (dropdown mode) */
+  .content { margin-left: 0 !important; padding: 12px; }
+
+  /* Icons mode: persistent icon bar */
+  [data-mobile-nav="icons"] .sidebar,
+  [data-mobile-nav="icons"] .sidebar.collapsed {
+    width: 56px;
+    /* Pin to the SMALL viewport (svh) so the footer stays visible even with
+       the mobile-browser URL bar showing (dvh/vh can be too tall there).
+       min-height:0 lets the icon list scroll instead of pushing the footer out. */
+    min-height: 0;
+    height: 100vh;
+    height: 100svh;
+    height: var(--app-height, 100svh);
+    /* `transform` (even translateX(0)) on a position:fixed element makes
+       mobile browsers scroll it with the page; `none` keeps the rail truly
+       fixed across every view (Eclipse/Secrets long lists included). */
+    transform: none;
+    /* Lift the copyright/license footer off the screen / system-nav edge. */
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+  [data-mobile-nav="icons"] .sidebar .sidebar-brand .name { display: none; }
+  [data-mobile-nav="icons"] .sidebar .nav-label { display: none; }
+  [data-mobile-nav="icons"] .sidebar .seal-badge { font-size: 8px; padding: 2px 6px; letter-spacing: 0; }
+  [data-mobile-nav="icons"] .sidebar .bh-canvas { display: none; }
+  [data-mobile-nav="icons"] .sidebar .mini-bh-canvas { display: block; }
+  [data-mobile-nav="icons"] .sidebar .key-canvas { display: block; }
+  [data-mobile-nav="icons"] .sidebar .sidebar-visual {
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  [data-mobile-nav="icons"] .sidebar .nav-item {
+    justify-content: center;
+    padding: 12px 0;
+    border-left: none;
+  }
+  [data-mobile-nav="icons"] .sidebar .sidebar-toggle { display: none; }
+  [data-mobile-nav="icons"] .content { margin-left: 56px !important; }
+  /* Hide hamburger in icons mode (bar is always visible) */
+  [data-mobile-nav="icons"] .mobile-hamburger { display: none; }
+
+  /* Footer visible in mobile icons mode with the same vertical-rl
+     layout as desktop collapsed. mobile-open is excluded to keep the
+     220px slide-in showing the footer horizontally. */
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-brand {
+    padding: 6px 0;
+  }
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-visual {
+    padding-bottom: 0;
+  }
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-footer {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: center;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 7px;
+    line-height: 1;
+    text-align: center;
+  }
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-footer .copyright,
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-footer .license-link {
+    writing-mode: vertical-rl;
+    display: block;
+    margin: 2px auto;
+    padding: 0;
+    letter-spacing: 0;
+  }
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-footer .copyright {
+    white-space: normal;
+  }
+  [data-mobile-nav="icons"] .sidebar:not(.mobile-open) .sidebar-footer .license-link {
+    white-space: nowrap;
+  }
+
+  /* Toast */
+  .toast {
+    bottom: auto;
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    font-size: 11px;
+    padding: 8px 12px;
+    z-index: 200;
+  }
+
+  /* Content: tighter padding */
+  #main { padding: 12px; }
+  .content-header { padding: 10px 12px; }
+  #view-title { font-size: 16px; }
+
+  /* Cards: single column */
+  .cards {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .card { padding: 14px; }
+
+  /* Tables: scroll horizontally */
+  .table { font-size: 11px; display: block; overflow-x: auto; }
+  .table th, .table td { padding: 8px 6px; white-space: nowrap; }
+
+  /* Forms: full width */
+  .form-group input, .form-group select { font-size: 14px; padding: 10px; }
+  .btn { padding: 10px 14px; font-size: 12px; }
+
+  /* Secret value: smaller */
+  .secret-value { font-size: 11px; padding: 10px; }
+
+  /* Pagination */
+  .pagination { flex-wrap: wrap; }
+}
+
+/* --- Phone (480px) --- */
+@media (max-width: 480px) {
+  #main { padding: 8px; }
+  .content { padding: 8px; }
+  .cards { gap: 6px; }
+  .table th, .table td { padding: 6px; font-size: 10px; }
+  .pagination .btn { padding: 8px 16px; font-size: 13px; min-height: 36px; }
+}
+
+/* --- Cluster / SSO inline-help spacing (CSP-compliant; replaces inline style="...") --- */
+.help-block { margin-top: 0.4em; }
+.help-list { margin: 0.3em 0 0 1.5em; padding: 0; }
+
+/* --- Touch devices --- */
+@media (hover: none) and (pointer: coarse) {
+  .sidebar .nav-item:hover { background: none; color: var(--text-muted); border-left-color: transparent; }
+  .sidebar .nav-item.active { background: rgba(124,58,237,0.08); color: var(--accent); border-left-color: var(--accent); }
+  .sidebar .nav-item { min-height: 44px; display: flex; align-items: center; }
+  .sidebar .nav-item:active, button:active { opacity: 0.7; }
+  .sidebar { padding-bottom: env(safe-area-inset-bottom); }
+  .content { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
+
+/* ============================================================ *
+ * confirm-modal, type-to-confirm dialog used by api.js's      *
+ * confirmType() for high-stakes destructive actions (secret    *
+ * delete, token revoke, namespace archive, master password     *
+ * rotate, Shamir disable). CSP-clean : all visuals here, no    *
+ * inline styles in the modal HTML.                             *
+ * ============================================================ */
+.confirm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+}
+.confirm-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 280px;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+.confirm-body {
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.confirm-prompt {
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+.confirm-prompt code {
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--accent);
+  user-select: all;
+}
+.confirm-input {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 16px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.confirm-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-actions .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Nova, observability view. In the shipped stylesheet (not JS-injected) because
+   the CSP is style-src 'self' - an injected <style> would be blocked. */
+/* max-width caps auto-fit at 4 columns on big screens (802<=W<1006 => 4 cols),
+   so panels wrap into rows left-aligned instead of one wide line. */
+.nova-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; max-width: 920px; }
+.nova-panel { position: relative; padding: 16px; border-radius: 12px; background: var(--bg-card); border: 1px solid var(--border); }
+.nova-panel.wide { grid-column: span 2; }
+/* mobile: one clean column, panels stacked (no cramped side-by-side). */
+@media (max-width: 640px) { .nova-grid { grid-template-columns: 1fr; } .nova-panel.wide { grid-column: span 1; } }
+.nova-lbl { font-size: 0.72rem; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.nova-val { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1;
+  background: linear-gradient(100deg, #ff0080, #22d3ee); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.nova-val.ok { background: none; color: var(--green); -webkit-text-fill-color: var(--green); }
+.nova-val.warn { background: none; color: var(--red); -webkit-text-fill-color: var(--red); }
+.nova-val.mute { background: none; color: var(--text-muted); -webkit-text-fill-color: var(--text-muted); }
+.nova-spark { width: 100%; height: 34px; margin-top: 8px; display: block; }
+.nova-spark path { fill: none; stroke: #22d3ee; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.nova-note { margin-top: 14px; font-size: .8rem; }

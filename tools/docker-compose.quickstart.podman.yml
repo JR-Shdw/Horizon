@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+#
+# PODMAN variant of the quickstart compose (picked by tools/install.sh when the
+# runtime is rootless podman). Same stack as docker-compose.quickstart.yml but
+# with two portability fixes podman-compose needs:
+#   - /run/rhorizon tmpfs without uid=/gid= (podman rejects those options;
+#     default mode 1777 lets uid 1500 write, sockets are chmod 0700 by the app)
+#   - depends_on as plain ordering (no condition: service_healthy; podman-compose
+#     1.5.0 hangs on health-gated deps - api/nginx tolerate a not-ready peer)
+# The Docker file keeps the stricter forms. A host runs one runtime, not both.
+#
+# Self-contained (PostgreSQL + API + frontend), bound to 127.0.0.1, no traefik.
+
+networks:
+  # edge: normal bridge so api/frontend host ports publish (an internal-only net
+  # gets no host NAT). internal: DB isolation (no host port, no egress).
+  rhorizon_edge:
+    driver: bridge
+  rhorizon_internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+  audit_logs:
+  node_uuid_data:   # per-node identity (node-uuid, 0400); api fs is read-only
+
+services:
+
+  postgres:
+    # Podman variant runs STOCK upstream postgres. It bundles gosu (a Go binary)
+    # with Go-stdlib CVEs upstream has not rebuilt; unreachable here (gosu is
+    # exec-only: no socket, no TLS, no parsing) -> accepted at your own risk.
+    # tools/install.sh warns on setup. The Docker variant builds a gosu-free
+    # image (postgres/Dockerfile) instead.
+    image: docker.io/library/postgres:${POSTGRES_VERSION:-18-trixie}
+    container_name: rhorizon_postgres
+    restart: unless-stopped
+    # Sizing scales with the tier preset (tools/presets/*.env): max_connections
+    # covers workers x (pool 10 + overflow 10) + heartbeat/reaper headroom.
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE:-512MB}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rhorizon}
+      POSTGRES_USER: ${POSTGRES_USER:-rhorizon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    networks:
+      - rhorizon_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rhorizon} -d ${POSTGRES_DB:-rhorizon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_drop:
+      - NET_RAW
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEM:-1G}
+          pids: 100
+
+  api:
+    image: ${RH_API_IMAGE:-${RHORIZON_API_IMAGE:-localhost/rhorizon-api:latest}}
+    container_name: rhorizon_api
+    restart: unless-stopped
+    # Ordering only (no condition: service_healthy). podman-compose 1.5.0 hangs
+    # on health-gated depends_on; the api reconnects to PG via its restart
+    # policy, so plain ordering is portable across Docker + podman.
+    depends_on:
+      - postgres
+    environment:
+      RH_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-rhorizon}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rhorizon}"
+      RH_DATABASE_SSL: "false"
+      RH_WORKERS: "${RH_WORKERS:-${RHORIZON_WORKERS:-5}}"
+      RH_CUSTODY_MODE: "${RH_CUSTODY_MODE:-${RHORIZON_CUSTODY_MODE:-embedded}}"
+      RH_CUSTODIAN_WORKERS: "${RH_CUSTODIAN_WORKERS:-${RHORIZON_CUSTODIAN_WORKERS:-5}}"
+      RH_PROXY_AUTH_ENABLED: "${RH_PROXY_AUTH_ENABLED:-${RHORIZON_PROXY_AUTH_ENABLED:-false}}"
+      RH_PROXY_TRUSTED_IPS: "${RH_PROXY_TRUSTED_IPS:-${RHORIZON_PROXY_TRUSTED_IPS:-}}"
+      RH_MEMORY_LOCK_MODE: "${RH_MEMORY_LOCK_MODE:-${RHORIZON_MEMORY_LOCK_MODE:-best-effort}}"
+      RH_SWAP_PROTECTION: "${RH_SWAP_PROTECTION:-${RHORIZON_SWAP_PROTECTION:-unknown}}"
+    ports:
+      # Localhost-only by default. Override RH_API_BIND to expose.
+      - "${RH_API_BIND:-${RHORIZON_API_BIND:-127.0.0.1}}:${RH_API_PORT:-${RHORIZON_API_PORT:-8200}}:8200"
+    networks:
+      - rhorizon_internal
+      - rhorizon_edge
+    volumes:
+      - audit_logs:/var/log/rhorizon
+      - node_uuid_data:/var/lib/rhorizon
+      - ./dynamic-engines.ini:/app/dynamic-engines.ini:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,noexec,nosuid
+      - /dev/shm:size=1M,noexec,nosuid
+      # tmpfs default mode 1777 - portable across Docker + podman (podman
+      # rejects the Docker-only uid=/gid= tmpfs options). The RPC socket files
+      # are chmod 0700 by the app (post_bind_chmod) and guarded by SO_PEERCRED.
+      - /run/rhorizon:size=1M,noexec,nosuid
+    cap_drop:
+      - ALL
+    # Portable rootless default. See docker-compose.memory-lock.yml for the
+    # explicit fail-closed memory-lock override.
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # If mlockall succeeds it wires the RSS. Budget: workers x ~160MB +
+          # 256MB Argon2id unseal spike + headroom (tools/presets/*.env).
+          memory: ${RH_API_MEM:-${RHORIZON_API_MEM:-768M}}
+          pids: 150
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    image: ${RH_FRONTEND_IMAGE:-${RHORIZON_FRONTEND_IMAGE:-localhost/rhorizon-frontend:latest}}
+    container_name: rhorizon_frontend
+    restart: unless-stopped
+    # Ordering only - nginx tolerates a not-yet-ready api (proxies on demand),
+    # and podman-compose hangs on a health-gated depends_on.
+    depends_on:
+      - api
+    environment:
+      MAX_BODY_API: "${MAX_BODY_API:-1m}"
+      MAX_BODY_BACKUP: "${MAX_BODY_BACKUP:-100m}"
+      TLS_ENABLED: "${TLS_ENABLED:-false}"
+      TLS_CERT: "${TLS_CERT:-/certs/cert.pem}"
+      TLS_KEY: "${TLS_KEY:-/certs/key.pem}"
+    ports:
+      - "${RH_FRONTEND_BIND:-${RHORIZON_FRONTEND_BIND:-127.0.0.1}}:${RH_FRONTEND_PORT:-${RHORIZON_FRONTEND_PORT:-8443}}:8443"
+      - "${RH_FRONTEND_BIND:-${RHORIZON_FRONTEND_BIND:-127.0.0.1}}:${RH_FRONTEND_HTTP_PORT:-${RHORIZON_FRONTEND_HTTP_PORT:-8080}}:8200"
+    networks:
+      - rhorizon_edge
+    volumes:
+      - ${TLS_CERT_DIR:-./certs}:/certs:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=1M,noexec,nosuid
+      - /var/cache/nginx:size=8M,noexec,nosuid
+      - /run:size=1M,noexec,nosuid
+      - /etc/nginx/conf.d:size=1M,noexec,nosuid
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${RH_FRONTEND_MEM:-${RHORIZON_FRONTEND_MEM:-64M}}
+          pids: 20
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8200/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

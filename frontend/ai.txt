@@ -1,0 +1,26 @@
+# ai.txt, AI / Machine-Learning policy
+# https://site.spawning.ai/spawning-ai-txt
+#
+# Project: Resurgamus Horizon (rhorizon), secrets vault
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+# License: AGPL-3.0-or-later
+# Full policy: /LICENSE-AI.md
+
+User-Agent: *
+Disallow: /
+
+# This codebase implements security-critical cryptographic primitives.
+# Disallow signals that the source MUST NOT be used as training data,
+# evaluation data, or any other input for machine-learning model
+# development without explicit prior written authorization.
+#
+# A model trained on this code may produce derivatives with subtle
+# deviations that fail the same security properties. Such derivatives,
+# presented as secure code, constitute a public hazard distinct from
+# ordinary copyright concerns.
+#
+# A text-and-data-mining (TDM) reservation is declared pursuant to
+# article 4 of EU directive 2019/790. Machine-readable form:
+# /.well-known/tdmrep.json
+#
+# Contact for licensing inquiries: horizon@resurgamus.com

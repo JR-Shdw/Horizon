@@ -1,0 +1,235 @@
+# Default values for rhorizon. Override with `helm install -f my-values.yaml`
+# or `--set key=value`. Comments below describe each knob.
+
+# --- Image references ---------------------------------------------------------
+# Defaults assume the operator has built and pushed the images to a registry
+# they control. There is no "official" public registry yet.
+image:
+  api:
+    repository: rhorizon-api
+    tag: ""             # falls back to .Chart.AppVersion if empty
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: rhorizon-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: postgres
+    tag: "18-trixie"
+    pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# --- API deployment -----------------------------------------------------------
+api:
+  replicas: 1
+  # Closed built-in catalog. A false value prevents that backend module from
+  # being imported after restart. Revoke/delete its leases and engines first:
+  # startup fails closed when persisted state still depends on a disabled one.
+  dynamicModules:
+    postgresql: true
+    mysql: true
+    ldap: true
+    redis: true
+    cassandra: true
+  # multi-worker compartmentalisation is mandatory, the master
+  # process holds the only copy of sub-keys, every other worker delegates
+  # crypto via the `rhorizon_runtime` tmpfs socket at /run/rhorizon.
+  # The image boot wrapper floors `workers` to 5 (Shamir quorum minimum).
+  workers: 5
+  # separated runs an additional fixed, UDS-only custody pool. Public worker
+  # replacement then has no effect on the Shamir generation. Raise the memory
+  # limit before enabling it; see concepts/key-custody.md.
+  custodyMode: embedded
+  custodianWorkers: 5
+  # best-effort: continue with zeroize-only buffers if mlock is unavailable;
+  # swapProtection decides whether that state is a warning. required: fail
+  # closed on the first lock failure.
+  memoryLockMode: best-effort
+  # Containers cannot reliably inspect the node's swap backing device. Set to
+  # protected only when every eligible node uses encrypted swap, zram, or none.
+  swapProtection: unknown
+  # Enable only where cluster policy permits IPC_LOCK. Keeping this off avoids
+  # Pod Security admission rejection; best-effort mode reports the result.
+  requestIpcLockCapability: false
+  # Forwarded identity and client-IP headers are ignored unless the direct
+  # proxy addresses are explicitly trusted.
+  proxyAuthEnabled: false
+  proxyTrustedIps: ""
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 100m
+    limits:
+      # workers are floored to 5 (Shamir quorum): ~5 x 160MB + 256MB Argon2id
+      # + headroom. 768Mi OOM-kills the master on unseal.
+      memory: 1536Mi
+      cpu: 1000m
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1500
+    fsGroup: 1500
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        # mlock(2) on the Rust wrap key + secure buffers (defense against
+        # swap-leak of master keys).
+        - IPC_LOCK
+  # Health probes, `/health` is unauthenticated and idempotent.
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8200
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /readiness
+      port: 8200
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  # Per-pod ulimits aren't supported by the standard Kubernetes Pod API.
+  # Effective IPC_LOCK bypasses RLIMIT_MEMLOCK on Linux. Without the
+  # capability, configure the node runtime limit or use best-effort mode.
+
+# --- Frontend (nginx) ---------------------------------------------------------
+frontend:
+  replicas: 1
+  resources:
+    requests:
+      memory: 32Mi
+      cpu: 50m
+    limits:
+      memory: 64Mi
+      cpu: 250m
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+        - CHOWN
+        - SETUID
+        - SETGID
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8200
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8200
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# --- PostgreSQL ---------------------------------------------------------------
+# Set `external.enabled: true` to point at a managed PG (Cloud SQL,
+# Patroni cluster, etc.) instead of running an in-chart StatefulSet.
+postgres:
+  external:
+    enabled: false
+    host: ""
+    port: 5432
+    database: rhorizon
+    username: rhorizon
+    # TLS mode for the external DB: disable | require (encrypt, no cert verify)
+    # | verify-full. Patroni/managed PG usually mandates TLS, so default require.
+    sslMode: require
+    # NetworkPolicy egress target(s) for the external DB. Empty = allow the DB
+    # port cluster-wide (covers an in-cluster Patroni without its pod IP); set
+    # CIDR(s) to restrict.
+    egressCidrs: []
+    # When external.enabled, the chart looks up `existingSecret` for the
+    # password (key: postgres-password). Otherwise generates one.
+    existingSecret: ""
+  storage:
+    size: 10Gi
+    storageClass: ""   # default storage class if empty
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 1000m
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+    runAsUser: 999      # postgres image's uid
+    capabilities:
+      drop:
+        - NET_RAW
+        - SYS_ADMIN
+
+# --- Service / Ingress --------------------------------------------------------
+service:
+  api:
+    type: ClusterIP
+    port: 8200
+  frontend:
+    type: ClusterIP
+    port: 8200       # internal HTTP ; TLS termination at ingress
+    httpsPort: 8443  # exposed only when frontend.tls.enabled
+
+ingress:
+  enabled: false
+  className: ""        # e.g. "nginx", "traefik"
+  annotations: {}
+  host: vault.example.com
+  tls:
+    enabled: false
+    secretName: ""     # cluster-issued cert (cert-manager etc.)
+
+# --- Network policies ---------------------------------------------------------
+# Egress lockdown : the API only reaches PG + DNS. The frontend only
+# reaches the API. Ingress to API is restricted to in-namespace pods
+# unless the operator opens it via additional rules.
+networkPolicy:
+  enabled: true
+  # Optional CIDR allow-list for ingress to the frontend (e.g. corp VPN).
+  ingressFrontendCidrs: []
+
+# --- Pod Disruption Budget ----------------------------------------------------
+pdb:
+  api:
+    enabled: false
+    minAvailable: 1
+  frontend:
+    enabled: false
+    minAvailable: 1
+
+# --- Service account & RBAC ---------------------------------------------------
+serviceAccount:
+  create: true
+  annotations: {}
+
+# --- Pod scheduling -----------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# --- Optional secret seeding --------------------------------------------------
+# DO NOT put production master passwords here. This is for unattended
+# bootstrap of dev/staging clusters only. When set, the chart creates
+# a Job that POSTs /unseal once the API becomes ready and writes the
+# resulting root_token to the `<release>-bootstrap` Secret.
+bootstrap:
+  enabled: false
+  # The master password used for the FIRST /unseal. After bootstrap
+  # the operator MUST rotate it (POST /vault/rotate-password).
+  masterPassword: ""
+
+# --- Common labels ------------------------------------------------------------
+commonLabels: {}
+commonAnnotations: {}

@@ -1,0 +1,194 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+[package]
+name = "rhorizon_crypto"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Memory-protected crypto primitives + Shamir secret sharing + master RPC dispatcher for Resurgamus Horizon vault."
+repository = "https://github.com/JR-Shdw/Horizon"
+authors = ["shdw <horizon@resurgamus.com>"]
+# NOTE : no `readme = ...` field. The Dockerfile builds inside
+# `/build` with only `api/rust/` copied as context, so `../../README.md`
+# does not exist in the container. rhorizon_crypto is also not
+# published to crates.io, so the field would only confuse local
+# `cargo package` runs.
+
+[workspace]
+members = [".", "custody-core", "custodian"]
+default-members = [".", "custody-core", "custodian"]
+resolver = "2"
+
+[lib]
+name = "rhorizon_crypto"
+# cdylib : Python extension via maturin (default consumer).
+# rlib   : required so the fuzz sub-crate (api/rust/fuzz/) can link
+#          against rhorizon_crypto as a regular Rust dependency.
+#          Building the cdylib alone produces a .so that pyo3 loads
+#          at runtime but cannot be `use rhorizon_crypto::...`d from
+#          another crate. Adding rlib has zero impact on the wheel.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The version requirement is redundant for a path dependency, but
+# `cargo deny check bans` treats a bare path dep as a wildcard and refuses
+# it (`wildcards = "deny"`). Keep it in step with custody-core's version.
+rhorizon-custody-core = { path = "custody-core", version = "0.1.0" }
+pyo3 = { version = "0.29", features = ["abi3-py311"] }
+# Enable wiping throughout the transient AES-GCM state. These direct feature
+# activations are intentional: aes-gcm's optional zeroize feature wipes its
+# temporary GHASH key, but does not forward zeroize to AES round keys or the
+# GHASH/POLYVAL state. Cargo feature unification applies them to the transitive
+# instances used by aes-gcm.
+aes-gcm = { version = "0.10", features = ["zeroize"] }
+aes = { version = "0.8", features = ["zeroize"] }
+ghash = { version = "0.5", features = ["zeroize"] }
+polyval = { version = "0.6", features = ["zeroize"] }
+curve25519-dalek = { version = "4.1.3", features = ["zeroize"] }
+blake2 = "0.10"
+crypto_secretbox = "0.1.1"
+# Libsodium-compatible X25519/XSalsa20-Poly1305 sealed boxes for HA rekey
+# envelopes. Rekey private keys are generated, wrapped, and used entirely
+# inside Rust; only public material and ciphertext cross into Python.
+crypto_box = { version = "0.9.1", features = ["seal"] }
+zeroize = { version = "1.8", features = ["derive"] }
+memsec = "0.7"
+# HMAC-SHA512 + AES-GCM operations on the encrypted subkeys
+# (hmac_key / dek_key / audit_key) without ever returning the plaintext
+# subkey to Python. WrapKey decrypts the subkey locally, performs the op,
+# zeroizes the subkey before returning.
+hmac = "0.12"
+sha2 = "0.10"
+# Audit chain : asymmetric (Ed25519, RFC 8032) signing. The audit chain moves
+# off the master-derived symmetric audit_key (which rotates -> per-epoch keyring
+# dance + sealed verify impossible) onto a per-node Ed25519 identity. This Rust
+# AuditSigner mlock's the 32-byte seed + zeroizes on Drop, mirroring WrapKey ;
+# the Python api/app/crypto.py impl is the reference and a parity test gates that
+# the two produce byte-identical signatures (Ed25519 is deterministic). The
+# `zeroize` feature wipes the transient SigningKey rebuilt per sign() call.
+# ed25519-dalek 2.x pulls curve25519-dalek >= 4.1.3 (past RUSTSEC-2024-0344) ;
+# cargo audit + cargo deny in validate.yml gate the dependency.
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+# Block G : BackupCryptoContext (api/rust/src/backup_context.rs), derives a
+# BACKUP-side master_key (Argon2id RFC 9106) + dek_key (HKDF-SHA512) entirely
+# in Rust, mlock'd, never visible to Python. Chains DEK unwrap (AES-GCM) +
+# secret decrypt (XChaCha20-Poly1305 IETF, matches libsodium
+# crypto_aead_xchacha20poly1305_ietf) in a single call so the unwrapped DEK
+# only lives on the Rust stack. argon2 0.5 + chacha20poly1305 0.10 + hkdf
+# 0.12 are RustCrypto-ecosystem crates, consistent with aes-gcm/hmac/sha2.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+# master RPC server in Rust: the dispatch loop that previously
+# ran in `cluster_rpc.MasterRpcServer` (Python asyncio under GIL) is being
+# moved to a native thread serving Unix socket connections directly from
+# Rust. Followers' crypto requests no longer round-trip through the
+# Python event loop on master, bypasses the GIL, lifts the master
+# dispatch ceiling that capped read_secret at ~190 RPS in the 2026-05-08
+# bench. serde_json parses the JSON wire format ; hex decodes/encodes
+# the binary payloads (subkeys, ciphertexts, signatures).
+serde_json = "1"
+hex = "0.4"
+# libc for SO_PEERCRED (Linux) and getpeereid (macOS / *BSD), same
+# peer-uid validation pattern as `peer_cred.py` shim, just inline in
+# the Rust dispatcher.
+libc = "0.2"
+# ML-DSA (FIPS 204) post-quantum signatures for the PKI engine's PQ CA option.
+# pyca/cryptography's ML-DSA needs cryptography>=49, but fido2 caps it <49 (no
+# compatible release yet) -> we do ML-DSA in Rust instead. fips204 (integritychain)
+# is pure-Rust, no_std, no heap, constant-time-by-design keygen/sign, stabilized
+# API. NOT independently audited -> gated by NIST ACVP ML-DSA-65 known-answer
+# vectors (the spec anchor; no trusted Python ML-DSA exists for a parity test)
+# and documented as an unaudited PQ impl. cargo audit + deny gate the dep in CI.
+fips204 = "0.4.6"
+# ML-KEM (FIPS 203) post-quantum KEM for the PKI engine's KEM certificates
+# (Workstream 2: subject key = ML-KEM, KeyUsage=keyEncipherment, signed by an
+# ed25519/ml-dsa/composite CA). app-level ML-KEM keygen/encaps/decaps is exposed
+# to Python here for the FIRST time -- the TLS handshake's ML-KEM (agent rustls
+# via aws-lc-rs) is not app-callable, so it cannot be reused. fips203
+# (integritychain) is the direct sibling of the fips204 already shipped: same
+# org, pure-Rust, no_std, no heap, constant-time-by-design, stabilized SerDes
+# API. NOT independently audited -> gated by NIST ACVP ML-KEM-768 keyGen +
+# encaps + decaps known-answer vectors (deterministic in the ACVP seeds; the
+# spec anchor, no trusted Python ML-KEM exists for a parity test) and documented
+# as an unaudited PQ impl. cargo audit + deny gate the dep in CI.
+fips203 = "0.4.3"
+# `extension-module` tells PyO3 not to link libpython, because CPython
+# provides the symbols at runtime when it loads our .so. The wheel MUST be
+# built with it: the manylinux/musllinux post-build check rejects a wheel that
+# links libpython. Every consumer that is not a wheel -- cargo test, the fuzz
+# harnesses -- is a standalone binary that MUST link it instead.
+#
+# The feature is therefore off by default and turned on by the one thing that
+# builds a wheel: `[tool.maturin] features = ["extension-module"]` in
+# pyproject.toml. `build.rs` emits the libpython link args exactly when this
+# feature is absent.
+#
+# a644b72 made it a default after an earlier `default = []` shipped a wheel
+# that linked libpython3.12 and broke the pipeline. The diagnosis stopped one
+# level short: pyproject.toml asked maturin for `pyo3/extension-module`, which
+# activates the feature on the PYO3 crate and leaves this crate's
+# CARGO_FEATURE_EXTENSION_MODULE unset, so build.rs added the libpython link
+# args to the wheel build itself. Reproduced 2026-08-13 and fixed at the
+# source (pyproject.toml + build.rs), so the default is no longer load-bearing
+# and `cargo test` works without `--no-default-features`. The flag stays on
+# the CI and `make rust-test` invocations: it is still correct, and it keeps
+# the test binaries linking libpython if a default is ever reintroduced.
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+# `fuzzing` exposes a handful of internal functions (shamir_split,
+# shamir_combine, aes_gcm_*) as public wrappers so the cargo-fuzz
+# harness in `fuzz/` can call them directly. Disabled by default -
+# the wrappers don't exist in normal builds, so they cannot widen
+# the public API surface accidentally.
+fuzzing = []
+# `asm-gate` exports unmangled `#[no_mangle] extern "C"` wrappers
+# around gf256_ct::mul / clmul_u8 / reduce so the CI asm-grep step
+# (tools/check-gf-ct.sh, .woodpecker/validate.yml) can locate the
+# generated assembly and assert it is branch-free. NEVER enabled in
+# the production wheel build.
+asm-gate = []
+
+[build-dependencies]
+# build.rs uses pyo3-build-config to add libpython
+# link args during `cargo test` (extension-module is off there ; the
+# standalone test binary needs libpython at link time).
+pyo3-build-config = "0.29"
+
+[dev-dependencies]
+pyo3 = { version = "0.29", features = ["auto-initialize"] }
+# proptest = property-based testing. Generates randomised inputs and
+# tries to falsify invariants like "encrypt(p, a) then decrypt(...) == p"
+# across thousands of random plaintexts/AADs/keys per test run. Catches
+# edge cases that hand-written tests miss (empty payloads, all-zero
+# keys, length boundaries, NULL bytes in AAD, ...). Used in the
+# `proptests` modules of lib.rs and key_share.rs.
+proptest = "1"
+
+# Reproducible release builds:
+#   strip = true            no debug info / symbol tables (path leaks)
+#   codegen-units = 1       deterministic codegen ordering
+#   lto = "fat"             single artifact, no rlib boundaries
+#   panic = "abort"         no unwinder tables (also smaller, more deterministic)
+# RUSTFLAGS="--remap-path-prefix=$PWD=." set in the Dockerfile rewrites
+# any remaining absolute path references in the binary to relative ones.
+#
+# panic = "abort" also has an FFI-soundness role (ANSSI-PA-074 R49): this
+# crate is loaded into CPython via PyO3 (#[pyfunction]/#[pymethods]), and a
+# Rust panic unwinding across that boundary into C code is undefined
+# behaviour. With `panic = "abort"`, unwinding across the boundary is
+# impossible by construction: any panic aborts the process instead of
+# propagating, so there is nothing for `std::panic::catch_unwind` to guard
+# here and none is installed. That makes R49 depend entirely on R14 (no
+# panic-capable calls in production code -- see lib.rs/key_share.rs/
+# master_rpc.rs/backup_context.rs, which is why they carry no unwrap/
+# expect/panic!/assert! outside #[cfg(test)]) and on R25 (no panics inside
+# Drop, since abort mid-teardown of a secret-zeroing destructor is worse
+# than an ordinary unwind would be).
+[profile.release]
+strip = true
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+opt-level = 3

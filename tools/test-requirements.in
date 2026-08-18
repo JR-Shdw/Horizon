@@ -1,0 +1,12 @@
+# Test runner deps (pytest step, alongside api/requirements.txt). Loose pins ->
+# test-requirements.txt hash-locked via pip-compile --generate-hashes.
+pytest==9.1.0
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+httpx==0.28.1
+asyncpg==0.30.0
+pyotp==2.9.0
+tomlkit==0.13.3
+typer==0.20.0
+# transitive CVE floor: idna<3.15 -> CVE-2026-45409
+idna>=3.15

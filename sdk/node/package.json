@@ -1,0 +1,40 @@
+{
+  "name": "@rhorizon/client",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Resurgamus Horizon \u2014 self-hosted secrets vault",
+  "license": "AGPL-3.0-or-later",
+  "author": "shdw <horizon@resurgamus.com>",
+  "homepage": "https://github.com/JR-Shdw/Horizon",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JR-Shdw/Horizon.git",
+    "directory": "sdk/node"
+  },
+  "keywords": [
+    "rhorizon",
+    "vault",
+    "secrets",
+    "kms",
+    "encryption"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc -p tsconfig.test.json && node -e \"require('fs').writeFileSync('.test-build/package.json','{\\\"type\\\":\\\"module\\\"}')\" && node --test \".test-build/tests/*.test.js\"",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

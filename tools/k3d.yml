@@ -1,0 +1,45 @@
+---
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Install k3d (local k8s for the `make k8s-test` tier) into ~/.local/bin,
+# pinned by version + verified by sha256. No sudo, no curl|bash.
+#
+# Run:  ansible-playbook tools/k3d.yml      (or: make k8s-setup)
+#
+# To pin a new version: download the binary once, sha256sum it, and set both
+# vars below (or pass -e k3d_version=... -e k3d_sha256=...):
+#   v=v5.7.5
+#   curl -fsSLo /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/$v/k3d-linux-amd64"
+#   sha256sum /tmp/k3d
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    k3d_version: "v5.9.0"
+    # sha256 of k3d-linux-amd64 for k3d_version (GitHub release asset, TOFU-
+    # pinned). Bump together with k3d_version (see header for how to recompute).
+    k3d_sha256: "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0"
+    k3d_dest: "{{ lookup('env', 'HOME') }}/.local/bin/k3d"
+  tasks:
+    - name: refuse to install without a pinned checksum
+      ansible.builtin.assert:
+        that: k3d_sha256 | length == 64
+        fail_msg: >-
+          Set k3d_sha256 to the sha256 of k3d-linux-amd64 for {{ k3d_version }}
+          (see the header of this playbook). Refusing to install unverified.
+
+    - name: ensure ~/.local/bin exists
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.local/bin"
+        state: directory
+        mode: "0755"
+
+    - name: download + verify k3d binary
+      ansible.builtin.get_url:
+        url: "https://github.com/k3d-io/k3d/releases/download/{{ k3d_version }}/k3d-linux-amd64"
+        dest: "{{ k3d_dest }}"
+        checksum: "sha256:{{ k3d_sha256 }}"
+        mode: "0755"
+
+    - name: report
+      ansible.builtin.debug:
+        msg: "k3d {{ k3d_version }} installed at {{ k3d_dest }} (ensure ~/.local/bin is on PATH)"

@@ -1,0 +1,21 @@
+.env
+.env.*
+.git
+.gitignore
+.ruff_cache
+.pytest_cache
+.coverage
+htmlcov
+tests
+__pycache__
+*.pyc
+*.md
+*.swp
+*~
+.vscode
+.idea
+# Rust build artefacts: a host-arch wheel/binary left in target/ would leak into
+# the image and break a cross/emulated build (pip refuses a foreign-arch wheel).
+**/target/
+.venv
+*.whl

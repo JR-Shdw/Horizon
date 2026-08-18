@@ -1,0 +1,83 @@
+# rhorizon vault -- AppArmor profile for Debian/Ubuntu (the SELinux families use
+# tools/selinux/rhorizon.te instead). The @RH_*@ path tokens are substituted for
+# the real install dirs by _rh_apparmor_setup in tools/drivers/linux.sh.
+#
+# Entry chain: systemd starts @RH_WORK@/run-app.sh (a /bin/sh wrapper) which
+# execs the venv python running uvicorn. The service mlockall()s its key
+# material (CAP_IPC_LOCK), connects to PostgreSQL, and listens on the API port.
+# Access set mirrors the confined SELinux domain rhorizon_t.
+
+abi <abi/3.0>,
+#include <tunables/global>
+
+profile rhorizon flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/ssl_certs>
+
+  # lock key material out of swap (mlockall) + raise the memlock rlimit
+  capability ipc_lock,
+  capability sys_resource,
+
+  # entry chain: sh wrapper -> venv python (uvicorn). Stay in this profile (ix).
+  @RH_WORK@/run-app.sh r,
+  /{usr/,}bin/dash ix,
+  /{usr/,}bin/sh ix,
+  /usr/bin/env ix,
+  @RH_WORK@/.venv/bin/python3* ix,
+  /usr/bin/python3.* ix,
+  # benign: the venv/native-ext bootstrap refreshes the dynamic-linker cache
+  # (matches SELinux libs_exec_ldconfig). gcc/ld are probed opportunistically
+  # and fall back on denial -- a vault gets NO compiler, so they stay denied.
+  /usr/sbin/ldconfig rix,
+  /sbin/ldconfig rix,
+
+  # directory reads: AppArmor needs an explicit rule to OPEN a directory entry
+  # (dir/), distinct from reading its contents (dir/**). Python opens the
+  # app-dir + walks the tree, so grant the dirs themselves too.
+  / r,
+  @RH_WORK@/ r,
+  @RH_WORK@/api/ r,
+  @RH_WORK@/api/**/ r,
+  @RH_WORK@/.venv/ r,
+  @RH_WORK@/.venv/**/ r,
+
+  # interpreter + stdlib + venv (native .so need mmap-exec via m)
+  /usr/lib/python3.*/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+  @RH_WORK@/.venv/** mr,
+
+  # app code + schema (read-only; the domain must not rewrite its own code)
+  @RH_WORK@/api/** r,
+  @RH_WORK@/schema.sql r,
+  @RH_WORK@/dynamic-engines.ini r,
+
+  # config (read-only): rhorizon.env + rhorizon.env-secrets
+  @RH_CONFIG@/ r,
+  @RH_CONFIG@/** r,
+
+  # persistent writable state (node-uuid, cluster mTLS certs). Needs link (l)
+  # for the atomic .tmp + link/rename write pattern.
+  @RH_STATE@/ rw,
+  @RH_STATE@/** rwkl,
+
+  # writable audit trail + runtime dir (pid, unix sockets)
+  @RH_AUDIT@/ rw,
+  @RH_AUDIT@/** rwkl,
+  @RH_RUNTIME@/ rw,
+  @RH_RUNTIME@/** rwkl,
+
+  # PostgreSQL: TCP loopback + unix socket
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+  /{var/,}run/postgresql/** rw,
+
+  # runtime introspection: cgroup memlock headroom, urandom, self proc
+  @{PROC}/sys/kernel/** r,
+  @{PROC}/@{pid}/** r,
+  /sys/fs/cgroup/** r,
+  /dev/urandom r,
+  /dev/null rw,
+  owner /tmp/** rwk,
+}

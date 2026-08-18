@@ -1,0 +1,3 @@
+# Trusted SSH signing keys for rhorizon commits and tags.
+# Format: allowed principals, SSH public key, optional comment.
+admin@baehrel.gdn ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPJNiRmRr8fPGl0jyksoNYTdFcQNyAmOEXCIKrUsiGfj admin@baehrel.gdn

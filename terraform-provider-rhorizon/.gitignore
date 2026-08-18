@@ -1,0 +1,8 @@
+terraform-provider-rhorizon
+*.test
+*.out
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+crash.log

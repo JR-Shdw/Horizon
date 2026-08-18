@@ -1,0 +1,14 @@
+{
+  "$comment": "rhorizon vault connector for opencode. Merge this 'mcp' block into your ~/.config/opencode/opencode.json (alongside your provider/model keys). Replace the ~ paths with ABSOLUTE paths -- opencode does not expand ~ in env values. mcp/setup.sh prints a ready-to-paste version with your real $HOME.",
+  "mcp": {
+    "rhorizon-vault": {
+      "type": "local",
+      "command": ["rhorizon-mcp-server"],
+      "environment": {
+        "RH_VAULT_URL": "http://127.0.0.1:8200",
+        "RH_TOKEN_FILE": "/home/YOU/.config/rhorizon/mcp.token",
+        "RHORIZON_MCP_POLICY": "/home/YOU/.config/rhorizon-mcp/policy.toml"
+      }
+    }
+  }
+}

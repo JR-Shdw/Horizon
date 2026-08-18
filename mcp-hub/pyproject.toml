@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw
+[project]
+name = "rhorizon-mcp-hub"
+version = "0.1.0"
+description = "Zero-dependency per-host MCP federation hub (stdio); fronts N local MCP servers behind one endpoint for local agents"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+authors = [{name = "shdw"}]
+dependencies = []  # ZERO third-party deps -- pure stdlib (json, subprocess, tomllib, select)
+
+[project.scripts]
+rhorizon-mcp-hub = "rhorizon_mcp_hub.hub:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rhorizon_mcp_hub"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

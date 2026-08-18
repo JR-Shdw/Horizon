@@ -1,0 +1,18 @@
+---
+namespace: resurgamus
+name: rhorizon
+version: 0.1.0
+readme: README.md
+authors:
+  - shdw <horizon@resurgamus.com>
+description: Secure Ansible modules for Resurgamus Horizon dynamic credentials.
+license:
+  - AGPL-3.0-or-later
+tags:
+  - secrets
+  - security
+  - credentials
+  - infrastructure
+repository: https://github.com/JR-Shdw/Horizon
+build_ignore:
+  - tests

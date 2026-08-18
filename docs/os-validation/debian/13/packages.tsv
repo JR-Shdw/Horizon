@@ -1,0 +1,22 @@
+key	relation	value	check	notes
+os.name	exact	Debian	. /etc/os-release; echo "$ID"	trixie lane
+os.version	exact	13	. /etc/os-release; echo "$VERSION_ID"	Debian 13 current stable lane
+python.version	min	3.12	python3 --version	Debian 13 ships Python 3.13; project floor remains >=3.12
+python.package	required	python3 python3-venv python3-dev python3-pip	apt-cache policy python3	venv and headers required for native build
+rust.version	min	1.79	rustc --version	Debian 13 distro rust is expected to pass; use pinned rustup if not
+cargo.lockfile	min	4	cargo --version	Cargo >=1.78 hard floor
+rust.toolchain_source	target	rustup-stable	rustup show active-toolchain	distro rust is acceptable only when locked gates pass
+rust.vault_gate	required	tools-check-rust	bash tools/check-rust.sh --skip-miri	locked vault crypto test/build on target OS/arch
+rust.agent_gate	required	cargo-agent-build	cd agent/rust && cargo build --release --locked --bins	locked rh-fetch/rh-inject/rh-watch/rh-podman build on target OS/arch
+postgresql.version	exact	18	psql --version	install from signed PGDG repo; Debian 13 base is not the contract
+postgresql.package	required	postgresql-18 postgresql-client-18	apt-cache policy postgresql-18	local DB lane only
+openssl.core	min	3.0	openssl version	core TLS and Python cryptography
+openssl.pq_tls	min	3.5	openssl list -tls-groups 2>/dev/null | grep X25519MLKEM768	required only for native PQ TLS endpoint; Debian 13 base should satisfy
+nginx.version	min	1.26	nginx -v 2>&1	optional native frontend/reverse-proxy lane
+nginx.openssl.pq_tls	min	3.5	nginx -V 2>&1 | grep -o 'OpenSSL[^)]*'	required if nginx serves X25519MLKEM768
+libsodium.version	min	1.0.18	pkg-config --modversion libsodium	runtime dep of PyNaCl
+libsodium.package	required	libsodium-dev	apt-cache policy libsodium-dev	build headers required
+ldap.package	required	libldap2-dev libsasl2-dev	apt-cache policy libldap2-dev	for LDAP/AD auth via bonsai
+ffi.package	required	libffi-dev	apt-cache policy libffi-dev	cffi/cryptography build support
+build.package	required	build-essential pkg-config curl git	command -v gcc; command -v pkg-config	native build support
+age.version	min	1.1	age --version	optional backup CLI local decrypt/test

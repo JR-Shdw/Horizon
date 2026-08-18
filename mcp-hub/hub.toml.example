@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# rhorizon-mcp-hub -- per-host config. Copy to ~/.config/rhorizon-mcp-hub/hub.toml
+#
+# One hub per host. Each agent (Claude Code / Codex / opencode) points at THIS
+# hub over stdio instead of listing every backend. The hub spawns the enabled
+# backends, prefixes their tools by backend name, routes calls, and audits.
+#
+# SECRETS: never inline a token here. `env` should point at 0600 token FILES
+# (RH_TOKEN_FILE, ...), not carry the secret value.
+
+[hub]
+name = "node-6-hub"                                        # shown in the audit log
+audit_log = "~/.local/state/rhorizon-mcp-hub/calls.jsonl"
+
+# ---- daemon mode (OPTIONAL) ----------------------------------------------
+# Run `rhorizon-mcp-hub --daemon` to serve MANY agents over loopback HTTP with
+# per-agent identity + a server-side chained audit. Without --daemon the hub is
+# stdio (single agent), unchanged. Requires the rh-mcp-gateway sidecar running
+# (it does the HTTP/2 + PQ TLS 1.3 leg to the vault); the hub never holds a token.
+bind          = "127.0.0.1"                              # loopback only (guard: RHORIZON_HUB_PUBLIC_BIND_OK=1)
+port          = 9110
+sidecar_socket = "~/.local/run/rhorizon/mcp-gateway.sock"  # rh-mcp-gateway RH_MCP_GATEWAY_SOCK
+emit_server_audit = true                                 # POST every call to the vault /audit/mcp chain
+
+# ---- backends -------------------------------------------------------------
+# Each [backends.<name>] becomes the tool prefix "<name>_". command = the same
+# stdio server you would otherwise put in your agent config directly.
+
+# The vault backend. Two modes:
+#   stdio (default): spawns the standalone rhorizon-mcp-server with ONE fixed token.
+#   sidecar (daemon): the hub calls the vault directly over the rh-mcp-gateway
+#     sidecar with EACH AGENT's own bearer -> per-agent identity in the vault's own
+#     audit. Use mode="sidecar" (no command/token) when running --daemon.
+[backends.rhorizon]
+enabled = true
+# mode = "sidecar"      # <- uncomment for --daemon (per-agent identity); drop command/env below
+command = ["/home/YOU/dev/tools/rhorizon-mcp/server/.venv/bin/rhorizon-mcp-server"]
+[backends.rhorizon.env]
+RH_VAULT_URL        = "https://192.168.10.1:8443"
+RH_VAULT_PQ         = "require"
+RH_TOKEN_FILE       = "/home/YOU/.config/rhorizon/mcp.token"   # per-host scoped token
+RH_MCP_POLICY = "/home/YOU/.config/rhorizon-mcp/policy.toml"
+
+[backends.docker]
+enabled = true
+destructive_requires_confirm = true                     # rm/kill/prune need "_confirm": true
+command = ["/home/YOU/dev/tools/sextant/docker-mcp/.venv/bin/docker-mcp-server"]
+
+[backends.cve-radio]
+enabled = true
+command = ["/home/YOU/dev/cve-radio/mcp/.venv/bin/cve-radio-mcp-server"]
+
+[backends.proxmox]
+enabled = false                                         # not exposed on this host
+command = ["/home/YOU/dev/tools/sextant/proxmox-mcp/.venv/bin/proxmox-mcp-server"]

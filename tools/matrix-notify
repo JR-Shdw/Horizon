@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+"""matrix-notify, send Matrix messages with credentials pulled from rhorizon.
+
+Same dogfood pattern as git-credential-rhorizon: a CLI helper that swaps
+plaintext-on-disk Matrix tokens for an on-demand vault lookup. Stdlib
+only (Python 3.10+); deployable on any host that can reach the vault.
+
+USAGE
+-----
+    # Argv mode
+    matrix-notify "deploy succeeded on node-1"
+
+    # Stdin mode (multi-line, preserved)
+    journalctl -u my-service --since '5 min ago' | matrix-notify --stdin
+
+    # Pipe-friendly with formatted output
+    matrix-notify --format html "<strong>build OK</strong>"
+
+    # Override which room / homeserver / secret names
+    matrix-notify --room '!abc:matrix.example.com' --message "hi"
+    matrix-notify --token-secret matrix-bot-token --room-secret bot-room "..."
+
+For the full adoption walkthrough (vault setup, secret minting, audit
+notes, webhook relay example), see:
+    tools/matrix-notify.examples/README.md
+
+CONFIGURATION
+-------------
+Reads `~/.config/rhorizon/matrix.conf` (key=value, one per line):
+
+    homeserver = https://matrix.example.com
+    token_secret = matrix-claude-token
+    room_secret = matrix-claude-room
+
+Each field can be overridden via CLI flag or environment variable
+(`MATRIX_HOMESERVER`, `MATRIX_TOKEN_SECRET`, `MATRIX_ROOM_SECRET`).
+
+Hard-coded defaults if nothing else is set:
+    homeserver   = https://matrix.org
+    token_secret = matrix-token
+    room_secret  = matrix-room
+
+The vault token + URL come from the same files as git-credential-rhorizon:
+`~/.config/rhorizon/token` (mode 0600) and `~/.config/rhorizon/url`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import secrets
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+# RH_* is the canonical env prefix product-wide; RHORIZON_* stays as a
+# deprecated alias so existing setups keep working.
+CONFIG_DIR = Path(
+    os.environ.get("RH_CONFIG_DIR")
+    or os.environ.get("RHORIZON_CONFIG_DIR")
+    or "~/.config/rhorizon"
+).expanduser()
+TOKEN_PATH = CONFIG_DIR / "token"
+URL_PATH = CONFIG_DIR / "url"
+CONF_PATH = CONFIG_DIR / "matrix.conf"
+
+DEFAULTS = {
+    "homeserver": "https://matrix.org",
+    "token_secret": "matrix-token",
+    "room_secret": "matrix-room",
+}
+
+
+def _die(msg: str, code: int = 2) -> None:
+    print(f"matrix-notify: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def _read_vault_token() -> str:
+    if not TOKEN_PATH.exists():
+        _die(f"no vault token at {TOKEN_PATH} (see tools/matrix-notify.examples/)")
+    if TOKEN_PATH.stat().st_mode & 0o077:
+        _die(f"{TOKEN_PATH} permissions too open; chmod 0600")
+    return TOKEN_PATH.read_text().strip()
+
+
+def _read_vault_url() -> str:
+    if URL_PATH.exists():
+        return URL_PATH.read_text().strip()
+    return (
+        os.environ.get("RH_VAULT_URL")
+        or os.environ.get("RHORIZON_VAULT_URL")
+        or "https://vault.example.com"
+    )
+
+
+def _read_conf() -> dict[str, str]:
+    """Parse matrix.conf, same format as git-map: key=value, # comments."""
+    out = dict(DEFAULTS)
+    if not CONF_PATH.exists():
+        return out
+    for raw in CONF_PATH.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def _vault_get(vault_url: str, vault_token: str, secret_name: str) -> str:
+    # Accept `namespace/name` to disambiguate same-name secrets across
+    # namespaces, the API returns 409 ambiguous otherwise. Same
+    # convention as git-credential-rhorizon and rh-fetch/rh-watch.
+    if "/" in secret_name:
+        namespace, _, name = secret_name.partition("/")
+        qs = f"?namespace={urllib.parse.quote(namespace)}"
+    else:
+        name = secret_name
+        qs = ""
+    url = f"{vault_url.rstrip('/')}/api/v1/vault/secrets/{name}{qs}"
+    req = urllib.request.Request(
+        url, headers={"Authorization": f"Bearer {vault_token}"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.load(resp)["value"]
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        _die(f"vault returned {e.code} for {secret_name}: {body}", 3)
+    except urllib.error.URLError as e:
+        _die(f"vault unreachable at {url}: {e}", 3)
+    return ""  # unreachable; satisfies type checker
+
+
+def _matrix_send(
+    homeserver: str,
+    matrix_token: str,
+    room_id: str,
+    body: str,
+    format_html: bool,
+) -> str:
+    """PUT /_matrix/client/v3/rooms/{room}/send/m.room.message/{txnId}.
+
+    Returns the event_id from the response on success.
+    """
+    txn = f"matrix-notify-{secrets.token_urlsafe(12)}"
+    safe_room = urllib.parse.quote(room_id, safe="")
+    url = (
+        f"{homeserver.rstrip('/')}/_matrix/client/v3/rooms/"
+        f"{safe_room}/send/m.room.message/{txn}"
+    )
+
+    payload: dict[str, str] = {"msgtype": "m.text", "body": body}
+    if format_html:
+        payload["format"] = "org.matrix.custom.html"
+        payload["formatted_body"] = body
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {matrix_token}",
+            "Content-Type": "application/json",
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.load(resp).get("event_id", "")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        _die(f"matrix returned {e.code}: {body}", 4)
+    except urllib.error.URLError as e:
+        _die(f"matrix unreachable at {url}: {e}", 4)
+    return ""  # unreachable
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="matrix-notify",
+        description="Post Matrix messages with credentials from rhorizon.",
+    )
+    p.add_argument(
+        "message",
+        nargs="?",
+        help="Message body. Omit to read from stdin or pass --stdin.",
+    )
+    p.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read message body from stdin instead of argv.",
+    )
+    p.add_argument(
+        "--format",
+        choices=("plain", "html"),
+        default="plain",
+        help="plain = m.text. html = adds formatted_body for rendering clients.",
+    )
+    p.add_argument(
+        "--room",
+        help="Override the resolved room ID (skips room_secret lookup).",
+    )
+    p.add_argument(
+        "--token",
+        help=(
+            "Override the resolved Matrix token (skips token_secret lookup). "
+            "Only useful for one-off testing, defeats the dogfood pattern."
+        ),
+    )
+    p.add_argument("--homeserver", help="Override homeserver URL.")
+    p.add_argument(
+        "--token-secret", help="rhorizon secret name holding the Matrix access token."
+    )
+    p.add_argument(
+        "--room-secret", help="rhorizon secret name holding the target room ID."
+    )
+    p.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Don't print the event_id on success.",
+    )
+    return p
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+
+    if args.stdin or (args.message is None and not sys.stdin.isatty()):
+        body = sys.stdin.read().rstrip("\n")
+    elif args.message is not None:
+        body = args.message
+    else:
+        _die("no message, pass it as an argument or via --stdin", 1)
+    if not body:
+        _die("empty message body", 1)
+
+    conf = _read_conf()
+    homeserver = (
+        args.homeserver or os.environ.get("MATRIX_HOMESERVER") or conf["homeserver"]
+    )
+
+    # Resolve credentials. Either explicit --token / --room (test path) or
+    # the standard vault lookup using the bootstrap token.
+    if args.token and args.room:
+        matrix_token = args.token
+        room_id = args.room
+    else:
+        vault_url = _read_vault_url()
+        vault_token = _read_vault_token()
+        token_secret = (
+            args.token_secret
+            or os.environ.get("MATRIX_TOKEN_SECRET")
+            or conf["token_secret"]
+        )
+        room_secret = (
+            args.room_secret
+            or os.environ.get("MATRIX_ROOM_SECRET")
+            or conf["room_secret"]
+        )
+        matrix_token = args.token or _vault_get(vault_url, vault_token, token_secret)
+        room_id = args.room or _vault_get(vault_url, vault_token, room_secret)
+
+    event_id = _matrix_send(
+        homeserver, matrix_token, room_id, body, args.format == "html"
+    )
+    if not args.quiet:
+        print(event_id)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

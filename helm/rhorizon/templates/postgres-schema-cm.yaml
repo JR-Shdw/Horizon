@@ -1,0 +1,12 @@
+{{- if not .Values.postgres.external.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-schema" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+data:
+  schema.sql: |-
+    {{- .Files.Get "schema.sql" | nindent 4 }}
+{{- end -}}

@@ -1,0 +1,12 @@
+# CI tooling (lint/SAST/tests). Loose pins -> ci-requirements.txt hash-locked
+# via pip-compile --generate-hashes.
+ruff==0.14.5
+bandit==1.8.6
+pip-audit==2.9.0
+detect-secrets==1.5.0
+maturin==1.9.6
+# transitive CVE floors: idna<3.15 -> CVE-2026-45409 ; urllib3<2.7.0 -> PYSEC-2026-141/142 ;
+# msgpack<1.2.1 -> GHSA-6v7p-g79w-8964 (pulled in transitively via cachecontrol)
+idna>=3.15
+urllib3>=2.7.0
+msgpack>=1.2.1

@@ -1,0 +1,39 @@
+rhorizon is being installed in namespace {{ .Release.Namespace }}.
+
+  Release : {{ .Release.Name }}
+  Chart   : {{ include "rhorizon.chart" . }}
+  AppVer  : {{ .Chart.AppVersion }}
+
+After the API pod becomes Ready :
+
+1. Forward the frontend (or expose via Ingress with .Values.ingress.enabled) :
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rhorizon.fullname" . }}-frontend 8200:{{ .Values.service.frontend.port }}
+
+   Then open http://127.0.0.1:8200/
+
+2. The vault is sealed by design. Perform the FIRST unseal, this also
+   sets the master password and emits a one-shot root token :
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rhorizon.fullname" . }}-api 8200:{{ .Values.service.api.port }}
+     curl -X POST http://127.0.0.1:8200/api/v1/vault/unseal \
+       -H 'Content-Type: application/json' \
+       -d '{"password": "<choose a strong passphrase>"}'
+
+   Save the `root_token` from the response immediately, it is shown once.
+
+3. Production hardening checklist :
+   - Replace the auto-generated POSTGRES_PASSWORD with a managed one
+     (helm install --set postgres.external.enabled=true …)
+   - Enable Ingress + TLS termination via cert-manager
+   - Tighten .Values.networkPolicy.ingressFrontendCidrs to your VPN/ops range
+   - Increase .Values.api.replicas + set .Values.api.clusterEnabled=true
+     once your cluster is set up for hostname-stable RPC
+   - Configure 2FA in the Core view of the UI before you store anything sensitive
+
+DB connection (in-chart PG) :
+
+  Host     : {{ include "rhorizon.postgres.host" . }}
+  Database : {{ include "rhorizon.postgres.database" . }}
+  Username : {{ include "rhorizon.postgres.username" . }}
+  Secret   : {{ include "rhorizon.postgres.secretName" . }}

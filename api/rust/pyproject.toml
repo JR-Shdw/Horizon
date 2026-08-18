@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rhorizon_crypto"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.maturin]
+# THIS crate's feature, not `pyo3/extension-module`. The two are not
+# interchangeable: only the local spelling sets CARGO_FEATURE_EXTENSION_MODULE,
+# which is what `build.rs` reads to decide it must not link libpython into the
+# wheel. `extension-module = ["pyo3/extension-module"]` forwards it, so pyo3
+# ends up with the same feature either way.
+features = ["extension-module"]

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+services:
+  postgres-test:
+    image: docker.io/library/postgres:18-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
+    environment:
+      POSTGRES_DB: rhorizon_test
+      POSTGRES_USER: rhorizon_test
+      POSTGRES_PASSWORD: rhorizon_test
+    ports:
+      # Host port configurable to avoid collisions (5434 clashes with forgejo's
+      # PG on some dev hosts). Override with RH_TEST_PG_PORT.
+      - "127.0.0.1:${RH_TEST_PG_PORT:-55434}:5432"
+    tmpfs:
+      - /var/lib/postgresql

@@ -1,0 +1,3 @@
+# Apache Cassandra dynamic-engine driver.
+-c ../../../requirements.txt
+cassandra-driver==3.30.1

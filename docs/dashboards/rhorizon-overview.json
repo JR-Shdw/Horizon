@@ -1,0 +1,140 @@
+{
+  "uid": "rhorizon-overview",
+  "title": "rhorizon, overview",
+  "tags": ["rhorizon"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Vault state",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_vault_sealed)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [
+        {"type": "value", "options": {"0": {"text": "UNSEALED", "color": "green"}, "1": {"text": "SEALED", "color": "red"}}}
+      ], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Active tokens",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_active_tokens)", "refId": "A"}]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Audit chain length",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_audit_chain_length)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}}},
+      "options": {"colorMode": "value", "graphMode": "area"}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Audit chain breaks",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rhorizon_audit_chain_breaks_total)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Honey access",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rhorizon_honey_access_total) or vector(0)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 6, "type": "stat", "title": "Locked IPs",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_locked_ips)", "refId": "A"}]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Secrets read / write (ops/s)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum(rate(rhorizon_secrets_read_total[5m]))", "legendFormat": "read", "refId": "A"},
+        {"expr": "sum(rate(rhorizon_secrets_write_total[5m]))", "legendFormat": "write", "refId": "B"}
+      ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Auth failures by reason (/s)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum by (reason) (rate(rhorizon_auth_failures_total[5m]))", "legendFormat": "{{reason}}", "refId": "A"}]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Token lifecycle (/s)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum(rate(rhorizon_tokens_created_total[5m]))", "legendFormat": "created", "refId": "A"},
+        {"expr": "sum(rate(rhorizon_tokens_revoked_total[5m]))", "legendFormat": "revoked", "refId": "B"},
+        {"expr": "sum(rate(rhorizon_tokens_rotated_total[5m]))", "legendFormat": "rotated", "refId": "C"}
+      ]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Requests in-flight / shed (/s)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "max(rhorizon_requests_inflight)", "legendFormat": "inflight", "refId": "A"},
+        {"expr": "sum by (reason) (rate(rhorizon_requests_shed_total[5m]))", "legendFormat": "shed {{reason}}/s", "refId": "B"}
+      ]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "DEK key age (s)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "max(rhorizon_dek_key_age_seconds)", "legendFormat": "age", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Cluster: transitions & uuid/ip conflicts",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "sum by (to_state) (rate(rhorizon_cluster_state_transitions_total[5m]))", "legendFormat": "{{to_state}}", "refId": "A"},
+        {"expr": "sum(rhorizon_cluster_uuid_ip_conflicts_total)", "legendFormat": "uuid/ip conflicts", "refId": "B"}
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "API vs HTTPS requests (/s)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(rhorizon_http_requests_total{transport=\"http\"}[5m]))",
+          "legendFormat": "api (http)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(rhorizon_http_requests_total{transport=\"https\"}[5m]))",
+          "legendFormat": "https (via nginx)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
+    }
+  ]
+}

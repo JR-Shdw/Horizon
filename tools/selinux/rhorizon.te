@@ -1,0 +1,140 @@
+policy_module(rhorizon, 0.2.2)
+
+########################################
+#
+# rhorizon -- confined SELinux domain for the native (non-Docker) vault service
+# on RHEL/Rocky/Fedora.
+#
+# Entry chain: systemd starts a #!/bin/sh wrapper (rhorizon_exec_t) which execs
+# the venv python (a symlink onto the system interpreter, bin_t) running uvicorn.
+# The service mlockall()s the wrap key + the transient 256MB Argon2id unseal
+# buffer out of swap (CAP_IPC_LOCK), connects to PostgreSQL over TCP 5432, and
+# listens on the vault API port (default 8200 -> rhorizon_port_t, set by the
+# installer). The venv ships native extensions (Rust/Cython .so) that the domain
+# must map+execute.
+#
+# Built + loaded by tools/drivers/linux.sh at install time (system mode, when
+# SELinux is enabled). File/port contexts are applied there via semanage
+# (WORK_DIR + API port are operator-chosen); this module declares types +
+# type-enforcement only.
+#
+# Rule set derived from a full permissive-domain audit2allow harvest on Rocky
+# 10.2 (kernel 6.12, python 3.12). No W^X: the crypto path never needs execmem/
+# execstack/execheap/mmap_zero -- those are deliberately NOT granted.
+#
+########################################
+
+gen_require(`
+    type bin_t;
+    type shell_exec_t;
+    type ldconfig_exec_t;
+    type cert_t;
+    type proc_t;
+    type cgroup_t;
+')
+
+########################################
+# Type declarations
+
+type rhorizon_t;
+type rhorizon_exec_t;
+init_daemon_domain(rhorizon_t, rhorizon_exec_t)
+
+# app bundle: venv (native .so + stdlib) + api/ code -- read + execute, no write
+type rhorizon_var_lib_t;
+files_type(rhorizon_var_lib_t)
+
+# writable audit trail (WORK_DIR/audit) -- append, no execute
+type rhorizon_log_t;
+logging_log_file(rhorizon_log_t)
+
+# runtime pid / unix sockets (WORK_DIR/run)
+type rhorizon_var_run_t;
+files_pid_file(rhorizon_var_run_t)
+
+# persistent writable state (STATE_DIR: node-uuid + cluster mTLS certs). Distinct
+# from the read-only code label rhorizon_var_lib_t -- the service must WRITE here
+# (atomic .tmp + rename), and it must survive reboot (so not the /run label).
+type rhorizon_var_lib_state_t;
+files_type(rhorizon_var_lib_state_t)
+
+# rhorizon.env -- DB creds + tuning
+type rhorizon_conf_t;
+files_config_file(rhorizon_conf_t)
+
+# vault API listen port (installer: semanage port -a -t rhorizon_port_t)
+type rhorizon_port_t;
+corenet_port(rhorizon_port_t)
+
+########################################
+# Process: lock key material out of swap (ipc_lock) + size the memlock ceiling
+# (sys_resource). NO exec* memory -- the secure allocator uses PROT_NONE guard
+# pages, never W+X.
+
+allow rhorizon_t self:capability { ipc_lock sys_resource };
+allow rhorizon_t self:process { setrlimit setsched getsched };
+
+# uvicorn worker + asyncio plumbing
+allow rhorizon_t self:fifo_file rw_fifo_file_perms;
+allow rhorizon_t self:unix_stream_socket create_stream_socket_perms;
+allow rhorizon_t self:unix_dgram_socket create_socket_perms;
+allow rhorizon_t self:tcp_socket create_stream_socket_perms;
+
+########################################
+# Entry chain: sh wrapper -> bash (shell_exec_t) -> python (bin_t); the venv
+# bootstrap shells out to ldconfig.
+
+corecmd_exec_shell(rhorizon_t)
+corecmd_exec_bin(rhorizon_t)
+libs_exec_ldconfig(rhorizon_t)
+
+########################################
+# App bundle: read + execute the native extensions, mmap them. Read-only:
+# the domain must not write its own code (bytecode cache is disabled in the
+# unit env via PYTHONDONTWRITEBYTECODE).
+
+allow rhorizon_t rhorizon_var_lib_t:dir list_dir_perms;
+allow rhorizon_t rhorizon_var_lib_t:file { read getattr open ioctl execute execute_no_trans map };
+allow rhorizon_t rhorizon_var_lib_t:lnk_file read_lnk_file_perms;
+
+# writable audit trail
+manage_dirs_pattern(rhorizon_t, rhorizon_log_t, rhorizon_log_t)
+manage_files_pattern(rhorizon_t, rhorizon_log_t, rhorizon_log_t)
+allow rhorizon_t rhorizon_log_t:file append_file_perms;
+
+# runtime dir (pid + unix sockets)
+manage_dirs_pattern(rhorizon_t, rhorizon_var_run_t, rhorizon_var_run_t)
+manage_files_pattern(rhorizon_t, rhorizon_var_run_t, rhorizon_var_run_t)
+manage_sock_files_pattern(rhorizon_t, rhorizon_var_run_t, rhorizon_var_run_t)
+files_pid_filetrans(rhorizon_t, rhorizon_var_run_t, { file dir sock_file })
+
+# persistent writable state (node-uuid, cluster certs) -- atomic .tmp + rename
+manage_dirs_pattern(rhorizon_t, rhorizon_var_lib_state_t, rhorizon_var_lib_state_t)
+manage_files_pattern(rhorizon_t, rhorizon_var_lib_state_t, rhorizon_var_lib_state_t)
+
+# env file at a standard config path (/etc/rhorizon): read the file AND search
+# its now-separate config directory (+ its /etc parent) to reach it. The dir
+# search was implicit when config lived inside the rhorizon_var_lib_t workdir;
+# moving to the standard /etc path makes rhorizon_conf_t its own directory.
+allow rhorizon_t rhorizon_conf_t:file read_file_perms;
+allow rhorizon_t rhorizon_conf_t:dir search_dir_perms;
+files_search_etc(rhorizon_t)
+
+########################################
+# System integration
+
+miscfiles_read_generic_certs(rhorizon_t)   # cert_t -- TLS trust store
+auth_read_passwd(rhorizon_t)               # getpwuid() at startup
+kernel_read_system_state(rhorizon_t)       # proc_t
+files_read_var_lib_files(rhorizon_t)       # shared var_lib state
+
+# mem_hardening.check_memlock_headroom() reads the cgroup memory limit
+allow rhorizon_t cgroup_t:dir search_dir_perms;
+allow rhorizon_t cgroup_t:file read_file_perms;
+
+########################################
+# Network: connect out to PostgreSQL (5432), listen on the vault API port.
+
+corenet_tcp_connect_postgresql_port(rhorizon_t)
+corenet_tcp_bind_generic_node(rhorizon_t)
+allow rhorizon_t rhorizon_port_t:tcp_socket name_bind;

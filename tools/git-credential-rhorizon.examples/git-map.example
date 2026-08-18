@@ -1,0 +1,30 @@
+# git-credential-rhorizon, host → secret-name mapping
+#
+# Each line maps a Git server hostname to the rhorizon secret holding the
+# matching credential (a Gitea / GitHub / GitLab API token, an HTTPS push
+# password, etc.). The secret name is resolved against the namespaces the
+# vault token is scoped to, there is no `namespace=` query parameter on
+# the GET, so the token's `namespaces` claim is what makes the lookup
+# unambiguous.
+#
+# Format
+# ------
+#   <git-host> = <secret-name>
+#
+# Lines starting with `#` and blank lines are ignored. Whitespace around
+# `=` is stripped.
+#
+# Default
+# -------
+# If a host is not listed here, the helper looks up
+#   git/<host-with-dots-as-dashes>-api-token
+# So `gitea.example.com` resolves to `git/gitea-example-com-api-token`
+# unless overridden below. Useful for fleets of repos sharing one
+# convention; explicit overrides take priority.
+#
+# Examples
+# --------
+gitea.example.com   = gitea-api-token
+github.com          = github-personal-access-token
+gitlab.example.org  = gitlab-deploy-token
+codeberg.org        = codeberg-token

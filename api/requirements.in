@@ -1,0 +1,28 @@
+fastapi==0.136.3
+# NOT uvicorn[standard]: that extra pulls watchfiles, websockets, pyyaml and
+# python-dotenv, none of which this vault imports or serves. watchfiles exists
+# for --reload and must never run in production; rhorizon has no WebSocket
+# endpoints (/audit/stream is SSE); pyyaml carries a deserialisation-CVE
+# history no vault image should hold for nothing.
+#
+# httptools and uvloop ARE load-bearing -- run-api.sh and
+# run-python-custodians.sh pass `--http httptools --loop uvloop` explicitly --
+# so they are named here instead of arriving implicitly through an extra.
+uvicorn==0.49.0
+httptools==0.8.0
+uvloop==0.22.1
+sqlalchemy[asyncio]==2.0.40
+asyncpg==0.30.0
+pydantic-settings==2.9.1
+pynacl==1.6.2
+cryptography==50.0.0
+pyrage==1.3.0
+pyotp==2.9.0
+bonsai==1.5.3
+httpx==0.28.1
+fido2==2.2.1
+prometheus_client==0.25.0
+# transitive CVE floor: idna<3.15 -> CVE-2026-45409
+idna>=3.15
+# transitive CVE floor: starlette<1.0.1 -> PYSEC-2026-161 (+CVE-2025-54121/62727), fastapi has no ceiling
+starlette>=1.0.1

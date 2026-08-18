@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+---
+# Resurgamus Horizon K8s namespace + RBAC
+# Le token vault est le seul secret K8s, scope minimal
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rhorizon
+  labels:
+    app.kubernetes.io/part-of: rhorizon
+---
+# ServiceAccount pour les init containers rh-fetch/rh-inject
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhorizon-agent
+  namespace: rhorizon
+automountServiceAccountToken: false
+---
+# Role : lecture seule sur les secrets rhorizon du namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhorizon-secret-reader
+  namespace: rhorizon
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["rhorizon-token"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhorizon-agent-binding
+  namespace: rhorizon
+subjects:
+  - kind: ServiceAccount
+    name: rhorizon-agent
+    namespace: rhorizon
+roleRef:
+  kind: Role
+  name: rhorizon-secret-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# Secret contenant le token vault (seul secret "faible" dans K8s)
+# Remplacer par le vrai token : kubectl create secret generic ...
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rhorizon-token
+  namespace: rhorizon
+type: Opaque
+stringData:
+  token: "rh_REPLACE_ME"
+  addr: "https://vault.internal:8200"

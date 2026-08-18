@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+---
+# CronJob avec secrets ephemeres depuis rhorizon
+#
+# Use case : batch/script periodique qui a besoin d'un secret
+# (backup, sync, rotation, rapport)
+#
+# Secrets requis dans rhorizon :
+#   - backup/restic-password
+#   - backup/s3-credentials
+#
+# kubectl apply -f namespace.yml
+# kubectl apply -f examples/cronjob.yml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-job
+  namespace: rhorizon
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          serviceAccountName: rhorizon-agent
+          restartPolicy: OnFailure
+          volumes:
+            - name: secrets
+              emptyDir:
+                medium: Memory
+                sizeLimit: 1Mi
+
+          initContainers:
+            - name: fetch-secrets
+              image: git.example.com/shdw/rhorizon-agent:latest
+              env:
+                - name: RH_ADDR
+                  valueFrom:
+                    secretKeyRef:
+                      name: rhorizon-token
+                      key: addr
+                - name: RH_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: rhorizon-token
+                      key: token
+                - name: RH_SECRETS
+                  value: >-
+                    backup/restic-password:/secrets/restic_pw,
+                    backup/s3-credentials:/secrets/s3_creds
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+              resources:
+                limits:
+                  memory: 32Mi
+                  cpu: 100m
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+
+          containers:
+            - name: backup
+              image: restic/restic:latest
+              command:
+                - sh
+                - -c
+                - |
+                  export RESTIC_PASSWORD_FILE=/secrets/restic_pw
+                  export AWS_SHARED_CREDENTIALS_FILE=/secrets/s3_creds
+                  restic backup /data --verbose
+                  restic forget --keep-daily 7 --keep-weekly 4 --prune
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+              resources:
+                limits:
+                  memory: 512Mi
+                  cpu: 1000m
+              securityContext:
+                runAsNonRoot: true
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]

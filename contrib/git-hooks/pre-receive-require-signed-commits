@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Server-side hook template for Gitea/Forgejo bare repositories.
+#
+# Install this as the repository pre-receive hook and set:
+#   RHORIZON_ALLOWED_SIGNERS=/absolute/path/to/rhorizon/.gitsigners
+#
+# CI gating is useful, but this hook is the hard stop for direct pushes.
+set -euo pipefail
+
+: "${RHORIZON_ALLOWED_SIGNERS:?set RHORIZON_ALLOWED_SIGNERS to the tracked .gitsigners file}"
+
+PROTECTED_REF_REGEX="${RHORIZON_SIGNED_REF_REGEX:-^refs/heads/(main|release/.+)$}"
+ZERO_RE='^0{40,64}$'
+FAILED=0
+
+verify_range() {
+  local range="$1"
+  local ref_name="$2"
+  local commit summary
+
+  while IFS= read -r commit; do
+    [ -n "$commit" ] || continue
+    summary="$(git log -1 --format='%h %an <%ae> %s' "$commit")"
+    if git -c "gpg.ssh.allowedSignersFile=$RHORIZON_ALLOWED_SIGNERS" verify-commit --raw "$commit" >/dev/null 2>&1; then
+      echo "[OK] signed on $ref_name: $summary" >&2
+    else
+      echo "[FAIL] unsigned or untrusted commit on $ref_name: $summary" >&2
+      FAILED=1
+    fi
+  done < <(git rev-list --reverse "$range")
+}
+
+while read -r old_rev new_rev ref_name; do
+  [[ "$ref_name" =~ $PROTECTED_REF_REGEX ]] || continue
+  [[ "$new_rev" =~ $ZERO_RE ]] && continue
+
+  if [[ "$old_rev" =~ $ZERO_RE ]]; then
+    verify_range "$new_rev" "$ref_name"
+  else
+    verify_range "$old_rev..$new_rev" "$ref_name"
+  fi
+done
+
+exit "$FAILED"

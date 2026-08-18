@@ -1,0 +1,12 @@
+key	relation	value	check	notes
+arch.x86_64	tested	yes	uname -m	full-suite VM lane
+arch.aarch64	supported	no	uname -m	not a current validation target
+cpu.bits	required	64	getconf LONG_BIT	32-bit unsupported
+cpu.endian	required	little	/opt/rhorizon-python/bin/python3.12 -c 'import sys; print(sys.byteorder)'	tested lane is amd64
+ram.workers1.min_mb	min	2048	sysctl -n hw.physmem	API+PG native practical floor
+ram.workers1.recommended_mb	min	4096	sysctl -n hw.physmem	source-built Python and full suite
+memlock.workers1.required_mb	exact	608	echo $((1*160+256+192))	rc.d wrapper ulimit floor
+disk.min_gb	min	12	df -g .	OpenBSD Python/Rust builds need space outside small /tmp
+disk.recommended_gb	min	24	df -g /usr/local	full tests and source builds
+entropy.required	required	yes	test -r /dev/urandom	master keys and tokens
+network.loopback.required	required	yes	ftp -o - http://127.0.0.1:8200/health after start	local API validation

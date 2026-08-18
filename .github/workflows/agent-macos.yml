@@ -1,0 +1,97 @@
+# Build the rhorizon agent binaries (rh-fetch / rh-inject / rh-watch /
+# rh-mcp-gateway / rh-podman) NATIVELY on macOS.
+#
+# Why this lives on GitHub Actions and not in the Woodpecker CI:
+#   - The internal Woodpecker CI has no macOS runner (no Mac in the lab).
+#   - GitHub-hosted macOS runners are the only free way to get a native
+#     darwin toolchain (Xcode + aws-lc), which the PQ-TLS agent needs.
+#   - GitHub macOS runners cannot run Docker, so this is deliberately a
+#     plain `cargo build`, NOT a container build.
+#
+# Cost: standard GitHub-hosted runners are FREE and unmetered on PUBLIC
+# repositories (all OSes, including macOS). On a PRIVATE repo, macOS minutes
+# bill at a 10x multiplier against the monthly free allowance -- so prefer
+# running this once the repo is public.
+#
+# Both arches are built on their NATIVE runner (no cross-compilation) so the
+# aws-lc assembly and bindgen step resolve against a matching host SDK:
+#   aarch64-apple-darwin  -> macos-latest (Apple Silicon)
+#   x86_64-apple-darwin   -> macos-13     (Intel)
+
+name: agent-macos
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - 'agent/rust/**'
+      - '.github/workflows/agent-macos.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, pinned target)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            agent/rust/target
+          key: cargo-${{ matrix.target }}-${{ hashFiles('agent/rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.target }}-
+
+      - name: Build agent binaries
+        working-directory: agent/rust
+        env:
+          # Reproducible-ish: strip the absolute build path out of the binary.
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=."
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Collect + strip artifacts
+        working-directory: agent/rust
+        run: |
+          out="dist/${{ matrix.target }}"
+          mkdir -p "$out"
+          for b in rh-fetch rh-inject rh-watch rh-mcp-gateway rh-podman; do
+            src="target/${{ matrix.target }}/release/$b"
+            if [ -x "$src" ]; then
+              strip -x "$src"
+              cp "$src" "$out/$b"
+              # Sanity: confirm the Mach-O arch matches the requested target.
+              file "$out/$b"
+            fi
+          done
+          shasum -a 256 "$out"/* | tee "$out/SHA256SUMS"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhorizon-agent-${{ matrix.target }}
+          path: agent/rust/dist/${{ matrix.target }}/
+          if-no-files-found: error

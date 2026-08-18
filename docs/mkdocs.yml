@@ -1,0 +1,111 @@
+site_name: rhorizon
+site_url: https://resurgamus.com/horizon/
+site_description: Self-hosted, AGPL secrets vault with scoped access and audit
+site_author: shdw
+repo_url: https://github.com/JR-Shdw/Horizon
+repo_name: JR-Shdw/Horizon
+edit_uri: edit/main/docs/docs/
+copyright: Copyright &copy; 2024-2026 shdw, AGPL-3.0-or-later
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - navigation.indexes
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  icon:
+    repo: simple/gitea
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - tables
+  - attr_list
+  - md_in_html
+  - footnotes
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: simple/gitea
+      link: https://github.com/JR-Shdw/Horizon
+    - icon: fontawesome/solid/envelope
+      link: mailto:horizon@resurgamus.com
+
+nav:
+  - Home: index.md
+  - Quickstart:
+      - quickstart/index.md
+      - Single host (docker): quickstart/docker.md
+      - Kubernetes (Helm): quickstart/kubernetes.md
+      - From source: quickstart/source.md
+  - Concepts:
+      - concepts/index.md
+      - Architecture: concepts/architecture.md
+      - Key custody and worker pools: concepts/key-custody.md
+      - Seal / Unseal lifecycle: concepts/seal-unseal.md
+      - Cryptography (5 layers): concepts/crypto.md
+      - RBAC & namespaces: concepts/rbac.md
+      - Memory protection: concepts/memory-protection.md
+      - Audit chain: concepts/audit.md
+  - How-to:
+      - howto/index.md
+      - Agents (rh-fetch / rh-inject / rh-watch): howto/agents.md
+      - MCP (LLM access): howto/mcp.md
+      - Kubernetes sidecar pattern: howto/kubernetes-sidecar.md
+      - LDAP & SSO proxy auth: howto/ldap-sso.md
+      - 2FA setup: howto/2fa.md
+      - Native TLS (HTTPS): howto/tls.md
+      - High availability: howto/high-availability.md
+      - Backup & restore: howto/backup-restore.md
+      - Capacity planning & benchmarking: howto/capacity-planning.md
+      - Observability & alerts: howto/observability-alerts.md
+  - Reference:
+      - reference/index.md
+      - REST API: reference/api.md
+      - Environment variables: reference/env-vars.md
+      - Permissions & scopes: reference/permissions.md
+      - Supply chain & SLSA: reference/supply-chain.md
+  - Security: security.md

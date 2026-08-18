@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+#
+# Provision qemu + cloud-utils on a host so it can run
+# tools/test-vm-bsd.sh. Targets ArchLinux + Debian/Ubuntu.
+#
+# Usage:
+#   ansible-playbook -i inventory ansible/qemu.yml
+#
+# Run with --check first to preview changes.
+---
+- name: Provision qemu for BSD VM tests
+  hosts: bsd_test_runners
+  become: true
+  vars:
+    qemu_packages_arch:
+      - qemu-base
+      - cloud-utils
+      - cdrtools      # genisoimage / mkisofs fallback if cloud-localds absent
+      - signify       # verify OpenBSD SHA256.sig against the trusted base
+                      #   public key (used by tools/openbsd-bootstrap.sh)
+    qemu_packages_debian:
+      - qemu-system-x86
+      - qemu-utils
+      - cloud-image-utils
+      - genisoimage
+      - signify-openbsd # signify package on Debian uses the -openbsd suffix
+
+  tasks:
+    - name: Install qemu (Arch)
+      community.general.pacman:
+        name: "{{ qemu_packages_arch }}"
+        state: present
+      when: ansible_facts['os_family'] == 'Archlinux'
+
+    - name: Install qemu (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "{{ qemu_packages_debian }}"
+        state: present
+        update_cache: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Ensure /dev/kvm is accessible to the test runner user
+      ansible.builtin.user:
+        name: "{{ rhorizon_test_user | default(ansible_user_id) }}"
+        groups: kvm
+        append: true
+      when: ansible_facts['os_family'] in ['Archlinux', 'Debian']
+
+    - name: Create rhorizon-vms cache directory
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.cache/rhorizon-vms"
+        state: directory
+        mode: "0755"
+      become: false
+
+    - name: Show next steps
+      ansible.builtin.debug:
+        msg: |
+          qemu provisioned. Re-login (or `newgrp kvm`) to pick up the
+          group membership, then run :
+            cd ~/dev/tools/rhorizon
+            tools/test-vm-bsd.sh freebsd
+            tools/test-vm-bsd.sh openbsd

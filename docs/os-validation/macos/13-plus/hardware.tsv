@@ -1,0 +1,12 @@
+key	relation	value	check	notes
+arch.arm64	target	yes	uname -m	Apple Silicon community target
+arch.x86_64	supported	yes	uname -m	Intel Mac possible but not the main wedge
+cpu.bits	required	64	getconf LONG_BIT	32-bit unsupported
+cpu.endian	required	little	python3.12 -c 'import sys; print(sys.byteorder)'	Apple Silicon and Intel Mac are little-endian
+ram.workers1.min_mb	min	2048	sysctl -n hw.memsize	API+PG native practical floor
+ram.workers1.recommended_mb	min	8192	sysctl -n hw.memsize	local AI workstation target; enough for tests/builds
+memlock.workers1.required_mb	exact	608	echo $((1*160+256+192))	mlock only; no macOS mlockall
+disk.min_gb	min	12	df -g .	Homebrew + source builds + PG data
+disk.recommended_gb	min	24	df -g .	full tests and wheel builds
+entropy.required	required	yes	test -r /dev/urandom	master keys and tokens
+network.loopback.required	required	yes	curl -fsS http://127.0.0.1:8200/health after start	local API/MCP validation

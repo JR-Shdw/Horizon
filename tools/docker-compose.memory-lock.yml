@@ -1,0 +1,12 @@
+# Optional hardening override. The default Compose files remain runnable by
+# rootless/non-privileged users and use best-effort memory locking.
+services:
+  api:
+    cap_add:
+      - IPC_LOCK
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    environment:
+      RH_MEMORY_LOCK_MODE: required

@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ printf "%s-api" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "rhorizon.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "rhorizon.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ include "rhorizon.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.api.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ include "rhorizon.image.api" . }}
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          ports:
+            - containerPort: 8200
+              name: http
+          env:
+            # POSTGRES_PASSWORD MUST precede RH_DATABASE_URL: k8s only
+            # expands $(VAR) for vars defined earlier in the list, else the
+            # literal "$(POSTGRES_PASSWORD)" is sent as the DB password.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rhorizon.postgres.secretName" . }}
+                  key: postgres-password
+            - name: RH_DATABASE_URL
+              value: "postgresql+asyncpg://{{ include "rhorizon.postgres.username" . }}:$(POSTGRES_PASSWORD)@{{ include "rhorizon.postgres.host" . }}:{{ include "rhorizon.postgres.port" . }}/{{ include "rhorizon.postgres.database" . }}"
+            # disable|require|verify-full. In-chart PG runs without TLS; an
+            # external (Patroni/managed) PG typically requires it.
+            - name: RH_DATABASE_SSL
+              value: {{ if .Values.postgres.external.enabled }}{{ .Values.postgres.external.sslMode | default "require" | quote }}{{ else }}"disable"{{ end }}
+            - name: RH_WORKERS
+              value: {{ .Values.api.workers | quote }}
+            - name: RH_CUSTODY_MODE
+              value: {{ .Values.api.custodyMode | quote }}
+            - name: RH_CUSTODIAN_WORKERS
+              value: {{ .Values.api.custodianWorkers | quote }}
+            - name: RH_MEMORY_LOCK_MODE
+              value: {{ .Values.api.memoryLockMode | quote }}
+            - name: RH_SWAP_PROTECTION
+              value: {{ .Values.api.swapProtection | quote }}
+            - name: RH_PROXY_AUTH_ENABLED
+              value: {{ .Values.api.proxyAuthEnabled | quote }}
+            - name: RH_PROXY_TRUSTED_IPS
+              value: {{ .Values.api.proxyTrustedIps | quote }}
+            - name: RH_DYNAMIC_MODULES_FILE
+              value: /app/dynamic-engines.ini
+          livenessProbe:
+            {{- toYaml .Values.api.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.api.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          {{- $apiSecurityContext := deepCopy .Values.api.containerSecurityContext }}
+          {{- if not .Values.api.requestIpcLockCapability }}
+          {{- $_ := unset $apiSecurityContext.capabilities "add" }}
+          {{- end }}
+          securityContext:
+            {{- toYaml $apiSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: shm
+              mountPath: /dev/shm
+            - name: rhorizon-runtime
+              mountPath: /run/rhorizon
+            - name: audit-logs
+              mountPath: /var/log/rhorizon
+            - name: rhorizon-data
+              mountPath: /var/lib/rhorizon
+            - name: dynamic-engines
+              mountPath: /app/dynamic-engines.ini
+              subPath: dynamic-engines.ini
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: rhorizon-runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: audit-logs
+          emptyDir:
+            sizeLimit: 100Mi
+        # node-uuid + cluster cert/key live here; readOnlyRootFilesystem makes
+        # the image path unwritable otherwise. emptyDir -> identity regenerates
+        # on restart; use a PVC for a stable cluster identity across restarts.
+        - name: rhorizon-data
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: dynamic-engines
+          configMap:
+            name: {{ printf "%s-dynamic-engines" (include "rhorizon.fullname" .) }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

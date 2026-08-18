@@ -1,0 +1,242 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "HA bench dashboard (docs/HA-CLUSTER.md §8.1). Covers cluster RPC latency quantiles, state transitions, reaper activity, UUID/IP conflicts and join idempotency hits. Import once; reuse across scenarios 1..4.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Server-side p99 of cluster_rpc_latency_seconds, per RPC op. Compare with client-observed p99 of /cluster/ha from bench_cluster_ha.py to spot dispatch overhead.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(rhorizon_cluster_rpc_latency_seconds_bucket[1m])) by (le, op))",
+          "legendFormat": "p99 {{op}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(rhorizon_cluster_rpc_latency_seconds_bucket[1m])) by (le, op))",
+          "legendFormat": "p95 {{op}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(rhorizon_cluster_rpc_latency_seconds_bucket[1m])) by (le, op))",
+          "legendFormat": "p50 {{op}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Cluster RPC latency quantiles (per op, 1m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Throughput per RPC op. A spike on `has_ha_password` correlates with /cluster/ha visibility traffic ; spikes on join/init correlate with bootstrap scenarios.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(rhorizon_cluster_rpc_latency_seconds_count[1m])) by (op)",
+          "legendFormat": "{{op}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster RPC throughput (per op, 1m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Rate of HA state transitions, labelled {from -> to}. Watch for joining->secondary (cold JOIN), secondary->primary (election), draining->evicted (operator drain) and joining->evicted (reap path).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(rhorizon_cluster_state_transitions_total[1m])) by (from_state, to_state)",
+          "legendFormat": "{{from_state}} -> {{to_state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster state transitions (rate, 1m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Reaper activity. `joining_orphan` = stuck JOIN rows past cluster_joining_orphan_ttl_secs. `drain_deadline_expired` = drain timeout.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(rate(rhorizon_cluster_nodes_reaped_total[5m])) by (reason)",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster nodes reaped (rate, 5m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Slice O -- JOIN idempotency cache hits. Each hit is a JOIN replay that the server short-circuited to the cached result (no re-mint of node cert).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(rate(rhorizon_cluster_join_idempotency_hits_total[1m]))",
+          "legendFormat": "hits/s",
+          "refId": "A"
+        }
+      ],
+      "title": "JOIN idempotency hits (rate, 1m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "node_uuid/IP conflict diagnostic -- count of /cluster/join pre-flights rejected because the joining node_uuid maps to an IP that conflicts with the existing membership. A non-zero rate signals a misconfigured Ansible inventory or stale node-uuid file mount.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "targets": [
+        {
+          "expr": "rhorizon_cluster_uuid_ip_conflicts_total",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "UUID/IP conflicts on JOIN (cumulative)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Failed loads of ha_password into RAM by reason (`decrypt_fail`, `missing_file`, ...). Should be zero in steady state ; a spike during bootstrap means a node started before its RHORIZON_HA_PASSWORD_FILE was provisioned (slice M misconfig).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(rate(rhorizon_ha_password_load_failures_total[5m])) by (reason)",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HA password load failures (rate, 5m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total observed transitions since cluster start, labelled. Use as a sanity check at end of run -- e.g. count of joining->secondary should equal the node count of scenario 1.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum(rhorizon_cluster_state_transitions_total) by (from_state, to_state)",
+          "legendFormat": "{{from_state}} -> {{to_state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster state transitions (cumulative)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["rhorizon", "ha", "bench"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "rhorizon -- HA bench",
+  "uid": "rhorizon-ha-bench",
+  "version": 1
+}

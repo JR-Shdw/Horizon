@@ -1,0 +1,120 @@
+## SPDX-License-Identifier: AGPL-3.0-or-later
+##
+## rhorizon-creds.service, fetch host secrets from the vault into a
+## tmpfs that systemd `LoadCredential=` can consume.
+##
+## Setup
+## -----
+## 1. Install rh-fetch on the host (statically-linked binary in
+##    /usr/local/bin/rh-fetch, copy from the agent/rust/target/.../release
+##    artefact, or build from source: `cargo build --release`).
+##
+## 2. Mint a host-bound vault token, store at /etc/rhorizon/host.token
+##    (mode 0400, owner root):
+##      rhorizon token create node-2-host \
+##        --scope secrets:r \
+##        --namespace node-2 \
+##        --allowed-ips 10.0.0.1/32 \
+##        --ttl 0
+##    Copy the rh_… value to the file. chmod 400. chown root:root.
+##
+## 3. Edit RHORIZON_ADDR + the RHORIZON_SECRETS map below to the
+##    actual list (name:path,name:path,...) for THIS host.
+##
+## 4. systemctl enable --now rhorizon-creds.service
+##
+## 5. In every consumer service, add :
+##      [Unit]
+##      Requires=rhorizon-creds.service
+##      After=rhorizon-creds.service
+##
+##      [Service]
+##      LoadCredential=db-password:/run/credstore/db-password
+##      LoadCredential=smtp-pass:/run/credstore/smtp-pass
+##      ExecStart=/usr/bin/myapp \
+##        --db-password-file=${CREDENTIALS_DIRECTORY}/db-password
+##
+##    `LoadCredential=` copies the file into a per-service ramfs at
+##    $CREDENTIALS_DIRECTORY (read-only, mode 0400, only that service
+##    can read it). The /run/credstore source is wiped on reboot or
+##    on `systemctl stop rhorizon-creds.service`.
+##
+## Security model
+## --------------
+##   - /run/credstore is a tmpfs (no swap), mode 0700, owner root.
+##   - The host token is the trust boundary: if the host is
+##     compromised, the attacker can read the secrets in this
+##     namespace. Mint with `--allowed-ips this-host/32` so the
+##     token can't be replayed from elsewhere on the LAN.
+##   - For TPM-backed encrypted credentials at rest, see
+##     ImportCredential= + systemd-creds(1), out of scope for v1
+##     but documented in examples/systemd/README.md.
+
+[Unit]
+Description=Fetch rhorizon secrets to /run/credstore for systemd LoadCredential=
+DefaultDependencies=no
+After=network-online.target
+Before=multi-user.target getty.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# --- Per-host configuration: EDIT THESE ---
+# Vault endpoint reachable from this host (typically VPN IP).
+Environment=RHORIZON_ADDR=https://vault.example.com
+# Long-lived host-bound token (mode 0400 root). See header comment.
+Environment=RHORIZON_TOKEN_FILE=/etc/rhorizon/host.token
+# Secret name → /run/credstore path. Comma-separated, no spaces.
+# These names must match LoadCredential= entries in consumer services.
+Environment=RHORIZON_SECRETS=db-password:/run/credstore/db-password,smtp-pass:/run/credstore/smtp-pass
+# --- End per-host configuration ---
+
+# Create the tmpfs-backed credstore. mode 0700 root keeps every other
+# user (incl. nobody) out; LoadCredential= copies into per-service
+# ramfs after we deposit, so no other process needs read access here.
+ExecStartPre=/usr/bin/install -d -m 0700 -o root -g root /run/credstore
+
+# Fetch every secret listed in RHORIZON_SECRETS. rh-fetch writes
+# atomically (tmp + fsync + rename, mode 0400) so consumer services
+# that race us never see a half-written file.
+ExecStart=/usr/local/bin/rh-fetch
+
+# On stop, wipe the credstore. systemd will re-run ExecStart on next
+# `start` so the secrets are always fresh after reboot.
+ExecStop=/usr/bin/find /run/credstore -mindepth 1 -delete
+
+# Hardening, narrow what this oneshot can touch.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/run/credstore
+
+# Egress firewall: deny the public internet, allow loopback + RFC1918 private
+# networks (rhorizon is reached over a VPN or private LAN). Tighten to the
+# vault's exact IP/32 for maximum restriction.
+IPAddressDeny=any
+IPAddressAllow=localhost 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+
+# Hide other processes and trim /proc to this unit's own pids.
+ProtectProc=invisible
+ProcSubset=pid
+
+# rh-fetch already writes 0400; this is belt and suspenders for anything else.
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

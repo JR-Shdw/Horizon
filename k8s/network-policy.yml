@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+---
+# NetworkPolicy : seuls les pods avec le label rhorizon-access
+# peuvent contacter le vault. Equivalent du reseau interne Docker.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rhorizon-access
+  namespace: rhorizon
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Resurgamus Horizon API (ajuster l'IP/CIDR selon le deploiement)
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.1/32    # node-1 WG
+      ports:
+        - protocol: TCP
+          port: 8200

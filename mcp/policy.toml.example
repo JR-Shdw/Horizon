@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <contact@resurgamus.com>
+#
+# rhorizon-mcp policy -- the trust boundary between the AI and your vault.
+# Copy to ~/.config/rhorizon-mcp/policy.toml, chmod 600, and edit.
+# FAIL-CLOSED: if this file is absent the server refuses every request.
+
+# Per-secret whitelist (fully-qualified "<namespace>/<name>"). Empty -> rely on
+# the namespace allow-list below.
+[secrets]
+whitelist = [
+    # "myns/api-key",
+]
+
+# Allow reading ANY secret in these namespaces. Keep this to exactly what the
+# agent needs -- it should match (or be narrower than) the token's namespaces.
+[namespaces]
+allow = [
+    # "myns",
+]
+
+# Tools the AI may call. Read-only by default; mutate/escalation tools stay
+# commented out (and the recommended token has no write scope anyway).
+[tools]
+allow = [
+    "vault_status",
+    "vault_whoami",
+    "vault_list_namespaces",
+    "vault_list_secrets",
+    "vault_get_secret",
+    # "vault_audit_tail",             # needs audit:r on the token
+    # "vault_set_secret",             # write -- opt-in only
+    # "vault_delete_secret",          # destructive -- opt-in only
+    # "vault_create_ephemeral_token", # escalation -- opt-in only
+]

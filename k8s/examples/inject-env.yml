@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+---
+# Injection secrets via env vars (rh-inject)
+#
+# Use case : app legacy qui lit ses secrets en env vars
+# MOINS SECURE que rh-fetch (secrets dans /proc/PID/environ)
+# A privilegier uniquement en dev ou pour des apps non modifiables
+#
+# Secrets requis dans rhorizon :
+#   - app/database-url
+#   - app/api-key
+#
+# kubectl apply -f namespace.yml
+# kubectl apply -f examples/inject-env.yml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: legacy-app
+  namespace: rhorizon
+  labels:
+    app: legacy-app
+spec:
+  serviceAccountName: rhorizon-agent
+  containers:
+    - name: app
+      image: git.example.com/shdw/rhorizon-agent:latest
+      command: ["/usr/local/bin/rh-inject"]
+      args:
+        - "--"
+        - "/app/start.sh"
+      env:
+        - name: RH_ADDR
+          valueFrom:
+            secretKeyRef:
+              name: rhorizon-token
+              key: addr
+        - name: RH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: rhorizon-token
+              key: token
+        # rh:// references, resolved at startup, then removed
+        - name: DATABASE_URL
+          value: "rh://app/database-url"
+        - name: API_KEY
+          value: "rh://app/api-key"
+      resources:
+        limits:
+          memory: 256Mi
+          cpu: 500m
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1500
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

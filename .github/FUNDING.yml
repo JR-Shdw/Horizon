@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+#
+# GitHub Sponsor button. The button only shows once Sponsors is enabled for the
+# account; other channels (liberapay, ko_fi, custom URL...) per GitHub's docs.
+github: YOUR-GITHUB-USERNAME

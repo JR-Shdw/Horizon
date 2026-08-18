@@ -1,0 +1,25 @@
+apiVersion: v2
+name: rhorizon
+description: |
+  Resurgamus Horizon, self-hosted secrets vault.
+  PostgreSQL + FastAPI + libsodium + Rust memory protection.
+  AGPL-3.0-or-later.
+type: application
+version: 0.1.0
+appVersion: "1.0.0-beta"
+keywords:
+  - secrets
+  - vault
+  - rbac
+  - encryption
+  - rhorizon
+home: https://github.com/JR-Shdw/Horizon
+sources:
+  - https://github.com/JR-Shdw/Horizon
+maintainers:
+  - name: shdw
+    email: horizon@resurgamus.com
+icon: ""
+annotations:
+  category: Security
+  licenses: AGPL-3.0-or-later

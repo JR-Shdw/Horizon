@@ -1,0 +1,16 @@
+{
+  "//": "rhorizon vault connector, Claude Code / Claude Desktop variant (see codex.config.toml / opencode.json for other clients). Copy to your",
+  "//install": "project root as .mcp.json (Claude Code) or merge mcpServers into your",
+  "//install2": "client config. No secret is stored here -- the token lives in RH_TOKEN_FILE.",
+  "//setup": "Run mcp/setup.sh first (mints a read-only token + writes the policy).",
+  "mcpServers": {
+    "rhorizon-vault": {
+      "command": "rhorizon-mcp-server",
+      "env": {
+        "RH_VAULT_URL": "http://127.0.0.1:8200",
+        "RH_TOKEN_FILE": "${HOME}/.config/rhorizon/mcp.token",
+        "RHORIZON_MCP_POLICY": "${HOME}/.config/rhorizon-mcp/policy.toml"
+      }
+    }
+  }
+}

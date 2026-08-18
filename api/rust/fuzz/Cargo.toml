@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+#
+# Sub-crate hosting cargo-fuzz targets for rhorizon_crypto.
+#
+# Usage :
+#
+#     # one-time install of the cargo-fuzz subcommand (host)
+#     cargo install --locked cargo-fuzz
+#
+#     # short smoke run (~60 sec each) on a single target
+#     cd api/rust && cargo +nightly fuzz run shamir_combine -- -max_total_time=60
+#
+#     # full run, keeps going until you stop it (Ctrl-C)
+#     cd api/rust && cargo +nightly fuzz run shamir_split
+#
+#     # list every defined target
+#     cd api/rust && cargo +nightly fuzz list
+#
+# cargo-fuzz REQUIRES nightly Rust. Reasoning : libfuzzer-sys binds
+# LLVM's libFuzzer runtime, which depends on nightly-only Rust ABI
+# features. Stable Rust does not support sanitizer instrumentation
+# the same way.
+#
+# Corpus files (= the inputs cargo-fuzz mutates and keeps) end up
+# under `corpus/<target>/` ; crashes get saved under
+# `artifacts/<target>/`. Both directories are git-ignored, see
+# `.gitignore` next to this Cargo.toml.
+# Its own workspace root, on purpose. api/rust became a workspace when the
+# custody crates were extracted (fa147f4), and cargo then walks up from this
+# manifest, finds a workspace that does not list it, and refuses to build --
+# which is how the nightly fuzz pipeline started failing before it compiled a
+# single target. This crate must NOT join that workspace: cargo-fuzz drives it
+# on a different toolchain with sanitizer RUSTFLAGS, and a workspace-wide
+# build has no business pulling in libfuzzer.
+[workspace]
+
+[package]
+name = "rhorizon_crypto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rhorizon_crypto]
+path = ".."
+default-features = false
+features = ["fuzzing"]
+
+# Don't compile any test/doc/bench infrastructure for fuzz binaries -
+# pure release-mode harnesses, smaller artefacts, faster builds.
+[[bin]]
+name = "shamir_combine"
+path = "fuzz_targets/shamir_combine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "shamir_split"
+path = "fuzz_targets/shamir_split.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "aes_gcm_roundtrip"
+path = "fuzz_targets/aes_gcm_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "aes_gcm_decrypt"
+path = "fuzz_targets/aes_gcm_decrypt.rs"
+test = false
+doc = false
+bench = false

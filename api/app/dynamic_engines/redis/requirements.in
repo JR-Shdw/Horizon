@@ -1,0 +1,3 @@
+# Redis ACL dynamic-engine driver.
+-c ../../../requirements.txt
+redis==8.0.1

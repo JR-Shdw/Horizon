@@ -1,0 +1,15 @@
+key	relation	value	check	notes
+support.status	note	skeleton-untested	test -x tools/install-macos.sh	must not be marked tested until real Mac run
+service.manager	required	launchd	launchctl version	native service target; installer still skeleton
+service.unit	required	plist	launchctl print gui/$(id -u) 2>/dev/null || true	launchd support to be implemented
+memlock.formula_mb	formula	workers*160+256+192	grep RH_MEM_MB tools/install-native.sh	budget still tracked, but macOS lacks mlockall
+mlockall.availability	exact	unavailable	python3.12 -c 'import platform; print(platform.system())'	app skips mlockall on Darwin
+mlock.required	required	yes	python3.12 -c 'import resource; print(resource.getrlimit(resource.RLIMIT_MEMLOCK))'	Rust SecureBuffer mlock must work
+ulimit.memlock.required	required	at-least-608MB	ulimit -l	installer attempts ulimit -l unlimited
+core_dump_limit	required	0	ulimit -c	core dumps should be disabled by app hardening
+postgresql.service	required	homebrew-pg	pg_ctl -D "$(brew --prefix)/var/postgresql@18" status	Homebrew runs PG as invoking user
+postgresql.data_dir	path	$(brew --prefix)/var/postgresql@18	echo "$(brew --prefix)/var/postgresql@18"	Apple Silicon prefix usually /opt/homebrew
+peer_cred.required	required	LOCAL_PEERCRED	python3.12 -c 'import socket; print(hasattr(socket, "SOL_LOCAL"))'	macOS peer UID shim must be exercised
+runtime_dir.path	default	$TMPDIR/rhorizon-or-user-dir	echo "${TMPDIR:-/tmp}"	filesystem AF_UNIX sockets; no abstract sockets
+keychain.integration	optional	planned	security list-keychains	token storage opportunity, not required yet
+mcp.workflow	required	Claude/Codex local config	test -f "$HOME/Library/Application Support/Claude/claude_desktop_config.json" || true	target community validation lane

@@ -1,0 +1,14 @@
+key	relation	value	check	notes
+service.manager	required	systemd	command -v systemctl	native system service lane
+service.unit	required	rhorizon.service	systemctl cat rhorizon.service	created by tools/install-native.sh
+memlock.formula_mb	formula	workers*160+256+192	grep RH_MEM_MB tools/install-native.sh	worker RSS + Argon2id + headroom
+memlock.workers1.bytes	exact	637534208	systemctl show rhorizon.service -p LimitMEMLOCK	608 MiB in bytes
+capability.required	required	CAP_IPC_LOCK	systemctl show rhorizon.service -p AmbientCapabilities	needed for mlockall
+core_dump_limit	required	0	ulimit -c	core dumps must be disabled by app hardening
+postgresql.service	required	postgresql	systemctl status postgresql	openSUSE service path may vary by package
+postgresql.initdb	required	postgresql-setup --initdb	command -v postgresql-setup	SUSE/RHEL style cluster init
+postgresql.auth.required	required	scram-or-local	psql -tAc 'show password_encryption'	local rhorizon DB connection must auth
+runtime_dir.path	default	/run/rhorizon	test -d /run/rhorizon || true	filesystem AF_UNIX sockets
+listen_addr.default	exact	127.0.0.1	grep RHORIZON_DATABASE_URL -n rhorizon.env	front with nginx/reverse proxy for remote access
+apparmor.mode	optional	recorded	aa-status 2>/dev/null || true	record if enabled; no shipped profile
+selinux.mode	required	enforcing-or-recorded	getenforce 2>/dev/null || true	Leap 16.0/SLE16 lane must record actual security module state

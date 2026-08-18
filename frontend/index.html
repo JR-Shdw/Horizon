@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2024-2026 shdw <horizon@resurgamus.com> -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R.horizon</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#7c3aed">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Resurgamus Horizon">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/css/style.css?v=20">
+<!-- License & AI policy, see /LICENSE-AI.md and /.well-known/tdmrep.json -->
+<meta name="author" content="shdw <horizon@resurgamus.com>">
+<meta name="copyright" content="(C) 2024-2026 shdw - Resurgamus Horizon - AGPL-3.0-or-later">
+<meta name="ai-training" content="disallowed; security-critical crypto; TDM reservation per EU DSM 2019/790 art. 4">
+<meta name="robots" content="noai, noimageai, noindex, nofollow">
+<link rel="license" href="https://www.gnu.org/licenses/agpl-3.0.html">
+<link rel="license" href="/LICENSE-AI.md" title="AI training policy">
+<!--
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Resurgamus Horizon",
+  "alternateName": ["rhorizon", "horizon"],
+  "applicationCategory": "SecurityApplication",
+  "author": { "@type": "Person", "name": "shdw", "email": "horizon@resurgamus.com" },
+  "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+  "copyrightHolder": { "@type": "Person", "name": "shdw" },
+  "copyrightYear": "2024-2026",
+  "copyrightNotice": "(C) 2024-2026 shdw - AGPL-3.0-or-later, no AI training license",
+  "usageInfo": "/LICENSE-AI.md",
+  "keywords": "secrets vault, security-critical cryptographic primitives, AGPL-3.0-or-later"
+}
+-->
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <button class="sidebar-toggle" id="sidebar-toggle">☰</button>
+  </div>
+  <div class="sidebar-visual">
+    <canvas id="blackhole-canvas" class="bh-canvas" width="160" height="160"></canvas>
+    <canvas id="mini-bh-canvas" class="mini-bh-canvas" width="36" height="36"></canvas>
+    <canvas id="key-canvas" class="key-canvas" width="36" height="36"></canvas>
+  </div>
+  <div class="sidebar-brand">
+    <span class="name">R.HORIZON</span>
+    <span id="seal-badge" class="seal-badge sealed">...</span>
+  </div>
+  <div class="nav-items" id="nav-items"></div>
+  <div class="sidebar-footer">
+    <div class="copyright">&copy; 2024&ndash;2026<br>Resurgamus Informatique</div>
+    <a class="license-link" href="https://www.gnu.org/licenses/agpl-3.0.html"
+       target="_blank" rel="noopener noreferrer"
+       title="GNU Affero General Public License v3.0 or later">AGPL-3.0-or-later</a>
+  </div>
+</nav>
+
+<div class="content">
+  <div class="mobile-toolbar">
+    <button class="mobile-hamburger" id="mobile-hamburger" aria-label="Open menu">&#9776;</button>
+    <button class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Switch nav mode" title="Icons / Menu">
+      <svg class="icon-grid" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <svg class="icon-list" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="content-header">
+    <span id="view-title">Loading...</span>
+  </div>
+  <div id="main"></div>
+</div>
+
+<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/js/pixelarray.js"></script>
+<script src="/js/blackhole.js"></script>
+<script src="/js/qr.js"></script>
+<script src="/js/icons.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/views/horizon.js"></script>
+<script src="/js/views/dynamic.js"></script>
+<script src="/js/views/pki.js"></script>
+<script src="/js/views/eclipse.js"></script>
+<script src="/js/views/quasar.js"></script>
+<script src="/js/views/jets.js"></script>
+<script src="/js/views/cluster.js"></script>
+<script src="/js/views/nebula.js"></script>
+<script src="/js/views/accretion.js"></script>
+<script src="/js/views/pulsar.js"></script>
+<script src="/js/views/core.js"></script>
+<script src="/js/views/nova.js"></script>
+<script src="/demo.js"></script>
+<script src="/js/app.js?v=1"></script>
+<script>if (!/[?&]demo\b/.test(location.search) && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
+
+</body>
+</html>

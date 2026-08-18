@@ -1,0 +1,16 @@
+# rhorizon vault connector for Codex.
+#
+# Merge this block into ~/.codex/config.toml after replacing the placeholder
+# paths with absolute paths. No secret is stored here; the token lives in
+# RH_TOKEN_FILE and must be mode 0600.
+#
+# The setup helper can do this for you:
+#   ./setup.sh --namespaces claude,forgejo --vault http://127.0.0.1:8200
+
+[mcp_servers.rhorizon-vault]
+command = "/absolute/path/to/rhorizon-mcp-server"
+
+[mcp_servers.rhorizon-vault.env]
+RH_VAULT_URL = "http://127.0.0.1:8200"
+RH_TOKEN_FILE = "/home/YOU/.config/rhorizon/mcp.token"
+RHORIZON_MCP_POLICY = "/home/YOU/.config/rhorizon-mcp/policy.toml"

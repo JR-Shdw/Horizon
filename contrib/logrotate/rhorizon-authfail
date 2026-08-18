@@ -1,0 +1,12 @@
+# Resurgamus Horizon - rotate the fail2ban auth-failure log.
+# Install: cp to /etc/logrotate.d/rhorizon-authfail (adjust the path).
+# copytruncate rotates without closing the fd the app holds (no restart).
+/var/lib/docker/volumes/rhorizon_audit_logs/_data/authfail.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

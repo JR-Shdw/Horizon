@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+---
+# App qui se connecte a un PostgreSQL externe
+# Credentials DB fetchees depuis rhorizon au demarrage
+#
+# Use case : pod K8s -> rh-fetch -> fichier tmpfs -> app lit le fichier
+# Le PostgreSQL tourne ailleurs (container Docker, bare metal, VM)
+#
+# Label rhorizon-refresh=true : le CronJob secret-refresh.yml
+# fait un rollout restart periodique pour re-fetch les secrets
+#
+# Secrets requis dans rhorizon :
+#   - db/url       (ex: postgresql://user:pass@10.0.0.1:5432/mydb)
+#
+# kubectl apply -f namespace.yml
+# kubectl apply -f examples/app-db-creds.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+  namespace: rhorizon
+  labels:
+    app: myapp
+    rhorizon-refresh: "true"    # secret-refresh CronJob cible ce label
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      serviceAccountName: rhorizon-agent
+      volumes:
+        - name: secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+
+      initContainers:
+        - name: fetch-secrets
+          image: git.example.com/shdw/rhorizon-agent:latest
+          env:
+            - name: RH_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: rhorizon-token
+                  key: addr
+            - name: RH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: rhorizon-token
+                  key: token
+            - name: RH_SECRETS
+              value: "db/url:/secrets/database_url"
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+          resources:
+            limits:
+              memory: 32Mi
+              cpu: 100m
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+      containers:
+        - name: app
+          image: git.example.com/shdw/myapp:latest
+          env:
+            - name: DATABASE_URL_FILE
+              value: /secrets/database_url
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+          resources:
+            limits:
+              memory: 256Mi
+              cpu: 500m
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1500
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp
+  namespace: rhorizon
+spec:
+  selector:
+    app: myapp
+  ports:
+    - port: 8000
+      targetPort: 8000

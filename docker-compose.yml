@@ -1,0 +1,258 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+networks:
+  rhorizon_internal:
+    driver: bridge
+    internal: true
+  traefik_proxy:
+    external: true
+
+volumes:
+  postgres_data:
+  audit_logs:
+  node_uuid_data:   # per-container node identity (node-uuid, 0400); wipe = new identity
+  pg_certs:         # PG server cert minted at first boot, pinned by the API (verify-full)
+
+services:
+
+  postgres:
+    # Built from postgres/Dockerfile: stock postgres with the gosu Go binary
+    # removed (see that file). Compose names the image `rhorizon-postgres`,
+    # which is what .woodpecker/scan.yml scans.
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+      args:
+        POSTGRES_VERSION: ${POSTGRES_VERSION:-18-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941}
+    container_name: rhorizon_postgres
+    restart: unless-stopped
+    entrypoint:
+      - bash
+      - -c
+      - |
+        CERT=/pg-certs/server.crt
+        KEY=/pg-certs/server.key
+        if [ ! -f "$$CERT" ]; then
+          # SAN covers compose-DNS + localhost so verify-full passes in every bundled topology
+          openssl req -new -x509 -days 3650 -nodes \
+            -subj '/CN=postgres' \
+            -addext 'subjectAltName=DNS:postgres,DNS:rhorizon-postgres,DNS:localhost,IP:127.0.0.1' \
+            -keyout "$$KEY" -out "$$CERT" 2>/dev/null
+          chmod 600 "$$KEY"
+          chmod 644 "$$CERT"
+          chown postgres:postgres "$$KEY" "$$CERT"
+        fi
+        # ssl_groups (PQ hybrid KEM) is a PG18+ GUC. Auto-skip it on PG<18 from
+        # the running binary's major version, so POSTGRES_VERSION can switch
+        # 17<->18 without aborting startup on an unknown parameter.
+        PG_MAJOR="$$(postgres --version | grep -oE '[0-9]+' | head -n1)"
+        SSL_GROUPS_ARG=""
+        if [ -n "$${PG_SSL_GROUPS:-}" ] && [ "$${PG_MAJOR:-0}" -ge 18 ]; then
+          SSL_GROUPS_ARG="-c ssl_groups=$${PG_SSL_GROUPS}"
+        fi
+        exec docker-entrypoint.sh \
+          postgres \
+          -c max_connections=${POSTGRES_MAX_CONNECTIONS:-200} \
+          -c shared_buffers=256MB \
+          -c effective_cache_size=512MB \
+          -c work_mem=8MB \
+          -c random_page_cost=1.1 \
+          -c ssl=on \
+          -c ssl_cert_file=$$CERT \
+          -c ssl_key_file=$$KEY \
+          $$SSL_GROUPS_ARG
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rhorizon}
+      POSTGRES_USER: ${POSTGRES_USER:-rhorizon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      # PQ hybrid KEM on the PG TLS hop (PG18+ only)
+      PG_SSL_GROUPS: "${PG_SSL_GROUPS:-X25519MLKEM768:X25519:secp256r1}"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - pg_certs:/pg-certs
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    networks:
+      - rhorizon_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rhorizon} -d ${POSTGRES_DB:-rhorizon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_drop:
+      - NET_RAW
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # Sized by `install.sh --tier` via tools/presets/<tier>.env
+          # (home 512M, smb 1G, heavy 2G). Unset keeps the previous
+          # hardcoded 1G, so an existing .env-less deployment is unchanged.
+          memory: ${POSTGRES_MEM:-1G}
+          pids: 100
+
+  # API
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: rhorizon_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RH_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-rhorizon}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rhorizon}"
+      # verify-full pins the per-instance PG cert; override CA_CERT for your own CA, or "require" to relax
+      RH_DATABASE_SSL: "${RH_DATABASE_SSL:-${RHORIZON_DATABASE_SSL:-verify-full}}"
+      RH_DATABASE_CA_CERT: "${RH_DATABASE_CA_CERT:-${RHORIZON_DATABASE_CA_CERT:-/pg-certs/server.crt}}"
+      RH_PROXY_AUTH_ENABLED: "${RH_PROXY_AUTH_ENABLED:-${RHORIZON_PROXY_AUTH_ENABLED:-false}}"
+      RH_PROXY_TRUSTED_IPS: "${RH_PROXY_TRUSTED_IPS:-${RHORIZON_PROXY_TRUSTED_IPS:-}}"
+      RH_MEMORY_LOCK_MODE: "${RH_MEMORY_LOCK_MODE:-${RHORIZON_MEMORY_LOCK_MODE:-best-effort}}"
+      # Containers cannot reliably inspect the host swap backing device.
+      RH_SWAP_PROTECTION: "${RH_SWAP_PROTECTION:-${RHORIZON_SWAP_PROTECTION:-unknown}}"
+      # Multi-worker (master/follower + per-worker Shamir share) is runnable out of the
+      # box; 2-4 floored to 5 for quorum, 1 = single-worker (keys in-process, no
+      # Shamir/RPC). See docs/multiworker.md.
+      RH_WORKERS: "${RH_WORKERS:-${RHORIZON_WORKERS:-5}}"
+      # Opt-in during migration. In separated mode a fixed UDS-only custodian
+      # quorum owns Shamir shares; RH_WORKERS controls disposable HTTP workers.
+      RH_CUSTODY_MODE: "${RH_CUSTODY_MODE:-${RHORIZON_CUSTODY_MODE:-embedded}}"
+      RH_CUSTODY_BACKEND: "${RH_CUSTODY_BACKEND:-${RHORIZON_CUSTODY_BACKEND:-python}}"
+      RH_CUSTODIAN_WORKERS: "${RH_CUSTODIAN_WORKERS:-${RHORIZON_CUSTODIAN_WORKERS:-5}}"
+      RH_RUST_CUSTODIAN_SLOTS: "${RH_RUST_CUSTODIAN_SLOTS:-${RHORIZON_RUST_CUSTODIAN_SLOTS:-3}}"
+      RH_RUST_CUSTODIAN_THRESHOLD: "${RH_RUST_CUSTODIAN_THRESHOLD:-${RHORIZON_RUST_CUSTODIAN_THRESHOLD:-0}}"
+      RH_RUST_CUSTODY_MAINTENANCE_INTERVAL_SECS: "${RH_RUST_CUSTODY_MAINTENANCE_INTERVAL_SECS:-${RHORIZON_RUST_CUSTODY_MAINTENANCE_INTERVAL_SECS:-5}}"
+    ports:
+      # machine-to-machine bus (hardcoded so a missing WG1_IP can't drop the binding)
+      - "10.0.1.1:8200:8200"
+      - "${WG_IP:-10.0.0.1}:8200:8200"   # admin direct access
+    networks:
+      - rhorizon_internal
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_proxy"
+      # Route API (priorite haute)
+      - "traefik.http.routers.rhorizon-api.rule=Host(`${VAULT_DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.rhorizon-api.entrypoints=websecure"
+      - "traefik.http.routers.rhorizon-api.tls=true"
+      - "traefik.http.routers.rhorizon-api.tls.certresolver=ovh"
+      - "traefik.http.routers.rhorizon-api.middlewares=${AUTHELIA_MIDDLEWARE}"
+      - "traefik.http.routers.rhorizon-api.priority=10"
+      - "traefik.http.services.rhorizon-api.loadbalancer.server.port=8200"
+      # HTTP redirect
+      - "traefik.http.routers.rhorizon-api-http.rule=Host(`${VAULT_DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.rhorizon-api-http.entrypoints=web"
+      - "traefik.http.routers.rhorizon-api-http.middlewares=https-redirect@file"
+    volumes:
+      - audit_logs:/var/log/rhorizon
+      - node_uuid_data:/var/lib/rhorizon
+      - pg_certs:/pg-certs:ro
+      # The closed dynamic-engine catalog is copied into the API image.
+      # Edit dynamic-engines.ini and rebuild the image to change it. A runtime
+      # bind cannot be used here because CI talks to an external Docker daemon.
+    # --- Security hardening ---
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,noexec,nosuid
+      - /dev/shm:size=1M,noexec,nosuid
+      # multi-worker IPC sockets (AF_UNIX, mode 0700); see docs/multiworker.md
+      - /run/rhorizon:size=1M,noexec,nosuid,mode=0700,uid=1500,gid=1500
+    cap_drop:
+      - ALL
+    # The portable default does not request IPC_LOCK or alter host ulimits.
+    # Use tools/docker-compose.memory-lock.yml to enforce locked memory.
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # When mlockall succeeds it wires all RAM, including the 256MB Argon2id
+          # allocation. Size for: workers x ~160MB + 256MB + ~192MB headroom.
+          # Default fits the 5-worker floor (~1.25G need); bump RH_API_MEM
+          # if you raise RH_WORKERS. Undersizing OOM-kills the master at
+          # unseal -- the boot guard (mem_hardening) warns when this is too low.
+          memory: ${RH_API_MEM:-${RHORIZON_API_MEM:-1536M}}
+          pids: 150
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8200/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rhorizon_frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      MAX_BODY_API: "${MAX_BODY_API:-1m}"
+      MAX_BODY_BACKUP: "${MAX_BODY_BACKUP:-100m}"
+      TLS_ENABLED: "${TLS_ENABLED:-false}"
+      TLS_CERT: "${TLS_CERT:-/certs/cert.pem}"
+      TLS_KEY: "${TLS_KEY:-/certs/key.pem}"
+      # nginx upstream for the API (reachable by container_name on rhorizon_internal).
+      # Was undefined here -> the tls.conf `upstream { server ${API_UPSTREAM}; }` block
+      # got a literal placeholder -> "host not found in upstream". Helm sets the k8s
+      # equivalent; compose needs it too.
+      API_UPSTREAM: "${API_UPSTREAM:-rhorizon_api:8200}"
+    ports:
+      # VPN, direct internal access
+      - "${WG_IP:-10.0.0.1}:8201:8200"
+      # HTTPS (only useful when TLS_ENABLED=true)
+      - "${WG_IP:-10.0.0.1}:8443:8443"
+    volumes:
+      - ${TLS_CERT_DIR:-./certs}:/certs:ro
+    networks:
+      - rhorizon_internal
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_proxy"
+      # Route frontend (priorite basse)
+      - "traefik.http.routers.rhorizon-front.rule=Host(`${VAULT_DOMAIN}`)"
+      - "traefik.http.routers.rhorizon-front.entrypoints=websecure"
+      - "traefik.http.routers.rhorizon-front.tls=true"
+      - "traefik.http.routers.rhorizon-front.tls.certresolver=ovh"
+      - "traefik.http.routers.rhorizon-front.middlewares=${AUTHELIA_MIDDLEWARE}"
+      - "traefik.http.routers.rhorizon-front.priority=1"
+      - "traefik.http.services.rhorizon-front.loadbalancer.server.port=8200"
+      # HTTP redirect
+      - "traefik.http.routers.rhorizon-front-http.rule=Host(`${VAULT_DOMAIN}`)"
+      - "traefik.http.routers.rhorizon-front-http.entrypoints=web"
+      - "traefik.http.routers.rhorizon-front-http.middlewares=https-redirect@file"
+    # --- Security hardening ---
+    read_only: true
+    tmpfs:
+      - /tmp:size=1M,noexec,nosuid
+      - /var/cache/nginx:size=8M,noexec,nosuid
+      - /run:size=1M,noexec,nosuid
+      - /etc/nginx/conf.d:size=1M,noexec,nosuid  # envsubst + tls-setup write here
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN                                # entrypoint chowns cache dirs on tmpfs
+      - SETUID                               # master spawns workers as nginx user
+      - SETGID                               # master sets worker group to nginx
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # Same tier wiring as postgres/api; unset keeps the previous 64M.
+          memory: ${RH_FRONTEND_MEM:-${RHORIZON_FRONTEND_MEM:-64M}}
+          pids: 50
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8200/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,127 @@
+{{- if .Values.networkPolicy.enabled -}}
+# API : ingress from frontend + (optionally) external CIDRs ; egress to PG + DNS only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-api" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "rhorizon.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Frontend can reach the API.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "rhorizon.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: frontend
+      ports:
+        - port: 8200
+          protocol: TCP
+    # Same-namespace pods (e.g. rh-fetch / rh-watch sidecars) can reach
+    # the API directly. Cross-namespace clients must add their own rule.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+      ports:
+        - port: 8200
+          protocol: TCP
+  egress:
+    # PostgreSQL.
+    {{- if not .Values.postgres.external.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "rhorizon.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- else }}
+    # External PG (Patroni / managed): allow egress to the DB port. Tighten the
+    # destination with postgres.external.egressCidrs; otherwise cluster-wide but
+    # port-scoped, which covers an in-cluster Patroni without its pod IP.
+    - to:
+        {{- if .Values.postgres.external.egressCidrs }}
+        {{- range .Values.postgres.external.egressCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: {{ .Values.postgres.external.port }}
+          protocol: TCP
+    {{- end }}
+    # DNS.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Frontend : ingress from anywhere (or restricted via ingressFrontendCidrs) ; egress to API only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-frontend" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "rhorizon.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if .Values.networkPolicy.ingressFrontendCidrs }}
+    - from:
+        {{- range .Values.networkPolicy.ingressFrontendCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 8200
+          protocol: TCP
+    {{- else }}
+    # No CIDR restriction declared, accept from any pod or ingress
+    # controller in the cluster. Lock down via .Values.networkPolicy.ingressFrontendCidrs.
+    - {}
+    {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "rhorizon.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports:
+        - port: 8200
+          protocol: TCP
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+{{- end -}}
