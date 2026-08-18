@@ -157,25 +157,18 @@ packaged nginx or python links, and `--pq-nginx` is the fix.
 | **Other Linux** | yes | yes | if libssl >= 3.5 | Arch/Fedora/Tumbleweed yes; Rocky 9 / Debian 12 no. Unmeasured. |
 | **macOS (native)** | yes | no | unverified | uvicorn only. Use the container path for HTTP/2. |
 
+`sh tools/install.sh` already gives you every "yes" in that table. The flag
+below is only for the rows that say **with `--pq-nginx`**, where the packaged
+nginx lacks ML-KEM and has to be built against an OpenSSL that has it:
+
 ```bash
-sh tools/install-native.sh --mode system --pq-nginx   # HTTP/2 *and* post-quantum
+sh tools/install-native.sh --mode system --pq-nginx
 ```
 
-**Why you might care about each.** Post-quantum (X25519MLKEM768) defeats
-harvest-now-decrypt-later: a handshake recorded *today* is broken later by a
-quantum computer, so it protects traffic already on the wire. That one is worth
-opting in for; `--pq-nginx` is opt-in only because it is a short source build
-rather than a package install.
+**Post-quantum** (X25519MLKEM768) protects traffic recorded *today* from a
+future quantum computer. Opt-in only because it is a source build.
 
-HTTP/2 is **not** a throughput requirement, and this README used to claim it
-was. What fixed the keep-alive race was nginx's upstream pool, whose idle
-timeout is strictly shorter than uvicorn's (25s < 30s), so nginx always closes
-first and never mid-request. That holds whether the client speaks h2 or 1.1.
-ALPN is negotiated per connection, and one client opens one connection either
-way, so h2's multiplexing only pays when a *single* client issues concurrent
-requests -- which rhorizon's CLI, agents and UI do not. The real concurrency
-ceiling is `worker_connections` x workers, identical under both protocols.
-Take h2 for browser latency if the lane offers it; do not treat 1.1 as a
+**HTTP/2** is a browser-latency win, not a throughput requirement; 1.1 is not a
 degraded mode.
 
 Details and the measurements behind each row: [`docs/TLS.md`](docs/TLS.md).
