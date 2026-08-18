@@ -20,7 +20,8 @@ Self-hosted secrets vault - No AI training license - see LICENSE-AI.md
 > | FreeBSD 14+ | validated | All IPC primitives shimmed 2026-05. Needs the `memorylocked=unlimited` login class the installer adds - the vault mlocks key material |
 > | OpenBSD 7.4+ | validated | Same shim path as FreeBSD. `install-openbsd.sh` builds CPython against the OpenSSL port: base LibreSSL's `ssl` cannot load the Ed25519 cluster certs |
 > | NetBSD 10+ | validated | `tools/drivers/netbsd.sh`; golden image built with anita. Only OS whose pkgsrc binary repo is unsigned upstream - pinned versions + HTTPS are the mitigation |
-> | macOS 13+ | skeleton / untested | `tools/install-macos.sh --mode user` |
+> | macOS (Apple Silicon) | validated | `tools/install-macos.sh --mode user`. Green end-to-end on GitHub-hosted `macos-latest` (`.github/workflows/macos-native.yml`): Homebrew deps, PostgreSQL, venv, Rust extension, LaunchAgent, unseal. User mode only |
+> | macOS (Intel) | untested | No free runner: GitHub retired the `macos-13` image, so x86_64 darwin is unverified rather than known-broken |
 > | aarch64 Linux stack | validated | Raspberry Pi 4 |
 > | AIX / Solaris | not supported | POWER/SPARC + IBM/Oracle proprietary, out of project scope |
 >

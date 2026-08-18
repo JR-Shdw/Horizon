@@ -10,10 +10,14 @@
 # This covers what that one does not: api/rust (the rhorizon_crypto wheel the
 # API imports) and tools/install-macos.sh end to end.
 #
-# Both arches run on their NATIVE runner, no cross-compilation, so libsodium
-# and the PyO3 build resolve against a matching host SDK:
-#   Apple Silicon -> macos-latest
-#   Intel         -> macos-13
+# Apple Silicon only (macos-latest). Intel is NOT covered: GitHub retired the
+# macos-13 image, and a job pinned to it now queues forever rather than failing
+# -- measured here at 123 minutes with no start, which also means the run never
+# reaches a conclusion. There is no free Intel macOS runner to move to, so
+# x86_64 darwin would need a self-hosted runner or a real Mac.
+#
+# No cross-compilation: libsodium and the PyO3 build resolve against the host
+# SDK.
 
 name: macos-native
 
@@ -42,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-13]
+        os: [macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -143,7 +147,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-13]
+        os: [macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v5

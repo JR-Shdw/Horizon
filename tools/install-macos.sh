@@ -3,9 +3,17 @@
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 #
 # rhorizon macOS native installer -- Homebrew deps + production-style user
-# install. This path is still UNVALIDATED on real Apple hardware; use
-# --dry-run first and keep Docker Desktop as the supported macOS path until a
-# real macOS lane runs green.
+# install.
+#
+# Validated on Apple Silicon: .github/workflows/macos-native.yml runs this
+# end-to-end on GitHub-hosted macos-latest (Homebrew deps -> PostgreSQL -> venv
+# -> Rust extension -> LaunchAgent -> unseal) and asserts the vault serves and
+# unseals. Intel is NOT covered -- GitHub retired the macos-13 image and there
+# is no free x86_64 darwin runner, so that arch is unverified rather than
+# known-broken.
+#
+# --mode user is the only mode implemented; system mode is documented as intent.
+# --dry-run previews everything without touching the machine.
 #
 # Path convention:
 #   user mode (implemented):
