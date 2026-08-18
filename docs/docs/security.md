@@ -189,7 +189,7 @@ Do not file a public issue. PGP if available.
 
 - **Paying sponsors / commercial members:** `horizon@resurgamus.com`. First
   response within **48 hours** (or the shorter time in your agreement).
-- **Everyone else (OSS / AGPL):** `security@example.com`. First response within
+- **Everyone else (OSS / AGPL):** `security@resurgamus.com`. First response within
   **96 hours**.
 
 Remediation runs on a separate clock driven by **severity, not reporter**:

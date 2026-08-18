@@ -45,7 +45,7 @@ jobs:
         os: [macos-latest, macos-13]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust (stable)
         run: |
@@ -54,7 +54,7 @@ jobs:
           rustc --version
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -65,7 +65,7 @@ jobs:
         run: brew install libsodium pkgconf || true
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -120,7 +120,7 @@ jobs:
           PY
 
       - name: Upload the wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: rhorizon-crypto-${{ matrix.os }}
           path: api/rust/dist/*.whl
@@ -146,7 +146,7 @@ jobs:
         os: [macos-latest, macos-13]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Dry run first
         # Cheap and diagnostic: proves argument parsing, path resolution and

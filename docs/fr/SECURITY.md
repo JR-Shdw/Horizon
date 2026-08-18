@@ -13,7 +13,7 @@
 
 **N'ouvrez pas d'issue publique pour une vulnérabilité de sécurité.**
 
-Email : **security@example.com**
+Email : **security@resurgamus.com**
 
 À inclure :
 - Description de la vulnérabilité
@@ -30,7 +30,7 @@ qui a signale.
 | | Premiere reponse | Adresse |
 |---|---|---|
 | Sponsor payant / membre commercial | 48 heures | `horizon@resurgamus.com` |
-| Toute autre personne | 96 heures | `security@example.com` |
+| Toute autre personne | 96 heures | `security@resurgamus.com` |
 
 La correction est pilotee par la severite, pas par le rapporteur : critique
 sous 7 jours, elevee sous 30 jours, moyenne à la prochaine release planifiee.

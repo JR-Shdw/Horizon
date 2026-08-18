@@ -74,7 +74,7 @@ support period expires.
 - **Paying sponsors / commercial members:** email **horizon@resurgamus.com**.
   First response within **48 hours**, or the shorter time in your support
   agreement if you have one.
-- **Everyone else (OSS / AGPL):** email **security@example.com**. First response
+- **Everyone else (OSS / AGPL):** email **security@resurgamus.com**. First response
   within **96 hours**.
 
 Include:
@@ -91,7 +91,7 @@ second is how fast a fix ships, and it does **not** depend on who reported.
 | | First response | Applies to |
 |---|---|---|
 | Paying sponsor / commercial member | 48 hours | Reports to `horizon@resurgamus.com` |
-| Anyone else | 96 hours | Reports to `security@example.com` |
+| Anyone else | 96 hours | Reports to `security@resurgamus.com` |
 
 Remediation is driven by severity, not by reporter. A critical flaw found by
 an anonymous reporter is fixed on the same clock as one raised by a sponsor:

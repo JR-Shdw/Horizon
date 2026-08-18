@@ -355,8 +355,15 @@ build_ext() {
     # writes the wheel there instead of ./target. Hardcoding the path made pip
     # try to install a literal '*'.
     _wheels="${CARGO_TARGET_DIR:-target}/wheels"
+    # sh -c is needed so the shell expands *.whl, but the interpolated paths
+    # must be quoted INSIDE the command string: macOS puts the venv under
+    # ~/Library/Application Support/..., and unquoted the space word-splits, so
+    # sh tries to run /Users/<user>/Library/Application and dies with
+    # "No such file or directory". Only macOS trips this -- every other path
+    # convention here is space-free. The glob stays outside the quotes so it
+    # still expands.
     ( cd "$_root/api/rust" && run "$_venv/bin/maturin" build --release --strip \
-      && run sh -c "$_venv/bin/pip install --quiet --force-reinstall $_wheels/*.whl" )
+      && run sh -c "'$_venv/bin/pip' install --quiet --force-reinstall '$_wheels'/*.whl" )
     run "$_venv/bin/python" -c 'import rhorizon_crypto' \
         && log "rhorizon_crypto OK" || warn "rhorizon_crypto import failed"
 }
