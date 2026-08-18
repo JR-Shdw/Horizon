@@ -132,7 +132,7 @@ one. Decide from the threat and the load, not from the OS:
 | You need | Because | Take |
 |---|---|---|
 | Post-quantum | Harvest-now-decrypt-later: a handshake recorded **today** is broken later by a quantum computer. This protects traffic already on the wire, not just future traffic. | `--pq-nginx`, or a lane that has it by default |
-| HTTP/2 | HTTP/1.1's keep-alive race drops connections under concurrency (see the c=500 bench note in `frontend/nginx-tls.conf`). Multiplexed h2 removes it structurally, so sustained throughput needs it. | nginx front (the default where supported) |
+| HTTP/2 | Lower latency for a client that issues concurrent requests over one connection (browsers). **Not** a throughput requirement: the c=500 keep-alive race in `frontend/nginx-tls.conf` is fixed by the upstream pool's timeout inequality (nginx 25s < uvicorn 30s), which applies to h2 and 1.1 alike. ALPN is per connection and one client opens one connection either way, so multiplexing only pays when a single client parallelises -- the CLI, agents and UI do not. Ceiling is `worker_connections` x workers, identical under both. | nginx front (the default where supported) |
 | Both | A vault that is also on a hot path | `--pq-nginx` |
 
 `--pq-nginx` is opt-in rather than default because it is a source build of a

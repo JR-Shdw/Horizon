@@ -163,12 +163,84 @@ sh tools/install-native.sh --mode system --pq-nginx   # HTTP/2 *and* post-quantu
 
 **Why you might care about each.** Post-quantum (X25519MLKEM768) defeats
 harvest-now-decrypt-later: a handshake recorded *today* is broken later by a
-quantum computer, so it protects traffic already on the wire. HTTP/2 removes
-the HTTP/1.1 keep-alive race that drops connections under concurrency, so it is
-the floor for sustained throughput. `--pq-nginx` is opt-in only because it is a
-short source build rather than a package install.
+quantum computer, so it protects traffic already on the wire. That one is worth
+opting in for; `--pq-nginx` is opt-in only because it is a short source build
+rather than a package install.
+
+HTTP/2 is **not** a throughput requirement, and this README used to claim it
+was. What fixed the keep-alive race was nginx's upstream pool, whose idle
+timeout is strictly shorter than uvicorn's (25s < 30s), so nginx always closes
+first and never mid-request. That holds whether the client speaks h2 or 1.1.
+ALPN is negotiated per connection, and one client opens one connection either
+way, so h2's multiplexing only pays when a *single* client issues concurrent
+requests -- which rhorizon's CLI, agents and UI do not. The real concurrency
+ceiling is `worker_connections` x workers, identical under both protocols.
+Take h2 for browser latency if the lane offers it; do not treat 1.1 as a
+degraded mode.
 
 Details and the measurements behind each row: [`docs/TLS.md`](docs/TLS.md).
+
+## Automatic unseal
+
+The vault holds its master key in RAM only, so it comes back **sealed** after
+every restart and someone must supply the master password again. By default the
+installers leave it sealed and write nothing to disk -- you set the password on
+the first unseal.
+
+If a host must come back on its own after a reboot, pass the password at
+install time:
+
+```bash
+sh tools/install.sh --master-password-file /path/to/passphrase
+```
+
+The installer then unseals for you and stores both credentials, one secret per
+file:
+
+```
+<install-dir>/secrets/master-password   # 0400
+<install-dir>/secrets/root-token        # 0400, first unseal only
+```
+
+Container installs use `~/rhorizon/secrets/`; native installs use
+`<config-dir>/secrets/` (`~/.config/rhorizon/secrets/` in user mode). Re-running
+the installer after a reboot or a `--tier` switch reuses that file and reopens
+the vault without asking.
+
+Prefer `--master-password-file` over `--master-password`: a value on the command
+line is readable in `/proc/<pid>/cmdline` while the installer runs, and lands in
+your shell history.
+
+**Understand what you are trading.** Automatic unseal and at-rest protection are
+the same fact seen from two sides: the host can reopen the vault unattended
+*precisely because* the password is readable on that host. Anyone -- or
+anything -- that can read those two files owns the vault. There is no
+configuration that gives you both.
+
+### Keeping the credentials away from an AI agent
+
+`0400` means "only the owning user may read this". It stops other unprivileged
+users on the box. It does **not** stop anything running *as* that user, and an
+AI coding assistant with shell access on your account is exactly that: it
+inherits your uid, so `cat ~/rhorizon/secrets/master-password` succeeds. The
+mode is not the boundary. The account is.
+
+If you run agents, assistants or automation on the same machine:
+
+- **Run the vault under its own OS account** and keep the secrets directory
+  owned by it (`chown rhorizon: ~rhorizon/secrets`, `chmod 700`). An agent under
+  your login then cannot read them regardless of file mode. The native installer
+  in `--mode system` already runs the service as a dedicated user.
+- **Do not leave credentials in a directory an agent is pointed at.** Move them
+  into a password manager and delete the files; the vault only needs the
+  password at unseal time, not permanently on disk.
+- **Do not paste them into a prompt, an issue, or a chat.** Anything sent to a
+  hosted model leaves the machine, and may be retained or logged.
+- **Give automation a scoped token, never the root token.** Per-service tokens
+  with narrow scopes and IP allowlists are revocable; the master password is
+  not, short of a rotation.
+- If you want unattended restart *and* an agent on the same host, treat the two
+  as incompatible on one account and separate them by user.
 
 ## Compatibility
 
@@ -246,10 +318,12 @@ CHANGELOG.
 
 ## Stack (one line)
 
-FastAPI - SQLAlchemy async - PostgreSQL 18 - PyNaCl (libsodium) -
-`cryptography` (pyca) - `python-fido2` (Yubico) - `pyotp` - `bonsai`
-(LDAP) - `pyrage` (age) - Rust extension (PyO3, `aes-gcm`, `memsec`,
-`zeroize`) - Vanilla JS UI - nginx (Alpine).
+FastAPI on uvicorn (`uvloop`, `httptools`) - SQLAlchemy async over `asyncpg` -
+PostgreSQL 18 - PyNaCl (libsodium) - `cryptography` (pyca) - `fido2` (Yubico) -
+`pyotp` - `bonsai` (LDAP) - `pyrage` (age) - `prometheus_client` - Rust
+extension via PyO3 (`aes-gcm`, `curve25519-dalek`, `blake2`, `crypto_box`,
+`crypto_secretbox`, `memsec`, `zeroize`) - a PyO3-free custody core shared with
+the standalone Rust custodian daemon - Vanilla JS UI - nginx (Alpine).
 
 Why these and not others: see [`SECURITY.md`](SECURITY.md#software--primitive-choices).
 

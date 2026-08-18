@@ -1,0 +1,203 @@
+# Validate the macOS NATIVE path: the PyO3 crypto extension, and the
+# installer that has never run on real Apple hardware.
+#
+# Why here and not Woodpecker: the lab has no Mac. GitHub-hosted macOS
+# runners are the only free native darwin toolchain available, and they are
+# free and unmetered on PUBLIC repositories. They cannot run Docker, which is
+# fine -- this is precisely the no-container path.
+#
+# Companion to agent-macos.yml, which builds the standalone agent binaries.
+# This covers what that one does not: api/rust (the rhorizon_crypto wheel the
+# API imports) and tools/install-macos.sh end to end.
+#
+# Both arches run on their NATIVE runner, no cross-compilation, so libsodium
+# and the PyO3 build resolve against a matching host SDK:
+#   Apple Silicon -> macos-latest
+#   Intel         -> macos-13
+
+name: macos-native
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - 'api/rust/**'
+      - 'tools/install-macos.sh'
+      - 'tools/lib/**'
+      - 'tools/drivers/**'
+      - '.github/workflows/macos-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  # --------------------------------------------------------------------
+  # 1. Build the crypto extension and prove the module actually imports and
+  #    computes. A wheel that builds but cannot load is the failure mode
+  #    that matters here -- the API refuses to start without this module.
+  # --------------------------------------------------------------------
+  crypto-smoke:
+    name: crypto wheel ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-13]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install libsodium
+        # pynacl and the Rust extension both link against it. Homebrew is
+        # preinstalled on the runners; `|| true` because a formula that is
+        # already present must not fail the job.
+        run: brew install libsodium pkgconf || true
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            api/rust/target
+          key: apicargo-${{ matrix.os }}-${{ hashFiles('api/rust/Cargo.lock') }}
+          restore-keys: |
+            apicargo-${{ matrix.os }}-
+
+      - name: Build the rhorizon_crypto wheel
+        working-directory: api/rust
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin build --release --locked --out dist
+          ls -la dist/
+
+      - name: Install and import it
+        working-directory: api/rust
+        run: |
+          python -m pip install dist/*.whl
+          # Import is the real gate: a cdylib can link on the build host and
+          # still fail to load (missing rpath, wrong arch, absent libsodium).
+          python - <<'PY'
+          import platform
+          import rhorizon_crypto as rc
+          print("machine :", platform.machine())
+          print("module  :", rc.__file__)
+          print("symbols :", len([s for s in dir(rc) if not s.startswith('_')]))
+          PY
+
+      - name: Exercise the primitives
+        working-directory: api/rust
+        run: |
+          # Round-trip rather than smoke: an extension that loads but computes
+          # wrongly on a different arch is worse than one that fails to load.
+          python - <<'PY'
+          import os, rhorizon_crypto as rc
+          fn = {n for n in dir(rc) if not n.startswith('_')}
+          print("exported:", sorted(fn))
+          key, pt = os.urandom(32), b"macos round-trip"
+          for enc, dec in (("encrypt", "decrypt"),
+                           ("aead_encrypt", "aead_decrypt"),
+                           ("xchacha20poly1305_encrypt", "xchacha20poly1305_decrypt")):
+              if enc in fn and dec in fn:
+                  ct = getattr(rc, enc)(key, pt)
+                  out = getattr(rc, dec)(key, ct)
+                  assert out == pt, f"{enc}/{dec} round-trip mismatch"
+                  print(f"OK {enc}/{dec} round-trip")
+                  break
+          else:
+              print("NOTE: no recognised AEAD pair exported; import-only check")
+          PY
+
+      - name: Upload the wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhorizon-crypto-${{ matrix.os }}
+          path: api/rust/dist/*.whl
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------
+  # 2. Run tools/install-macos.sh to completion.
+  #
+  #    Its own header calls this path UNVALIDATED on real Apple hardware and
+  #    tells you to keep Docker Desktop as the supported macOS route. This
+  #    job is what would change that, so it is expected to surface real
+  #    breakage rather than pass on the first attempt.
+  #
+  #    --mode user: the only mode the script implements. System mode is
+  #    documented as intent and would need sudo and LaunchDaemons.
+  # --------------------------------------------------------------------
+  install-macos:
+    name: install-macos.sh ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-13]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dry run first
+        # Cheap and diagnostic: proves argument parsing, path resolution and
+        # Homebrew prefix detection before anything touches the runner. If
+        # this fails the real run cannot possibly work, and the log is far
+        # easier to read.
+        run: sh tools/install-macos.sh --mode user --dry-run
+
+      - name: Real install
+        # A password is supplied so the run is deterministic and the vault
+        # ends up unsealed, which is what makes the checks below meaningful.
+        # Not a secret: this instance exists for the length of the job.
+        env:
+          RHORIZON_MASTER_PASSWORD: ci-macos-throwaway-not-a-secret
+        run: |
+          set -x
+          sh tools/install-macos.sh --mode user --workers 1 --api-port 8200
+
+      - name: Verify it actually serves
+        run: |
+          set -eux
+          cfg="$HOME/Library/Application Support/rhorizon/config"
+          cert="$cfg/certs/cert.pem"
+          ls -la "$cfg" || true
+
+          # Give the LaunchAgent a moment; the vault does an Argon2id unseal
+          # on first boot, which is deliberately slow.
+          for i in $(seq 1 30); do
+            curl -fsS --cacert "$cert" "https://127.0.0.1:8200/health" && break
+            sleep 4
+          done
+
+          echo "--- status ---"
+          curl -fsS --cacert "$cert" "https://127.0.0.1:8200/api/v1/vault/status"
+
+          # sealed=false proves the whole chain worked: PostgreSQL up, schema
+          # applied, Rust extension loaded, master key derived.
+          sealed=$(curl -fsS --cacert "$cert" \
+            "https://127.0.0.1:8200/api/v1/vault/status" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin)["sealed"])')
+          echo "sealed=$sealed"
+          [ "$sealed" = "False" ] || { echo "vault did not unseal"; exit 1; }
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "--- launchagent ---"
+          ls -la "$HOME/Library/LaunchAgents" 2>/dev/null || true
+          launchctl list 2>/dev/null | grep -i rhorizon || true
+          echo "--- logs ---"
+          tail -n 100 "$HOME/Library/Logs/rhorizon"/* 2>/dev/null || true
+          echo "--- postgres ---"
+          brew services list 2>/dev/null || true
+          tail -n 50 "$(brew --prefix)/var/log/postgresql@18.log" 2>/dev/null || true

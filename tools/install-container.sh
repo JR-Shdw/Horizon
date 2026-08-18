@@ -669,15 +669,10 @@ else cat <<SEALED
 
     rhorizon unseal
 
-  On a FIRST unseal this sets the master password and returns a one-time
-  root token - store that in a password manager. On a later one (after a
-  reboot or a --tier switch) it just reopens the vault with the password
-  you already chose.
-
   Nothing is written to disk on this path, which is also why the vault
   cannot reopen itself: unattended unseal needs the password readable by
-  the machine. Pass --master-password if you want that instead, and read
-  the warning it prints.
+  the machine. See "Automatic unseal" in the README, and the warning at
+  the bottom of this summary.
 SEALED
 fi)
 
@@ -687,9 +682,11 @@ fi)
     export RH_ADDR=https://$BIND_ADDR:$FRONTEND_PORT
     export RH_CA_FILE=$CERT_DIR/cert.pem
 
-  Quick API check :
+  Quick API check (once you hold a token) :
 
-    export RH_TOKEN=\$(cat $WORK_DIR/secrets/root-token)
+    export RH_TOKEN=$(if [ "$UNSEALED_BY_INSTALLER" = true ]; then \
+        printf '\\$(cat %s/secrets/root-token)' "$WORK_DIR"; \
+      else printf '<the root token the first unseal printed>'; fi)
     curl --cacert $CERT_DIR/cert.pem \\
       -H "Authorization: Bearer \$RH_TOKEN" \\
       https://$BIND_ADDR:$FRONTEND_PORT/api/v1/vault/tokens/whoami
@@ -700,12 +697,20 @@ fi)
   Production hardening checklist :
     - TLS is on by default with a self-signed certificate; replace it
       with a cluster-CA or public-CA pair for anything shared
-    - replace the auto-generated master password with a passphrase you
-      can re-enter (it is required to unseal after every restart)
+    - choose a master password you can re-enter; it is required to unseal
+      after every restart
     - rotate the root token immediately and create per-service tokens
       with narrow scopes + IP allowlists
     - enable 2FA via the Core view in the UI
     - back up the Postgres volume and the secrets/ directory
+
+--------------------------------------------------------------------------------
+  WARNING ON A FIRST UNSEAL THIS SETS THE MASTER PASSWORD AND RETURNS A
+  ONE-TIME ROOT TOKEN, STORE THAT IN A PASSWORD MANAGER.
+
+  On a later one (after a reboot or a --tier switch) it just reopens the
+  vault with the password you already chose.
+--------------------------------------------------------------------------------
 ================================================================================
 
 EOF
