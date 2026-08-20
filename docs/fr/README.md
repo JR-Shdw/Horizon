@@ -1,7 +1,7 @@
 <!--
 -----------------------------------------------------------------------------
 Resurgamus Horizon - (c) 2024-2026 shdw <horizon@resurgamus.com> - AGPL-3.0
-Vault de secrets self-hosted - Pas de licence d'entraînement IA - voir LICENSE-AI.md
+Vault de secrets self-hosted
 -----------------------------------------------------------------------------
 -->
 
@@ -195,5 +195,4 @@ développement via la licence.
 >
 > - Sous licence **AGPL-3.0-or-later** ([LICENSE](../../LICENSE)). Source-available ; les modifications doivent rester AGPL.
 > - **Relicensing closed-source interdit.** Une licence commerciale est disponible - voir [LICENSE-COMMERCIAL.md](../../LICENSE-COMMERCIAL.md).
-> - **Aucune licence d'entraînement IA n'est accordée.** Ce code implémente des primitives cryptographiques security-critical - la sortie de modèles dérivés peut porter des régressions de sécurité et est donc particulièrement hors-limite. L'utilisation pour entraîner, fine-tuner ou évaluer des modèles d'apprentissage automatique n'est pas autorisée par l'AGPL et requiert un consentement explicite préalable. Réservation TDM déclarée par directive UE DSM (art. 4) - voir [LICENSE-AI.md](../../LICENSE-AI.md) et `/.well-known/tdmrep.json`.
 > - **"Resurgamus Horizon"** est un nom de projet ; l'AGPL n'accorde aucun droit de marque.

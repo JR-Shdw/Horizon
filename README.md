@@ -1,8 +1,8 @@
 <!--
 -----------------------------------------------------------------------------
 Resurgamus Horizon - (c) 2024-2026 shdw <horizon@resurgamus.com> - AGPL-3.0
-Self-hosted secrets vault - No AI training license - see LICENSE-AI.md
-Source: https://github.com/JR-Shdw/Horizon - TDM reservation: EU DSM art. 4
+Self-hosted secrets vault
+Source: https://github.com/JR-Shdw/Horizon
 -----------------------------------------------------------------------------
 -->
 
@@ -350,5 +350,4 @@ most users encounter them:
 >
 > - Licensed under **AGPL-3.0-or-later** ([LICENSE](LICENSE)). Source-available; modifications must remain AGPL.
 > - **Closed-source relicensing prohibited.** A commercial license is available - see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
-> - **No AI training license is granted.** This codebase implements security-critical cryptographic primitives - derivative ML output may carry security regressions and is therefore particularly off-limits. Use to train, fine-tune, or evaluate machine-learning models is not authorized under AGPL and requires explicit prior consent. TDM reservation declared per EU DSM directive (art. 4) - see [LICENSE-AI.md](LICENSE-AI.md) and `/.well-known/tdmrep.json`.
 > - **"Resurgamus Horizon" is a reserved project name.** The AGPL license covers the source code only, not the name or logo - it grants no trademark rights. Forks, derivatives, and commercial services built on this code may not use "Resurgamus Horizon" (or a confusingly similar name) to identify themselves without permission from Resurgamus.

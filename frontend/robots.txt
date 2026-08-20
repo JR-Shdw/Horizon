@@ -1,9 +1,17 @@
 # Resurgamus Horizon (rhorizon)
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
-# Licensed under AGPL-3.0-or-later. AI training not authorized.
-# See /LICENSE-AI.md and /.well-known/tdmrep.json for full policy.
+# Licensed under AGPL-3.0-or-later.
+#
+# AI/ML use of the SOURCE is permitted under the AGPL grant; no TDM
+# reservation is declared. The rules below are not an AI policy.
+#
+# A running instance of this software is a secrets vault. It must never be
+# reachable from the public internet, so nothing should be crawling it at
+# all -- the blanket Disallow at the end is a deployment property, and the
+# named agents below are kept only so a crawler that ignores `*` still gets
+# an explicit answer.
 
-# === AI / ML training crawlers, DISALLOWED ===
+# === Crawlers, DISALLOWED (this is a vault UI, not a website) ===
 
 User-agent: GPTBot
 Disallow: /
@@ -89,7 +97,7 @@ Disallow: /
 User-agent: PanguBot
 Disallow: /
 
-# === Default, but rhorizon should NEVER be exposed publicly anyway ===
+# === Default ===
 # This is a secrets vault. Production deploy must be VPN-only.
 User-agent: *
 Disallow: /

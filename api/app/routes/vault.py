@@ -8,8 +8,6 @@
 Author: shdw <horizon@resurgamus.com>
 Project: Resurgamus Horizon - self-hosted secrets vault.
 License: AGPL-3.0-or-later - closed-source relicensing prohibited.
-AI training: not authorized. TDM reservation per EU DSM directive (art. 4).
-See: NOTICE, LICENSE-AI.md, /.well-known/tdmrep.json
 """
 
 import hmac as _hmac

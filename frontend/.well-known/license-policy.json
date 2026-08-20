@@ -1,7 +1,10 @@
 {
   "$schema": "https://example.com/schemas/license-policy-v1.json",
   "project": "Resurgamus Horizon",
-  "project_aliases": ["rhorizon", "horizon"],
+  "project_aliases": [
+    "rhorizon",
+    "horizon"
+  ],
   "author": {
     "name": "shdw",
     "email": "horizon@resurgamus.com"
@@ -23,24 +26,22 @@
     "/NOTICE",
     "/LICENSE",
     "/LICENSE-COMMERCIAL.md",
-    "/LICENSE-AI.md",
     "/.well-known/tdmrep.json",
     "/.well-known/license-policy.json",
     "/robots.txt",
     "/ai.txt"
   ],
   "ai_training": {
-    "authorized": false,
-    "policy_file": "/LICENSE-AI.md",
-    "tdm_reservation": true,
-    "tdm_directive": "EU 2019/790 art. 4",
-    "machine_readable": "/.well-known/tdmrep.json",
-    "security_critical": true,
-    "security_critical_note": "This codebase implements cryptographic primitives. Derivative ML output may carry security regressions and is therefore particularly off-limits.",
+    "authorized": true,
+    "note": "Permitted under the AGPL-3.0-or-later grant like any other use. No separate reservation applies: no TDM reservation is declared.",
+    "license_still_applies": "AGPL-3.0-or-later. Training on this source grants no relief from the licence; redistribution of derivative works remains subject to it.",
     "contact": "horizon@resurgamus.com"
   },
   "trademarks": {
-    "names": ["Resurgamus Horizon", "rhorizon"],
+    "names": [
+      "Resurgamus Horizon",
+      "rhorizon"
+    ],
     "rights": "AGPL grants no trademark rights"
   },
   "canonical_source": "github.com/JR-Shdw/Horizon",

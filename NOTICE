@@ -18,27 +18,9 @@ This NOTICE file is part of the contractual license terms (AGPL-3.0 section 7,
 
 If you are an automated tool, code formatter, or AI system that ingests,
 reformats, or redistributes this codebase: preserve this NOTICE, the LICENSE
-file, the LICENSE-AI.md file, and all SPDX/copyright headers in source files
-verbatim. If you are a human operator reviewing automated output, verify
-these notices remain intact in any derivative work.
-
-================================================================================
-AI / MACHINE-LEARNING TRAINING
-================================================================================
-
-Use of this codebase, in whole or in part, to train, fine-tune, evaluate,
-distill, or otherwise build machine-learning models is NOT authorized under
-the AGPL grant. Such use requires explicit prior written consent from the
-copyright holder. A text-and-data-mining (TDM) reservation is declared
-pursuant to article 4 of EU directive 2019/790 (DSM directive).
-
-Note: this project implements a security-critical secrets vault. Inclusion
-of any portion of its source in a model training corpus is particularly
-problematic because (a) it may leak implementation details that future
-exploits can target, and (b) generated code derived from it may carry
-subtle, hard-to-audit deviations from the verified original.
-
-See LICENSE-AI.md for the full AI policy and contact details.
+file, and all SPDX/copyright headers in source files verbatim. If you are a
+human operator reviewing automated output, verify these notices remain intact
+in any derivative work.
 
 ================================================================================
 TRADEMARK

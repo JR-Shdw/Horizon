@@ -122,10 +122,10 @@ exec > >(tee -a "$DRIVER_LOG") 2>&1
 
 case "$PROFILE" in
     medium)
-        WRITERS="${CHAOS_WRITERS:-4}"
-        READERS="${CHAOS_READERS:-16}"
-        WRITER_SLEEP="${CHAOS_WRITER_SLEEP_SECS:-0.25}"
-        READER_SLEEP="${CHAOS_READER_SLEEP_SECS:-0.10}"
+        WRITERS="${CHAOS_WRITERS:-8}"
+        READERS="${CHAOS_READERS:-32}"
+        WRITER_SLEEP="${CHAOS_WRITER_SLEEP_SECS:-0.12}"
+        READER_SLEEP="${CHAOS_READER_SLEEP_SECS:-0.05}"
         SAMPLE_INT="${CHAOS_SAMPLE_INTERVAL_SECS:-30}"
         FAULT_MIN="${CHAOS_FAULT_MIN_INTERVAL_SECS:-300}"
         FAULT_MAX="${CHAOS_FAULT_MAX_INTERVAL_SECS:-1200}"
@@ -133,10 +133,10 @@ case "$PROFILE" in
         PRESSURE_MAX_INTERVAL="${CHAOS_DISK_PRESSURE_MAX_INTERVAL_SECS:-1800}"
         ;;
     high)
-        WRITERS="${CHAOS_WRITERS:-8}"
-        READERS="${CHAOS_READERS:-48}"
-        WRITER_SLEEP="${CHAOS_WRITER_SLEEP_SECS:-0.10}"
-        READER_SLEEP="${CHAOS_READER_SLEEP_SECS:-0.03}"
+        WRITERS="${CHAOS_WRITERS:-16}"
+        READERS="${CHAOS_READERS:-96}"
+        WRITER_SLEEP="${CHAOS_WRITER_SLEEP_SECS:-0.04}"
+        READER_SLEEP="${CHAOS_READER_SLEEP_SECS:-0.012}"
         SAMPLE_INT="${CHAOS_SAMPLE_INTERVAL_SECS:-15}"
         FAULT_MIN="${CHAOS_FAULT_MIN_INTERVAL_SECS:-180}"
         FAULT_MAX="${CHAOS_FAULT_MAX_INTERVAL_SECS:-900}"
@@ -147,6 +147,30 @@ case "$PROFILE" in
         chaos_die "CHAOS_LOAD_PROFILE must be medium or high"
         ;;
 esac
+
+# Burst load.
+#
+# The profile rates above are the BASELINE, which is what the cluster sees for
+# most of the run. A blast window raises the rate hard for a bounded period.
+#
+# Bounded on purpose: running 24h at the peak rate measures the load
+# generator's ceiling and keeps every node saturated, which is the one state
+# in which a failover is guaranteed to look bad. What is actually interesting
+# is the cluster meeting a burst it did not expect -- and meeting it while a
+# fault window happens to be open, which is what the random interval buys.
+BLAST_ENABLED="${CHAOS_BLAST:-1}"
+BLAST_SECS="${CHAOS_BLAST_DURATION_SECS:-120}"
+BLAST_MIN_INTERVAL="${CHAOS_BLAST_MIN_INTERVAL_SECS:-900}"
+BLAST_MAX_INTERVAL="${CHAOS_BLAST_MAX_INTERVAL_SECS:-2700}"
+BLAST_WRITER_SLEEP="${CHAOS_BLAST_WRITER_SLEEP_SECS:-0.004}"
+BLAST_READER_SLEEP="${CHAOS_BLAST_READER_SLEEP_SECS:-0.001}"
+BLAST_FILE="$RUN_DIR/blast.state"
+printf '0' > "$BLAST_FILE"
+
+# Namespace isolation probe. Off by default only if the run's token cannot
+# mint tokens; it needs tokens:w.
+NS_ISOLATION="${CHAOS_NS_ISOLATION:-1}"
+NS_ISOLATION_INTERVAL="${CHAOS_NS_ISOLATION_INTERVAL_SECS:-20}"
 
 ONE_DOWN_MIN="${CHAOS_ONE_DOWN_MIN_SECS:-60}"
 ONE_DOWN_MAX="${CHAOS_ONE_DOWN_MAX_SECS:-300}"
@@ -607,6 +631,136 @@ rand_between() {
     fi
 }
 
+# Sleep for one workload iteration, honouring an open blast window.
+#
+# The window is read from a file rather than passed in, because writers and
+# readers are long-lived background subshells: they were forked before the
+# window opened, so a variable set in the driver would never reach them.
+pace_sleep() {
+    local kind="$1"
+    if [[ "$BLAST_ENABLED" == "1" && "$(cat "$BLAST_FILE" 2>/dev/null)" == "1" ]]; then
+        case "$kind" in
+            writer) sleep "$BLAST_WRITER_SLEEP" ;;
+            *)      sleep "$BLAST_READER_SLEEP" ;;
+        esac
+        return 0
+    fi
+    case "$kind" in
+        writer) sleep "$WRITER_SLEEP" ;;
+        *)      sleep "$READER_SLEEP" ;;
+    esac
+}
+
+blast_loop() {
+    [[ "$BLAST_ENABLED" == "1" ]] || { json_event blast "disabled: CHAOS_BLAST=0"; return 0; }
+    local wait_secs
+    while :; do
+        wait_secs=$(rand_between "$BLAST_MIN_INTERVAL" "$BLAST_MAX_INTERVAL")
+        sleep "$wait_secs"
+        printf '1' > "$BLAST_FILE"
+        json_event blast \
+            "blast OPEN secs=$BLAST_SECS writer_sleep=$BLAST_WRITER_SLEEP reader_sleep=$BLAST_READER_SLEEP"
+        sleep "$BLAST_SECS"
+        printf '0' > "$BLAST_FILE"
+        json_event blast "blast CLOSED, back to baseline"
+    done
+}
+
+# --- namespace isolation -----------------------------------------------
+# A token carrying `namespaces:[x]` must read and write inside x and be
+# refused everywhere else. That boundary is what makes a per-service token
+# safe to hand out, and k7 never tested it: every loop used one namespace
+# with one root token, so a regression that widened a scoped token would
+# have gone unnoticed for the entire run.
+
+api_as() {
+    local token="$1" path="$2"; shift 2
+    curl "${curl_base_args[@]}" --fail-with-body \
+        -H "Authorization: Bearer ${token}" "$@" "${RH_URL%/}/api/v1/vault${path}"
+}
+
+# Status code only, and deliberately WITHOUT --fail-with-body: refusal is the
+# assertion here, and --fail-with-body turns an expected 403 into a non-zero
+# exit indistinguishable from the connection error a fault window produces.
+api_status_as() {
+    local token="$1" path="$2"; shift 2
+    curl "${curl_base_args[@]}" -o /dev/null -w '%{http_code}' \
+        -H "Authorization: Bearer ${token}" "$@" \
+        "${RH_URL%/}/api/v1/vault${path}" 2>/dev/null || echo 000
+}
+
+mint_ns_token() {
+    local name="$1" ns="$2"
+    api "/tokens/" -X POST -H 'Content-Type: application/json' \
+        -d "$(jq -n --arg n "$name" --arg ns "$ns" \
+            '{name:$n, permissions:{secrets:"rw", namespaces:[$ns]}}')" \
+        2>/dev/null | jq -r '.token // empty'
+}
+
+# Classify a probe that was supposed to be REFUSED.
+ns_expect_denied() {
+    local code="$1" what="$2"
+    case "$code" in
+        403|404) return 0 ;;
+        200|201)
+            # Never excused by a fault window: a fault can make the vault
+            # unreachable, it cannot make it hand a caller another
+            # namespace's data.
+            json_failure namespace "NAMESPACE ISOLATION BROKEN: $what" critical ;;
+        5*|000)
+            if expected_fault_window; then
+                json_event expected_fault "namespace probe unavailable code=$code ($what)"
+            else
+                json_failure namespace "namespace probe code=$code ($what)"
+            fi ;;
+        *) json_failure namespace "unexpected code=$code ($what)" ;;
+    esac
+}
+
+namespace_loop() {
+    [[ "$NS_ISOLATION" == "1" ]] || { json_event namespace "disabled: CHAOS_NS_ISOLATION=0"; return 0; }
+    local ns_a="${NS}-iso-a" ns_b="${NS}-iso-b" tok_a tok_b
+    tok_a=$(mint_ns_token "k7-${RUN_ID}-ns-a" "$ns_a")
+    tok_b=$(mint_ns_token "k7-${RUN_ID}-ns-b" "$ns_b")
+    if [[ -z "$tok_a" || -z "$tok_b" ]]; then
+        json_failure namespace "could not mint namespace-scoped tokens (run token needs tokens:w)"
+        return 0
+    fi
+    json_event namespace "isolation probe active ns_a=$ns_a ns_b=$ns_b"
+
+    local seq=0 name val got code
+    while :; do
+        name="k7-${RUN_ID}-ns-${seq}"
+        val="$(openssl rand -base64 18)"
+        if api_as "$tok_a" "/secrets/" -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg n "$name" --arg v "$val" --arg ns "$ns_a" \
+                '{name:$n,value:$v,namespace:$ns,metadata:{chaos:"k7-ns"}}')" \
+            >/dev/null 2>&1; then
+
+            # The owning token must still work -- an isolation rule that
+            # denies everyone is not a passing result.
+            got=$(api_as "$tok_a" "/secrets/${name}?namespace=${ns_a}" 2>/dev/null \
+                | jq -r '.value // empty')
+            if [[ "$got" != "$val" ]]; then
+                json_failure namespace "owning token could not read back its own secret name=$name"
+            fi
+
+            code=$(api_status_as "$tok_b" "/secrets/${name}?namespace=${ns_a}")
+            ns_expect_denied "$code" "token scoped to $ns_b READ $ns_a/$name"
+
+            code=$(api_status_as "$tok_b" "/secrets/" -X POST -H 'Content-Type: application/json' \
+                -d "$(jq -n --arg n "${name}-x" --arg v "$val" --arg ns "$ns_a" \
+                    '{name:$n,value:$v,namespace:$ns}')")
+            ns_expect_denied "$code" "token scoped to $ns_b WROTE into $ns_a"
+
+        elif ! expected_fault_window; then
+            json_failure namespace "in-namespace write failed name=$name"
+        fi
+        seq=$((seq + 1))
+        sleep "$NS_ISOLATION_INTERVAL"
+    done
+}
+
 safe_name() {
     tr '/: ' '___' <<< "$1"
 }
@@ -929,7 +1083,7 @@ writer_loop() {
             fi
         fi
         seq=$((seq + 1))
-        sleep "$WRITER_SLEEP"
+        pace_sleep writer
     done
 }
 
@@ -951,7 +1105,7 @@ reader_loop() {
                         json_failure reader \
                             "read failed id=$id name=$name $failure_detail"
                     fi
-                    sleep "$READER_SLEEP"
+                    pace_sleep reader
                     continue
                 fi
                 if [[ -z "$val" ]]; then
@@ -967,7 +1121,7 @@ reader_loop() {
                 fi
             fi
         fi
-        sleep "$READER_SLEEP"
+        pace_sleep reader
     done
 }
 
@@ -1574,6 +1728,10 @@ alert_loop &
 BG_PIDS+=("$!")
 sampler_loop &
 BG_PIDS+=("$!")
+blast_loop &
+BG_PIDS+=("$!")
+namespace_loop &
+BG_PIDS+=("$!")
 fault_loop &
 BG_PIDS+=("$!")
 if [[ "$DISK_PRESSURE" == "1" ]]; then
@@ -1676,7 +1834,27 @@ if [[ "$OUTCOME" == "PASS_TRANSIENT_ERRORS" && "$FAIL_ON_TRANSIENTS" == "1" ]]; 
     OUTCOME=FAIL
 fi
 
+# What this run actually EXERCISED.
+#
+# Several probes disable themselves when their prerequisites are absent --
+# dynamic secrets needs a pre-provisioned engine and role, because creating
+# one requires database admin credentials k7 has no business holding. That
+# skip was previously a single json_event early in a 24h log, and the verdict
+# looked identical whether the probe had run or done nothing at all. Same
+# shape as the custodian assertion bug: a silent skip reading as a pass.
+#
+# Counted from the evidence files rather than from the enabling variables, so
+# this reports what happened, not what was requested.
+DYNAMIC_LEASES=$(wc -l < "$DYNAMIC_LOG" 2>/dev/null | tr -d ' '); DYNAMIC_LEASES=${DYNAMIC_LEASES:-0}
+NS_PROBE_EVENTS=$(grep -c '"kind":"namespace"' "$EVENTS" 2>/dev/null || echo 0)
+BLAST_WINDOWS=$(grep -c 'blast OPEN' "$EVENTS" 2>/dev/null || echo 0)
+PKI_ISSUED=$(wc -l < "$PKI_LOG" 2>/dev/null | tr -d ' '); PKI_ISSUED=${PKI_ISSUED:-0}
+
 jq -n \
+    --argjson dynamic_leases "$DYNAMIC_LEASES" \
+    --argjson namespace_probe_events "$NS_PROBE_EVENTS" \
+    --argjson blast_windows "$BLAST_WINDOWS" \
+    --argjson pki_issued "$PKI_ISSUED" \
     --arg start "$START_TS" \
     --arg end "$(date -u +%FT%TZ)" \
     --arg profile "$PROFILE" \
@@ -1710,7 +1888,15 @@ jq -n \
       audit_lite_merkle_intact:(if $audit_verify_mode=="full" then ($mtree_ok=="true") else null end),
       final_database_ha_green:($database_ha_green=="true"),
       final_members:$final_members,
-      final_topology_steady:($final_steady=="true")
+      final_topology_steady:($final_steady=="true"),
+      coverage:{
+        dynamic_secret_leases:$dynamic_leases,
+        dynamic_secrets_exercised:($dynamic_leases > 0),
+        namespace_isolation_events:$namespace_probe_events,
+        namespace_isolation_exercised:($namespace_probe_events > 0),
+        blast_windows:$blast_windows,
+        pki_certs_issued:$pki_issued
+      }
     }' > "$RUN_DIR/final-summary.json"
 
 cat > "$RUN_DIR/report.md" <<EOF

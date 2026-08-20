@@ -5,15 +5,13 @@
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 # -----------------------------------------------------------------------------
 # Resurgamus Horizon, (c) 2024-2026 shdw <horizon@resurgamus.com>, AGPL-3.0
-# Self-hosted secrets vault, No AI training license, see LICENSE-AI.md
+# Self-hosted secrets vault
 # -----------------------------------------------------------------------------
 """Resurgamus Horizon - self-hosted secrets vault (FastAPI entry point).
 
 Author: shdw <horizon@resurgamus.com>
 Project: Resurgamus Horizon - minimal AGPL-3.0 vault for infra automation.
 License: AGPL-3.0-or-later - closed-source relicensing prohibited.
-AI training: not authorized. TDM reservation per EU DSM directive (art. 4).
-See: NOTICE, LICENSE-AI.md, /.well-known/tdmrep.json
 
 Lifespan handles schema migration at startup and worker
 compartmentalization (master + RPC-attached followers, intra-host).

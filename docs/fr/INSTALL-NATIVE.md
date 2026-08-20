@@ -1,7 +1,7 @@
 <!--
 -----------------------------------------------------------------------------
 Resurgamus Horizon - (c) 2024-2026 shdw <horizon@resurgamus.com> - AGPL-3.0
-Self-hosted secrets vault - No AI training license - see LICENSE-AI.md
+Self-hosted secrets vault
 -----------------------------------------------------------------------------
 -->
 
