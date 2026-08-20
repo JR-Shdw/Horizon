@@ -34,6 +34,43 @@ archives:
   - formats: [zip]
     name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 
+# One module-level CycloneDX document, not one per archive: the dependency set
+# comes from a single go.mod and is identical across all 13 platform zips, so
+# per-archive SBOMs would be 13 near-copies. Same shape as the Gitea release
+# (.woodpecker/release.yml builds one <module>.sbom.cdx.json per module), and
+# the same CycloneDX format, so a consumer sees one artifact type either way.
+#
+# This is what lets someone confirm a dependency CVE is actually remediated --
+# e.g. golang.org/x/mod >= 0.40.0 for CVE-2026-56864/56865 -- without unzipping
+# a provider and rebuilding it.
+#
+# It is declared BEFORE checksum on purpose: goreleaser hashes SBOM artifacts
+# into SHA256SUMS, which is the file the GPG signature covers, so the SBOM
+# inherits that signature transitively.
+sboms:
+  - id: module
+    artifacts: any
+    documents:
+      - '{{ .ProjectName }}_{{ .Version }}_sbom.cdx.json'
+  # `dir:..`, NOT `dir:.` -- goreleaser runs this command with its working
+  # directory set to dist/, so `dir:.` cataloged the 13 freshly-built platform
+  # binaries instead of the module. Measured: 325 library components of which
+  # only 25 were unique (every dependency repeated once per binary), and
+  # golang.org/x/mod absent entirely -- the go.mod was never read.
+  #
+  # `dir:..` is the module root; --exclude ./dist then keeps the build output
+  # from being catalogued a second time. Result: 91 components, no duplicates,
+  # and golang.org/x/mod v0.40.0 present, which is the entry a consumer needs
+  # to confirm CVE-2026-56864/56865 is remediated.
+    cmd: syft
+    args:
+      - 'scan'
+      - 'dir:..'
+      - '--exclude'
+      - './dist'
+      - '--output'
+      - 'cyclonedx-json=$document'
+
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
   algorithm: sha256

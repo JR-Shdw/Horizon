@@ -348,11 +348,7 @@ SECRET_DIR="$CONFIG_DIR/secrets"
 # after the cheap argument validation, not in the middle of it.
 if [ -n "${MASTER_PW_FILE:-}" ]; then
     [ -f "$MASTER_PW_FILE" ] || { printf 'master password file not found: %s\n' "$MASTER_PW_FILE" >&2; exit 1; }
-    # Strip a single trailing newline only: `printf secret > file` and
-    # `echo secret > file` must yield the same password, but a password whose
-    # real last byte is a newline is not silently truncated further.
-    MASTER_PW=$(printf '%s' "$(cat "$MASTER_PW_FILE")")
-    [ -n "$MASTER_PW" ] || { printf 'master password file is empty: %s\n' "$MASTER_PW_FILE" >&2; exit 1; }
+    [ -s "$MASTER_PW_FILE" ] || { printf 'master password file is empty: %s\n' "$MASTER_PW_FILE" >&2; exit 1; }
 fi
 if [ -n "${MASTER_PW_FROM_ARGV:-}" ]; then
     printf '%s\n' \
@@ -361,13 +357,61 @@ if [ -n "${MASTER_PW_FROM_ARGV:-}" ]; then
       "         Prefer --master-password-file FILE, or omit it to keep the" \
       "         vault sealed." >&2
 fi
-# Shared layout first, then the pre-existing single-file form so an install
-# made before the layouts converged still re-runs.
-if [ -z "$MASTER_PW" ] && [ -f "$SECRET_DIR/master-password" ]; then
-    MASTER_PW=$(cat "$SECRET_DIR/master-password" 2>/dev/null || true)
+# ---------------------------------------------------------------------------
+# Stage the master password in a FILE, never in a shell variable.
+#
+# $(...) strips ALL trailing newlines, so a shell variable cannot carry a
+# password that ends in one. The --master-password-file branch above used to
+# read it as $(printf '%s' "$(cat FILE)") while its comment claimed that
+# stripped "a single trailing newline only ... not silently truncated further"
+# -- it did the opposite, and the failure is unrecoverable: the vault gets
+# initialised with the truncated password while the operator holds the
+# original, with no way in. Same defect tools/install-container.sh carried.
+#
+# Every source now lands in one staged file, and every consumer reads it: the
+# unseal, the persisted copy, and the legacy mirror.
+# ---------------------------------------------------------------------------
+PW_STAGE=$(TMPDIR=/tmp mktemp)
+chmod 0600 "$PW_STAGE"
+trap 'rm -f "$PW_STAGE"' EXIT INT TERM
+HAVE_MASTER_PW=false
+if [ -n "${MASTER_PW_FILE:-}" ]; then
+    # python reads the bytes and removes at most ONE trailing newline, so
+    # `printf secret >f` and `echo secret >f` still agree, and a password whose
+    # last byte really is a newline survives.
+    python3 - "$MASTER_PW_FILE" "$PW_STAGE" <<'PY' || exit 1
+import sys
+data = open(sys.argv[1], "rb").read()
+if data.endswith(b"\n"):
+    data = data[:-1]
+if not data:
+    sys.exit("master password file is empty once its trailing newline is removed")
+with open(sys.argv[2], "wb") as fh:
+    fh.write(data)
+PY
+    HAVE_MASTER_PW=true
+elif [ -n "$MASTER_PW" ]; then
+    # argv / RH_MASTER_PASSWORD: already a shell string, so whatever it holds is
+    # what the operator passed. Write it byte for byte.
+    printf '%s' "$MASTER_PW" > "$PW_STAGE"
+    HAVE_MASTER_PW=true
 fi
-if [ -z "$MASTER_PW" ] && [ -f "$SECRET_FILE" ]; then
-    MASTER_PW=$(sed -n 's/^MASTER_PASSWORD=//p' "$SECRET_FILE" 2>/dev/null || true)
+# Shared layout first, then the pre-existing single-file form so an install
+# made before the layouts converged still re-runs. The saved file is
+# authoritative and already byte-exact, so it is copied rather than round-tripped
+# through a variable, which would strip a trailing newline again.
+if [ "$HAVE_MASTER_PW" != true ] && [ -f "$SECRET_DIR/master-password" ]; then
+    cat "$SECRET_DIR/master-password" > "$PW_STAGE" 2>/dev/null && HAVE_MASTER_PW=true
+fi
+if [ "$HAVE_MASTER_PW" != true ] && [ -f "$SECRET_FILE" ]; then
+    # KEY=VALUE cannot represent a newline in the first place, so nothing this
+    # legacy file can hold is at risk from the capture.
+    _legacy_pw=$(sed -n 's/^MASTER_PASSWORD=//p' "$SECRET_FILE" 2>/dev/null || true)
+    if [ -n "$_legacy_pw" ]; then
+        printf '%s' "$_legacy_pw" > "$PW_STAGE"
+        HAVE_MASTER_PW=true
+    fi
+    unset _legacy_pw
 fi
 # Sealed by default, matching tools/install-container.sh. The installer used to
 # mint a master password here (`: "${MASTER_PW:=$(gen_secret 24)}"`) and unseal
@@ -378,7 +422,7 @@ fi
 # Providing one (--master-password, --master-password-file, or a saved
 # SECRET_FILE from an earlier run) keeps the unattended path working, and is
 # the only way credentials land on disk.
-if [ -z "$MASTER_PW" ]; then
+if [ "$HAVE_MASTER_PW" != true ]; then
     UNSEAL_AT_INSTALL=0
 else
     UNSEAL_AT_INSTALL=1
@@ -619,7 +663,7 @@ if [ "$UNSEAL_AT_INSTALL" = 0 ]; then
     log "  Pass --master-password-file FILE if you want that instead."
 else
     log "unseal"
-    _minted_rt=$(unseal_vault "https://$LOCAL_HOST:$API_PORT" "$MASTER_PW" "$TLS_CERT")
+    _minted_rt=$(unseal_vault "https://$LOCAL_HOST:$API_PORT" "$PW_STAGE" "$TLS_CERT")
     [ -n "$_minted_rt" ] && ROOT_TOKEN="$_minted_rt"   # first-boot/restore mints one; else keep the saved one
     # One credential layout across every installer: <base>/secrets/<name>, one
     # secret per file, mode 0400 in a 0700 directory. install-container.sh and
@@ -642,18 +686,27 @@ else
     [ "$DRY_RUN" = 1 ] || { umask 077
         run mkdir -p "$SECRET_DIR"
         run chmod 700 "$SECRET_DIR"
-        printf '%s' "$MASTER_PW" > "$SECRET_DIR/master-password"
+        cat "$PW_STAGE" > "$SECRET_DIR/master-password"
         chmod 0400 "$SECRET_DIR/master-password"
         if [ -n "$ROOT_TOKEN" ]; then
             printf '%s' "$ROOT_TOKEN" > "$SECRET_DIR/root-token"
             chmod 0400 "$SECRET_DIR/root-token"
         fi
+        # Refresh the legacy KEY=VALUE mirror only when the password is
+        # representable in it. A newline in the value would end the line, so the
+        # file would read back as a DIFFERENT password -- exactly the silent
+        # truncation this change removes, reintroduced one layer down. The
+        # per-file copy above is authoritative and is read first on re-run.
         if [ -f "$SECRET_FILE" ]; then
-            {
-                printf 'MASTER_PASSWORD=%s\n' "$MASTER_PW"
-                [ -n "$ROOT_TOKEN" ] && printf 'ROOT_TOKEN=%s\n' "$ROOT_TOKEN"
-            } > "$SECRET_FILE"
-            _legacy_secret_file=1
+            if [ "$(wc -l < "$PW_STAGE")" -eq 0 ]; then
+                {
+                    printf 'MASTER_PASSWORD=%s\n' "$(cat "$PW_STAGE")"
+                    [ -n "$ROOT_TOKEN" ] && printf 'ROOT_TOKEN=%s\n' "$ROOT_TOKEN"
+                } > "$SECRET_FILE"
+                _legacy_secret_file=1
+            else
+                _legacy_secret_file_skipped=1
+            fi
         fi
     }
     if [ -n "$ROOT_TOKEN" ]; then log "done. master password + admin root token saved in $SECRET_DIR/ (mode 0400)"
@@ -671,6 +724,15 @@ else
         log "NOTE: $SECRET_FILE predates the shared layout and still holds both"
         log "  secrets. They are now in $SECRET_DIR/ as well, so that file is a"
         log "  redundant copy -- delete it once you have checked the new one:"
+        log "      rm $SECRET_FILE"
+    fi
+    if [ -n "${_legacy_secret_file_skipped:-}" ]; then
+        # Left deliberately stale rather than rewritten wrong: this password
+        # contains a newline, and KEY=VALUE would read back as a different one.
+        log "NOTE: $SECRET_FILE predates the shared layout and was left untouched --"
+        log "  this master password contains a newline, which KEY=VALUE cannot hold"
+        log "  without changing it. $SECRET_DIR/master-password is the byte-exact"
+        log "  copy and is the one this installer reads. Delete the old file:"
         log "      rm $SECRET_FILE"
     fi
 fi

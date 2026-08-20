@@ -161,14 +161,19 @@ async def _maybe_auto_promote(db: AsyncSession) -> int:
         return 0
 
     # 1-3. Already primary, no lease, or lease still fresh -- skip.
-    current_primary, lease_dt = await cluster_membership.read_canonical_primary(db)
+    #
+    # ``now`` is PostgreSQL's clock, never this host's. Every timestamp
+    # compared below (the lease, last_heartbeat, role_changed_at) was stamped
+    # by the database, so measuring them against a local wall clock made every
+    # gate here sensitive to NTP drift between nodes. See
+    # cluster_membership.read_canonical_primary.
+    current_primary, lease_dt, now = await cluster_membership.read_canonical_primary(db)
     if current_primary == node_uuid:
         return 0
     if lease_dt is None:
         return 0
     ttl_secs = settings.cluster_primary_lease_ttl_secs
     skew_secs = ttl_secs / 3.0
-    now = datetime.now(timezone.utc)
     if now < lease_dt + timedelta(seconds=skew_secs):
         return 0
 
@@ -225,14 +230,16 @@ async def _maybe_auto_promote(db: AsyncSession) -> int:
         # 7. Re-read under lock : the snapshot may have moved while we
         # slept on the jitter. An honest primary that re-extended its
         # lease in between wins ; we back off cleanly.
+        # Re-reads PostgreSQL's clock along with the lease, so the decisive
+        # comparison and the timestamps it writes below share one reference.
         (
             primary_under_lock,
             lease_under_lock,
+            now_under_lock,
         ) = await cluster_membership.read_canonical_primary(db)
         if primary_under_lock == node_uuid:
             return  # Defensive : a concurrent path won us (e.g. operator
             #          /promote called targeting self between guard and lock).
-        now_under_lock = datetime.now(timezone.utc)
         if (
             lease_under_lock is not None
             and now_under_lock < lease_under_lock + timedelta(seconds=skew_secs)
@@ -655,8 +662,10 @@ async def _heartbeat_body(db: AsyncSession, node_uuid: str) -> bool:
                 node_uuid,
             )
 
-    primary_uuid, lease_dt = await cluster_membership.read_canonical_primary(db)
-    now = datetime.now(timezone.utc)
+    # PostgreSQL's clock on both sides : the deadline we STAMP here is read by
+    # every other node, and the self-demote comparison below reads a deadline
+    # stamped by another node. Neither may involve this host's wall clock.
+    primary_uuid, lease_dt, now = await cluster_membership.read_canonical_primary(db)
     if primary_uuid == node_uuid:
         ttl_secs = settings.cluster_primary_lease_ttl_secs
         lease_expires_iso = (now + timedelta(seconds=ttl_secs)).isoformat()
@@ -1110,7 +1119,7 @@ async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
                 # (DB unreachable) we fall through to the except below with
                 # last_lease_confirm UNCHANGED, which is precisely what arms the
                 # fence.
-                primary_uuid, _ = await cluster_membership.read_canonical_primary(db)
+                primary_uuid, _, _ = await cluster_membership.read_canonical_primary(db)
                 last_lease_confirm = (
                     time.monotonic() if primary_uuid == node_uuid else None
                 )

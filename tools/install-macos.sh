@@ -39,7 +39,7 @@
 #   sh tools/install-macos.sh [--mode user] [--workers N] [--dry-run]
 #       [--dir APP_DIR] [--config-dir DIR] [--state-dir DIR]
 #       [--runtime-dir DIR] [--audit-dir DIR] [--bind ADDR] [--api-port N]
-#       [--master-password V] [--external-db URL]
+#       [--master-password-file FILE] [--external-db URL]
 #       [--memory-lock-mode best-effort|required] [--no-service]
 
 set -eu
@@ -83,15 +83,36 @@ while [ $# -gt 0 ]; do
         --audit-dir) AUDIT_DIR=$2; shift ;;
         --bind) BIND=$2; shift ;;
         --api-port) API_PORT=$2; shift ;;
-        --master-password) MASTER_PW=$2; shift ;;
+        # A secret passed in argv is world-readable in /proc/<pid>/cmdline for
+        # the life of the process and lands in shell history. Kept for
+        # compatibility, but it warns and --master-password-file is preferred.
+        --master-password) MASTER_PW=$2; MASTER_PW_FROM_ARGV=1; shift ;;
+        --master-password-file) MASTER_PW_FILE=$2; shift ;;
         --external-db) EXTERNAL_DB=$2; shift ;;
         --memory-lock-mode) MEMORY_LOCK_MODE=$2; shift ;;
         --no-service) WANT_SERVICE=0 ;;
-        -h|--help) sed -n '5,32p' "$0"; exit 0 ;;
+        # Through 43, not 32: the invocation synopsis lives at 39-43, so the
+        # option list was never actually printed by --help.
+        -h|--help) sed -n '5,43p' "$0"; exit 0 ;;
         *) printf 'unknown arg: %s\n' "$1" >&2; exit 1 ;;
     esac
     shift
 done
+
+# Checked here, not at the staging in [5/7]: that runs after Homebrew and the
+# PostgreSQL setup, so a typo'd path would fail several minutes into an install
+# rather than immediately. The bytes are read later; this only proves the file
+# is there and non-empty.
+if [ -n "${MASTER_PW_FILE:-}" ]; then
+    [ -f "$MASTER_PW_FILE" ] || { printf 'master password file not found: %s\n' "$MASTER_PW_FILE" >&2; exit 1; }
+    [ -s "$MASTER_PW_FILE" ] || { printf 'master password file is empty: %s\n' "$MASTER_PW_FILE" >&2; exit 1; }
+fi
+if [ -n "${MASTER_PW_FROM_ARGV:-}" ]; then
+    printf '%s\n' \
+      "WARNING: --master-password puts the secret in this process's command line" \
+      "         (readable via ps) and in your shell history." \
+      "         Prefer --master-password-file FILE." >&2
+fi
 
 case "$RH_MODE" in
     user) ;;
@@ -221,7 +242,43 @@ xml_escape() {
 }
 
 log "[5/7] env + launch wrapper"
-: "${MASTER_PW:=$(gen_secret 24)}"
+# Stage the master password in a FILE, never hand it to unseal_vault by value.
+# A shell variable cannot carry a password that ends in a newline -- any $(...)
+# on the way in strips all of them -- and a vault initialised with a truncated
+# master password cannot be reopened with the one the operator holds. Same
+# shape as tools/install-native.sh and tools/install-container.sh.
+PW_STAGE=$(TMPDIR=/tmp mktemp)
+chmod 0600 "$PW_STAGE"
+trap 'rm -f "$PW_STAGE"' EXIT INT TERM
+if [ -n "${MASTER_PW_FILE:-}" ]; then
+    # python reads the bytes and removes at most ONE trailing newline, so
+    # `printf secret >f` and `echo secret >f` still agree, and a password whose
+    # last byte really is a newline survives. Same normalisation as the other
+    # two installers, so one password file works against all three.
+    python3 - "$MASTER_PW_FILE" "$PW_STAGE" <<'PY' || exit 1
+import sys
+data = open(sys.argv[1], "rb").read()
+if data.endswith(b"\n"):
+    data = data[:-1]
+if not data:
+    sys.exit("master password file is empty once its trailing newline is removed")
+with open(sys.argv[2], "wb") as fh:
+    fh.write(data)
+PY
+elif [ -n "$MASTER_PW" ]; then
+    # argv / RH_MASTER_PASSWORD: already a shell string, so whatever it holds is
+    # what the operator passed. Write it byte for byte.
+    printf '%s' "$MASTER_PW" > "$PW_STAGE"
+else
+    # Last resort: mint one. Unlike install-native.sh, which stays SEALED when
+    # given nothing, macOS keeps this path so an unattended run (the GitHub
+    # Actions macOS runner is the only place this script is exercised end to
+    # end) still reaches an unsealed vault and validates the whole install.
+    # The $(...) capture is safe HERE specifically: gen_secret returns lowercase
+    # hex, which contains no newline of its own, so stripping the one openssl
+    # appends loses nothing.
+    printf '%s' "$(gen_secret 24)" > "$PW_STAGE"
+fi
 # TLS is mandatory and uvicorn terminates it -- the native path has no nginx.
 # Same helper and same reasoning as tools/install-native.sh.
 ensure_tls_cert "$CONFIG_DIR/certs" "$BIND"
@@ -313,7 +370,7 @@ fi
 
 log "[7/7] unseal"
 if [ "$WANT_SERVICE" = 1 ]; then
-    unseal_vault "https://$LOCAL_HOST:$API_PORT" "$MASTER_PW" "$TLS_CERT"
+    unseal_vault "https://$LOCAL_HOST:$API_PORT" "$PW_STAGE" "$TLS_CERT"
 else
     log "unseal skipped because --no-service was used"
 fi
@@ -321,7 +378,20 @@ fi
 if [ "$DRY_RUN" = 1 ]; then
     printf '   [dry-run] write %s\n' "$SECRET_FILE"
 else
-    umask 077; printf 'MASTER_PASSWORD=%s\n' "$MASTER_PW" > "$SECRET_FILE"
+    # KEY=VALUE cannot represent a newline: it would end the line, so the file
+    # would name a DIFFERENT password than the one the vault was initialised
+    # with, and this is the only copy. Write the byte-exact form beside it and
+    # say which one is real rather than record a password that does not work.
+    umask 077
+    if [ "$(wc -l < "$PW_STAGE")" -eq 0 ]; then
+        printf 'MASTER_PASSWORD=%s\n' "$(cat "$PW_STAGE")" > "$SECRET_FILE"
+    else
+        cat "$PW_STAGE" > "$CONFIG_DIR/master-password"
+        chmod 0400 "$CONFIG_DIR/master-password"
+        log "NOTE: this master password contains a newline, which $SECRET_FILE"
+        log "  cannot hold without changing it. The byte-exact copy is at"
+        log "  $CONFIG_DIR/master-password -- that is the one that unseals."
+    fi
 fi
 
 log "done. env=$ENVFILE service=$PLIST logs=$AUDIT_DIR"

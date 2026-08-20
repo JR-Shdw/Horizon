@@ -187,8 +187,8 @@ async def read_primary_uuid(session: AsyncSession) -> str | None:
 
 async def read_canonical_primary(
     session: AsyncSession,
-) -> tuple[str | None, datetime | None]:
-    """Return (primary_uuid, primary_lease_expires_at) in one round-trip.
+) -> tuple[str | None, datetime | None, datetime]:
+    """Return (primary_uuid, primary_lease_expires_at, db_now) in one round-trip.
 
     Centralises the two ``vault_cluster_config`` reads used by both the
     auto-promote eligibility cascade and the per-host self-demote check
@@ -203,23 +203,59 @@ async def read_canonical_primary(
       (pre-auto-promote-v1 cluster) or its value is not parseable as
       ISO-8601 (logged at WARNING ; caller treats as no signal).
 
-    Returned datetime is always tz-aware UTC ; a naive value found in
+    ``db_now`` is PostgreSQL's ``clock_timestamp()`` and is the ONLY clock a
+    caller may compare the lease against. The lease is a distributed deadline :
+    it is
+    written by one node and evaluated by the others, so evaluating it with
+    ``datetime.now()`` compared each node's own wall clock against a value
+    stamped by a different host's wall clock. The margin absorbing that
+    disagreement is ``ttl / 3`` (6.7s at the 20s default) and it is also the
+    margin that orders the primary's self-fence BEFORE any secondary may
+    promote -- so a node whose clock ran more than ttl/3 ahead could promote
+    while the old primary was still serving. Nothing enforces NTP; the
+    reference deployment only mentions it as a Patroni prerequisite. Reading
+    the lease and the clock in the same statement removes the second clock:
+    every node now measures the deadline against the database that stores it,
+    which is the same fix ``6236d05`` applied to the audit chain.
+
+    The local monotonic fence in ``cluster_ha_loops`` is deliberately NOT
+    affected -- it fires precisely because the database is unreachable, so it
+    cannot consult this clock and must stay on ``time.monotonic()``.
+
+    ``clock_timestamp()``, NOT ``NOW()``: ``NOW()`` is
+    ``transaction_timestamp()`` and is frozen for the life of the transaction.
+    The auto-promote path sleeps on its election jitter (up to ttl/6, 3.3s at
+    the default) INSIDE the transaction that holds the advisory lock, so
+    ``NOW()`` would hand the under-lock re-check a reading up to that stale and
+    write a lease short by the same amount. Measured: 0.00s of ``NOW()`` drift
+    across a 2s in-transaction sleep versus 2.00s of ``clock_timestamp()``.
+
+    Scalar sub-selects rather than a two-row IN(): ``db_now`` must come back
+    even in the pre-cluster-init state where neither config row exists.
+
+    Returned datetimes are always tz-aware UTC ; a naive lease value found in
     storage is defensively re-tagged.
     """
-    rows = (
+    row = (
         await session.execute(
             text(
-                "SELECT key, value FROM vault_cluster_config "
-                "WHERE key IN (:k_uuid, :k_lease)"
+                "SELECT clock_timestamp() AS db_now, "
+                "  (SELECT value FROM vault_cluster_config WHERE key = :k_uuid) "
+                "    AS primary_uuid, "
+                "  (SELECT value FROM vault_cluster_config WHERE key = :k_lease) "
+                "    AS lease_raw"
             ),
             {"k_uuid": _PRIMARY_UUID_KEY, "k_lease": _PRIMARY_LEASE_KEY},
         )
-    ).fetchall()
-    by_key = {r.key: r.value for r in rows}
+    ).fetchone()
 
-    primary_uuid: str | None = by_key.get(_PRIMARY_UUID_KEY) or None
+    db_now: datetime = row.db_now
+    if db_now.tzinfo is None:  # defensive : asyncpg returns timestamptz aware
+        db_now = db_now.replace(tzinfo=timezone.utc)
 
-    lease_raw = by_key.get(_PRIMARY_LEASE_KEY)
+    primary_uuid: str | None = row.primary_uuid or None
+
+    lease_raw = row.lease_raw
     lease_dt: datetime | None = None
     if lease_raw is not None:
         try:
@@ -234,7 +270,7 @@ async def read_canonical_primary(
             if lease_dt.tzinfo is None:
                 lease_dt = lease_dt.replace(tzinfo=timezone.utc)
 
-    return primary_uuid, lease_dt
+    return primary_uuid, lease_dt, db_now
 
 
 async def set_primary_uuid(session: AsyncSession, node_uuid: str | None) -> None:

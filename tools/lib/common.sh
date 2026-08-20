@@ -377,12 +377,22 @@ _curl_ca() {
     if [ -n "$_c" ]; then curl --cacert "$_c" "$@"; else curl "$@"; fi
 }
 
-# unseal_vault BASE_URL MASTER_PW [CAFILE] : wait for /health, then POST
-# /unseal. Echoes the bootstrap root token to STDOUT when the vault mints one
-# (fresh first-boot or post-restore), empty otherwise; diagnostics to stderr.
-# CAFILE pins verification when BASE_URL is https with a self-signed cert.
+# unseal_vault BASE_URL PW_FILE [CAFILE] : wait for /health, then POST
+# /unseal with the master password read from PW_FILE. Echoes the bootstrap root
+# token to STDOUT when the vault mints one (fresh first-boot or post-restore),
+# empty otherwise; diagnostics to stderr. CAFILE pins verification when
+# BASE_URL is https with a self-signed cert.
+#
+# The password arrives by FILE, not by value. It used to be the second
+# argument, and that forced every caller to hold it in a shell variable --
+# which cannot carry a master password, because ANY $(...) capture on the way
+# in strips ALL trailing newlines. A password ending in one was silently
+# truncated, the vault was initialised with the short version while the
+# operator still held the original, and there is no way back in.
+# tools/install-container.sh already carried it by file for that reason; the
+# signature now makes the value path unrepresentable for the other callers too.
 unseal_vault() {
-    _url=$1; _pw=$2; _ca=${3:-}
+    _url=$1; _pwf=$2; _ca=${3:-}
     if [ "${DRY_RUN:-0}" = 1 ]; then printf '   [dry-run] unseal %s\n' "$_url" >&2; return 0; fi
     # -f matters: without it curl exits 0 on ANY response, including nginx's 502
     # while the backend is still booting. Direct against uvicorn a closed port
@@ -390,6 +400,7 @@ unseal_vault() {
     # front the port is always open, so the probe passed instantly and /unseal
     # fired at a backend that was not up yet.
     _i=0; while [ "$_i" -lt 45 ]; do _curl_ca "$_ca" -fsS -m2 "$_url/health" >/dev/null 2>&1 && break; sleep 2; _i=$((_i+1)); done
+    [ -f "$_pwf" ] || { warn "master password file not found: $_pwf" >&2; return 1; }
     # Argon2id (256MB, t=3) can exceed 20s on slow/loaded hosts -- give the client
     # room so the root token in the response is not lost to a premature cutoff.
     # The password is serialised by python3's json module and reaches curl on
@@ -397,8 +408,7 @@ unseal_vault() {
     # Interpolating it -- -d "{\"password\":\"$_pw\"}" -- produced invalid or
     # silently altered JSON for any password containing a double quote, a
     # backslash or a newline. A vault master password has to be opaque input.
-    _resp=$(printf '%s' "$_pw" \
-        | python3 -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' \
+    _resp=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' < "$_pwf" \
         | _curl_ca "$_ca" -s -m 120 -X POST "$_url/api/v1/vault/unseal" \
             -H 'Content-Type: application/json' --data-binary @-)
     if printf '%s' "$_resp" | grep -q unsealed; then log "vault unsealed" >&2

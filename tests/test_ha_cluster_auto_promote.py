@@ -526,3 +526,140 @@ async def test_state_machine_combines_join_flip_and_auto_promote(fresh):
     assert await _get_state(_OTHER_NODE_UUID) == "secondary"
     assert await _get_state(self_uuid) == "primary"
     assert await _read_config("primary_uuid") == self_uuid
+
+
+# ---------------------------------------------------------------------------
+# Clock authority : the lease is evaluated and stamped by PostgreSQL only
+#
+# The lease is a distributed deadline -- one node stamps it, the others judge
+# it. While both sides read their own wall clock, the margin absorbing NTP
+# disagreement was ttl/3, and that same margin is what orders the primary's
+# monotonic self-fence BEFORE any secondary may promote. A node running more
+# than ttl/3 ahead could therefore promote while the old primary was still
+# serving. These tests pin the clock authority to the database.
+#
+# Each stubs loops.datetime with a clock skewed far into the future. Post-fix
+# the promote/heartbeat paths never consult it, so the stub must have no
+# effect ; before the fix each of these promoted or stamped on the fake clock.
+# ---------------------------------------------------------------------------
+
+
+def _skewed_clock(seconds_ahead: int):
+    """Stand-in for loops.datetime whose .now() runs seconds_ahead fast."""
+    return types.SimpleNamespace(
+        now=lambda tz=None: (
+            datetime.now(tz or timezone.utc) + timedelta(seconds=seconds_ahead)
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_auto_promote_ignores_fast_local_clock(fresh, monkeypatch):
+    """A node inside the exploitable skew window must not promote early.
+
+    The window is narrow and has to be hit deliberately -- a wildly fast clock
+    does NOT reach the lease gate, because gate 4 judges the node's own
+    last_heartbeat (stamped by PG) against the same fast clock and finds it
+    stale, so the node disqualifies itself. With ttl=20 / heartbeat=3 :
+
+        gate 3 calls a fresh lease stale once  skew > ttl/3          = 6.67s
+        gate 4 self-blocks once                skew + hb_age > 3*hb  = 9s
+
+    so only skew in (6.67, 9] with a fresh heartbeat both passes gate 4 and
+    fires gate 3 early. skew=8 with a 0s-old heartbeat sits in it.
+
+    The lease here is 3s in the past : still fresh to PostgreSQL (3 < 6.67
+    skew margin) but stale to a clock 8s fast. Before the fix this promoted
+    while the real primary was still serving -- the primary's monotonic
+    self-fence does not fire until ttl, so the ordering that keeps the two
+    apart was inverted.
+    """
+    self_uuid = nu.get_node_uuid()
+    await _insert_node(
+        node_uuid=self_uuid, ha_state="secondary", heartbeat_offset_secs=0
+    )
+    await _set_config("primary_uuid", _OTHER_NODE_UUID)
+    await _seed_stale_lease(secs_in_past=3)  # "stale" only to the skewed clock
+
+    monkeypatch.setattr(loops, "datetime", _skewed_clock(8))
+
+    async with async_session() as db:
+        n = await loops._maybe_auto_promote(db)
+
+    assert n == 0, "promoted on a skewed local clock instead of PostgreSQL's"
+    assert await _get_state(self_uuid) == "secondary"
+    assert await _read_config("primary_uuid") == _OTHER_NODE_UUID
+
+
+@pytest.mark.asyncio
+async def test_auto_promote_still_fires_when_pg_says_stale(fresh, monkeypatch):
+    """The guard is PG's clock, not "never promote" : a truly stale lease elects.
+
+    Companion to the test above -- together they prove the gate moved to
+    PostgreSQL rather than simply becoming harder to satisfy. Here the local
+    clock is skewed BACKWARD, so a wall-clock reader would refuse.
+    """
+    self_uuid = nu.get_node_uuid()
+    await _insert_node(node_uuid=self_uuid, ha_state="secondary")
+    await _set_config("primary_uuid", _OTHER_NODE_UUID)
+    await _seed_stale_lease(secs_in_past=60)
+
+    monkeypatch.setattr(loops, "datetime", _skewed_clock(-3600))
+
+    async with async_session() as db:
+        n = await loops._maybe_auto_promote(db)
+        await db.commit()
+
+    assert n == 1
+    assert await _get_state(self_uuid) == "primary"
+    assert await _read_config("primary_uuid") == self_uuid
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_stamps_lease_from_pg_clock(fresh, monkeypatch):
+    """The primary's lease write is stamped by PG, not by a fast local clock.
+
+    A lease stamped an hour ahead would be read as fresh by every secondary
+    for that hour, disabling failover entirely.
+    """
+    self_uuid = nu.get_node_uuid()
+    await _insert_node(node_uuid=self_uuid, ha_state="primary")
+    await _set_config("primary_uuid", self_uuid)
+
+    monkeypatch.setattr(loops, "datetime", _skewed_clock(3600))
+
+    async with async_session() as db:
+        await loops._heartbeat_body(db, self_uuid)
+        await db.commit()
+
+    lease = datetime.fromisoformat(await _read_config("primary_lease_expires_at"))
+    ttl = settings.cluster_primary_lease_ttl_secs
+    ahead = (lease - datetime.now(timezone.utc)).total_seconds()
+    # Expect ~ttl ahead of real time. On the skewed clock it would be ttl+3600.
+    assert ttl - 10 < ahead < ttl + 10, f"lease is {ahead}s ahead, expected ~{ttl}s"
+
+
+@pytest.mark.asyncio
+async def test_read_canonical_primary_clock_advances_within_transaction(fresh):
+    """db_now must be clock_timestamp(), not NOW().
+
+    NOW() is transaction_timestamp() and is frozen for the life of the
+    transaction. _maybe_auto_promote sleeps on its election jitter INSIDE the
+    transaction holding the advisory lock, so a frozen reading would make the
+    under-lock re-check judge a stale moment and stamp a lease short by the
+    jitter. Guards against a future "simplification" back to NOW().
+    """
+    import asyncio
+
+    from api.app import cluster_membership
+
+    async with async_session() as db:
+        _, _, first = await cluster_membership.read_canonical_primary(db)
+        await asyncio.sleep(1.1)
+        _, _, second = await cluster_membership.read_canonical_primary(db)
+
+    advanced = (second - first).total_seconds()
+    assert advanced > 1.0, (
+        f"db_now advanced only {advanced}s across a 1.1s in-transaction sleep -- "
+        "this is NOW()/transaction_timestamp(), not clock_timestamp()"
+    )
