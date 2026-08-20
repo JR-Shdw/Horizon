@@ -149,11 +149,7 @@ die() { printf "\033[1;31m[rhorizon]\033[0m %s\n" "$*" >&2; exit 1; }
 # command can move between a Docker host and a native one unchanged.
 if [ -n "$MASTER_PASSWORD_FILE" ]; then
     [ -f "$MASTER_PASSWORD_FILE" ] || die "master password file not found: $MASTER_PASSWORD_FILE"
-    # Strip a single trailing newline only, so `printf secret >f` and
-    # `echo secret >f` agree without truncating a password that genuinely
-    # ends in one.
-    MASTER_PASSWORD="$(printf '%s' "$(cat "$MASTER_PASSWORD_FILE")")"
-    [ -n "$MASTER_PASSWORD" ] || die "master password file is empty: $MASTER_PASSWORD_FILE"
+    [ -s "$MASTER_PASSWORD_FILE" ] || die "master password file is empty: $MASTER_PASSWORD_FILE"
 fi
 if [ -n "$MASTER_PW_FROM_ARGV" ]; then
     warn "--master-password puts the secret in this process's command line"
@@ -330,6 +326,43 @@ say "using compose : $DC"
 command -v openssl >/dev/null 2>&1 || die "openssl not found (needed to generate passwords)"
 command -v curl >/dev/null 2>&1 || die "curl not found"
 command -v python3 >/dev/null 2>&1 || die "python3 not found (used to parse the unseal response). On Alpine: 'apk add python3'."
+
+# ---------------------------------------------------------------------------
+# Stage the master password in a FILE, never in a shell variable.
+#
+# $(...) strips ALL trailing newlines, so a shell variable cannot carry a
+# password that ends in one. The previous code read the file that way while
+# its comment claimed it stripped "a single trailing newline only ... without
+# truncating a password that genuinely ends in one" -- it did the opposite,
+# and the failure is unrecoverable: the vault gets initialised with the
+# truncated password while the operator holds the original, with no way in.
+#
+# python reads the bytes and removes at most ONE trailing newline, so
+# `printf secret >f` and `echo secret >f` still agree, and a password whose
+# last character really is a newline survives.
+# ---------------------------------------------------------------------------
+PW_STAGE=$(mktemp)
+chmod 0600 "$PW_STAGE"
+trap 'rm -f "$PW_STAGE"' EXIT INT TERM
+HAVE_MASTER_PW=false
+if [ -n "$MASTER_PASSWORD_FILE" ]; then
+    python3 - "$MASTER_PASSWORD_FILE" "$PW_STAGE" <<'PY' || die "could not read the master password file"
+import sys
+data = open(sys.argv[1], "rb").read()
+if data.endswith(b"\n"):
+    data = data[:-1]
+if not data:
+    sys.exit("master password file is empty once its trailing newline is removed")
+with open(sys.argv[2], "wb") as fh:
+    fh.write(data)
+PY
+    HAVE_MASTER_PW=true
+elif [ -n "$MASTER_PASSWORD" ]; then
+    # argv / env value: already a shell string, so it cannot have carried a
+    # trailing newline this far. Write it byte-for-byte.
+    printf '%s' "$MASTER_PASSWORD" > "$PW_STAGE"
+    HAVE_MASTER_PW=true
+fi
 SWAP_PROTECTION=$(swap_protection)
 
 # ---------------------------------------------------------------------------
@@ -593,8 +626,8 @@ UNSEALED_BY_INSTALLER=false
 
 # Persist an explicitly supplied password too. The summary promises this file,
 # and restart/tier/override convergence needs it to re-unseal automatically.
-if [ -n "$MASTER_PASSWORD" ] && [ ! -f "$MASTER_PW_FILE" ]; then
-    umask 077 && printf '%s' "$MASTER_PASSWORD" > "$MASTER_PW_FILE"
+if [ "$HAVE_MASTER_PW" = true ] && [ ! -f "$MASTER_PW_FILE" ]; then
+    ( umask 077 && cat "$PW_STAGE" > "$MASTER_PW_FILE" )
     chmod 0400 "$MASTER_PW_FILE"
 fi
 
@@ -626,8 +659,11 @@ if [ -f "$ROOT_TOKEN_FILE" ]; then
 else
     # Re-run of an install that already has a saved password: reuse it, the
     # operator opted into the scripted path once already.
-    if [ -z "$MASTER_PASSWORD" ] && [ -f "$MASTER_PW_FILE" ]; then
-        MASTER_PASSWORD="$(cat "$MASTER_PW_FILE")"
+    if [ "$HAVE_MASTER_PW" != true ] && [ -f "$MASTER_PW_FILE" ]; then
+        # Saved file is authoritative and already byte-exact; do not round-trip
+        # it through a variable, which would strip a trailing newline again.
+        cat "$MASTER_PW_FILE" > "$PW_STAGE"
+        HAVE_MASTER_PW=true
     fi
 fi
 
@@ -642,7 +678,7 @@ fi
 #
 # --master-password / RH_MASTER_PASSWORD keeps the unattended path working. It
 # is opt-in, and it is the only branch that writes credentials to disk.
-if [ ! -f "$ROOT_TOKEN_FILE" ] && [ -z "$MASTER_PASSWORD" ]; then
+if [ ! -f "$ROOT_TOKEN_FILE" ] && [ "$HAVE_MASTER_PW" != true ]; then
     UNSEALED_BY_INSTALLER=false
     # Worded to hold on a RE-RUN too. A default install writes no root-token
     # file, so a --tier switch re-enters this branch on a vault that already
@@ -654,9 +690,7 @@ if [ ! -f "$ROOT_TOKEN_FILE" ] && [ -z "$MASTER_PASSWORD" ]; then
 elif [ ! -f "$ROOT_TOKEN_FILE" ]; then
     UNSEALED_BY_INSTALLER=true
     say "performing first /unseal (sets master password)"
-    # printf is a shell builtin, so the password does not reach any process
-    # argument list on its way to the serialiser.
-    UNSEAL_RESP=$(printf '%s' "$MASTER_PASSWORD" | unseal_post)
+    UNSEAL_RESP=$(unseal_post < "$PW_STAGE")
 
     ROOT_TOKEN=$(printf '%s' "$UNSEAL_RESP" | python3 -c '
 import sys, json

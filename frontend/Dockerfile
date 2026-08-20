@@ -35,6 +35,29 @@ COPY nginx-tls.conf /etc/nginx/templates/tls.conf.tpl
 # Entrypoint hook: rename .tpl -> .template before envsubst runs
 COPY 15-tls-setup.sh /docker-entrypoint.d/15-tls-setup.sh
 RUN chmod +x /docker-entrypoint.d/15-tls-setup.sh
+# Entrypoint hook: reload nginx when the api container's address changes.
+# nginx resolves an upstream once, at config load, so a recreated api leaves
+# the frontend 502ing on a dead address until something reloads it.
+COPY 25-upstream-watch.sh /docker-entrypoint.d/25-upstream-watch.sh
+RUN chmod +x /docker-entrypoint.d/25-upstream-watch.sh
+
+# Bound the worker count at BUILD time.
+#
+# The stock config is `worker_processes auto`, which means one worker per CPU.
+# Against the compose pids_limit that is a fork storm on any large host: on a
+# 32-core machine nginx tried to spawn 32 workers into a 20-pid budget and
+# logged 15 "fork() failed while spawning worker process (11: Resource
+# temporarily unavailable)" alerts before settling, leaving no pid budget for
+# anything else in the container.
+#
+# It has to be fixed here rather than at runtime: the container is read_only
+# with a tmpfs only on /etc/nginx/conf.d, so the image's own
+# 30-tune-worker-processes.sh cannot rewrite /etc/nginx/nginx.conf and the
+# `auto` silently stands.
+#
+# Four is ample for a TLS terminator in front of a vault -- nginx is
+# event-driven, so workers cap CPU parallelism, not connection count.
+RUN sed -i 's/^worker_processes.*/worker_processes 4;/' /etc/nginx/nginx.conf
 
 COPY index.html /usr/share/nginx/html/index.html
 COPY sw.js /usr/share/nginx/html/sw.js
