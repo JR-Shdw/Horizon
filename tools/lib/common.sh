@@ -392,8 +392,15 @@ unseal_vault() {
     _i=0; while [ "$_i" -lt 45 ]; do _curl_ca "$_ca" -fsS -m2 "$_url/health" >/dev/null 2>&1 && break; sleep 2; _i=$((_i+1)); done
     # Argon2id (256MB, t=3) can exceed 20s on slow/loaded hosts -- give the client
     # room so the root token in the response is not lost to a premature cutoff.
-    _resp=$(_curl_ca "$_ca" -s -m 120 -X POST "$_url/api/v1/vault/unseal" \
-        -H 'Content-Type: application/json' -d "{\"password\":\"$_pw\"}")
+    # The password is serialised by python3's json module and reaches curl on
+    # stdin, so it never lands in argv (/proc, ps) or in the environment.
+    # Interpolating it -- -d "{\"password\":\"$_pw\"}" -- produced invalid or
+    # silently altered JSON for any password containing a double quote, a
+    # backslash or a newline. A vault master password has to be opaque input.
+    _resp=$(printf '%s' "$_pw" \
+        | python3 -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' \
+        | _curl_ca "$_ca" -s -m 120 -X POST "$_url/api/v1/vault/unseal" \
+            -H 'Content-Type: application/json' --data-binary @-)
     if printf '%s' "$_resp" | grep -q unsealed; then log "vault unsealed" >&2
     else warn "unseal did not confirm (check the service log)" >&2; fi
     printf '%s' "$_resp" | sed -n 's/.*"root_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'

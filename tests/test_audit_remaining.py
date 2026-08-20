@@ -2,6 +2,7 @@
 """Audit fallback paths that must stay writable during partial failures."""
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,10 @@ from api.app import audit, audit_keyring
 class _Result:
     def fetchone(self):
         return None
+
+    def scalar_one(self):
+        # audit.chain_timestamp reads the row timestamp from PostgreSQL.
+        return datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 class _Db:

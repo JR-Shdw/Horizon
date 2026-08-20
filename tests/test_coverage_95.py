@@ -1127,6 +1127,11 @@ class TestAuditDefensivePaths:
                     def fetchone(self_):
                         return None
 
+                    def scalar_one(self_):
+                        # audit.chain_timestamp reads the row timestamp
+                        # from PostgreSQL.
+                        return datetime(2026, 1, 1, tzinfo=timezone.utc)
+
                 return _R()
 
             async def commit(self):

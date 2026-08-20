@@ -43,6 +43,16 @@ class _AuditClock:
             return value.replace(tzinfo=None)
         return value.astimezone(tz)
 
+    @classmethod
+    async def chain_timestamp(cls, _db=None):
+        """Stand in for audit.chain_timestamp (the PostgreSQL clock).
+
+        Patching this is the only way to place a row on a historical day:
+        the v2 payload binds the timestamp into the signature, so a row
+        cannot be backdated with an UPDATE after the fact.
+        """
+        return cls.now(timezone.utc)
+
 
 async def _write_chain_rows(count: int, *, actor: str = "prune-e2e") -> None:
     async with async_session() as db:
@@ -188,7 +198,7 @@ async def test_a_pruned_chain_still_verifies(
     from api.app import audit as audit_module
     from api.app.config import settings
 
-    monkeypatch.setattr(audit_module, "datetime", _AuditClock)
+    monkeypatch.setattr(audit_module, "chain_timestamp", _AuditClock.chain_timestamp)
     monkeypatch.setattr(settings, "audit_dir", str(tmp_path))
     old_day = date.today() - timedelta(days=400)
     second_old_day = date.today() - timedelta(days=200)
@@ -376,7 +386,7 @@ async def test_prune_refuses_a_signed_row_tampered_after_sealing(
 
     from api.app import audit as audit_module
 
-    monkeypatch.setattr(audit_module, "datetime", _AuditClock)
+    monkeypatch.setattr(audit_module, "chain_timestamp", _AuditClock.chain_timestamp)
     old_day = date.today() - timedelta(days=100)
     _AuditClock.set_day(old_day)
     await _write_chain_rows(1, actor="prune-tamper-victim")
@@ -438,7 +448,7 @@ async def test_prune_refuses_an_unsealed_day_inside_the_delete_prefix(
 
     from api.app import audit as audit_module
 
-    monkeypatch.setattr(audit_module, "datetime", _AuditClock)
+    monkeypatch.setattr(audit_module, "chain_timestamp", _AuditClock.chain_timestamp)
     missing_day = date.today() - timedelta(days=101)
     sealed_day = date.today() - timedelta(days=100)
     _AuditClock.set_day(missing_day)

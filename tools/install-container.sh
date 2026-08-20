@@ -522,6 +522,63 @@ while true; do
     sleep 2
 done
 
+# Everything that carries the master password or the root token goes over the
+# TLS frontend, never the plaintext API port. Both ports are published on
+# $BIND_ADDR, and --bind is explicitly supported for LAN/VPN installs (the
+# certificate above even gets a SAN for it), so an unattended install was
+# POSTing the master password in clear over the network and getting the root
+# token back the same way. The plaintext port stays up for debugging and for
+# health checks, which carry nothing.
+#
+# --cacert pins the self-signed certificate we just minted: -k would accept
+# any certificate and defeat the point.
+VAULT_URL="https://$BIND_ADDR:$FRONTEND_PORT"
+CACERT="$CERT_DIR/cert.pem"
+
+# Wait for the frontend too, otherwise the first sensitive call races nginx.
+# -f is what makes this a real probe: without it curl exits 0 on nginx's 502
+# while the backend is still starting.
+say "waiting for the TLS frontend on $VAULT_URL/health"
+# One restart is allowed, for a specific and reproducible reason: nginx
+# resolves the api container's address ONCE, when it loads its config. If the
+# api container is (re)created after the frontend started, it comes back on a
+# new address and the frontend keeps proxying to the old one, answering 502 to
+# everything until it is reloaded. Compose start ordering makes that likely on
+# a first install, and it does not heal on its own.
+_fe_restarted=0
+DEADLINE=$(( $(date +%s) + 90 ))
+while true; do
+    if curl --cacert "$CACERT" -fsS -m 2 "$VAULT_URL/health" >/dev/null 2>&1; then
+        say "TLS frontend up"
+        break
+    fi
+    if [ "$(date +%s)" -ge "$DEADLINE" ] && [ "$_fe_restarted" = 0 ]; then
+        say "frontend is answering but cannot reach the api (stale upstream address)"
+        say "  restarting it so nginx re-resolves"
+        $DC -f "$WORK_DIR/docker-compose.yml" --env-file "$WORK_DIR/.env" \
+            restart frontend >/dev/null 2>&1 || true
+        _fe_restarted=1
+        DEADLINE=$(( $(date +%s) + 90 ))
+    elif [ "$(date +%s)" -ge "$DEADLINE" ]; then
+        die "TLS frontend did not answer. Check '$DC logs frontend'."
+    fi
+    sleep 2
+done
+
+# POST /unseal with the password read from stdin. The password is serialised
+# by python3's json module and handed to curl on stdin, so it never lands in
+# argv (/proc, ps), in the environment, or in a shell string.
+#
+# It used to be interpolated: -d "{\"password\": \"$PW\"}". A password
+# containing a double quote, a backslash or a newline produced invalid or
+# silently altered JSON -- and a vault master password has to be opaque input,
+# not something the operator has to keep shell-safe.
+unseal_post() {
+    python3 -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' \
+        | curl --cacert "$CACERT" -fsS -m 180 -X POST "$VAULT_URL/api/v1/vault/unseal" \
+            -H 'Content-Type: application/json' --data-binary @-
+}
+
 # ---------------------------------------------------------------------------
 # First unseal - sets master password + returns root token
 # ---------------------------------------------------------------------------
@@ -558,9 +615,7 @@ if [ -f "$ROOT_TOKEN_FILE" ]; then
         warn "  anyone who can read that file can unseal this vault; it is mode 0400,"
         warn "  so it is only as protected as this host's disk and root account."
         warn "  Delete it to require a manual unseal after every restart."
-        if curl -fsS -X POST "http://$BIND_ADDR:$API_PORT/api/v1/vault/unseal" \
-            -H 'Content-Type: application/json' \
-            -d "{\"password\": \"$(cat "$MASTER_PW_FILE")\"}" >/dev/null 2>&1; then
+        if unseal_post < "$MASTER_PW_FILE" >/dev/null 2>&1; then
             say "re-unsealed"
         else
             warn "auto re-unseal failed (2FA enabled?). Run /unseal manually."
@@ -599,9 +654,9 @@ if [ ! -f "$ROOT_TOKEN_FILE" ] && [ -z "$MASTER_PASSWORD" ]; then
 elif [ ! -f "$ROOT_TOKEN_FILE" ]; then
     UNSEALED_BY_INSTALLER=true
     say "performing first /unseal (sets master password)"
-    UNSEAL_RESP=$(curl -fsS -X POST "http://$BIND_ADDR:$API_PORT/api/v1/vault/unseal" \
-        -H 'Content-Type: application/json' \
-        -d "{\"password\": \"$MASTER_PASSWORD\"}")
+    # printf is a shell builtin, so the password does not reach any process
+    # argument list on its way to the serialiser.
+    UNSEAL_RESP=$(printf '%s' "$MASTER_PASSWORD" | unseal_post)
 
     ROOT_TOKEN=$(printf '%s' "$UNSEAL_RESP" | python3 -c '
 import sys, json

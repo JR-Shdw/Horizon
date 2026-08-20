@@ -70,8 +70,18 @@ def _write_file(entry: dict):
     what stops an incomplete archive being certified as complete.
     """
     try:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = _audit_dir() / f"audit-{today}.jsonl"
+        # Day comes from the entry's own timestamp, which is the database
+        # clock (chain_timestamp), NOT from this host's clock. Reading a
+        # second, different clock here put a row written at 23:59:59.9
+        # database-time into tomorrow's file whenever the API host ran
+        # slightly ahead -- and _cross_check compares this file against the
+        # database rows for that day, so the mismatch surfaced as a day that
+        # could never be sealed.
+        stamp = entry.get("timestamp")
+        if not isinstance(stamp, datetime):
+            stamp = datetime.now(timezone.utc)
+        day = stamp.astimezone(timezone.utc).strftime("%Y-%m-%d")
+        path = _audit_dir() / f"audit-{day}.jsonl"
         with open(path, "a") as f:
             f.write(json.dumps(entry, default=str) + "\n")
     except Exception:
@@ -86,6 +96,33 @@ def _write_file(entry: dict):
             audit_archive_write_failures.inc()
         except Exception:
             pass
+
+
+async def chain_timestamp(db: AsyncSession) -> datetime:
+    """Wall-clock for one audit row, read from PostgreSQL.
+
+    The database is the single clock for the chain, and that is deliberate:
+    read order must reproduce write order, and the ordering key is this
+    column (schema.sql documents clock_timestamp() as chosen for exactly
+    that). Reading datetime.now() here instead made every API node its own
+    clock. Single-node deployments never noticed; under HA three NTP-synced
+    hosts still disagree by microseconds, so two correctly serialized writes
+    could land with inverted timestamps and the verifier reported a false
+    chain break. Measured on the 24h chaos run: 284us of inversion.
+
+    Asking the database keeps ONE clock however many nodes write, and still
+    yields the value before signing, which is what a v2 payload needs to
+    bind the complete stored row.
+
+    This function is the ONLY clock seam in the chain. Tests that place rows
+    on a historical day (retention, prune, archive) monkeypatch it, because
+    v2 binds the timestamp into the signature: a row cannot be backdated
+    with an UPDATE afterwards without invalidating it.
+    """
+    value = (await db.execute(text("SELECT clock_timestamp()"))).scalar_one()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
 
 
 async def log_action(
@@ -157,7 +194,7 @@ async def log_action(
     # values. Letting PostgreSQL generate either value after signing would make
     # it impossible for v2 to bind the complete stored row.
     row_id = uuid4()
-    row_timestamp = datetime.now(timezone.utc)
+    row_timestamp = await chain_timestamp(db)
     key_epoch_val = await get_key_epoch(db)
 
     def payload_for(algorithm: str, fingerprint: str | None) -> str:

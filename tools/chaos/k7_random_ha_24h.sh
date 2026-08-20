@@ -782,7 +782,8 @@ promote_survivor_if_needed() {
 }
 
 single_survivor_probe() {
-    local uuid="$1" base name val got topology workers readiness_code this_host role_ok
+    local uuid="$1" base name val got topology readiness_code this_host
+    local followers has_master all_followers_ok expect_master role_detail expected_followers
     base=$(url_for_uuid "$uuid")
     name="k7-survivor-$(date +%s%N)"
     val="$(openssl rand -base64 24)"
@@ -816,15 +817,53 @@ single_survivor_probe() {
         printf '%s\n' "$topology" > "$RUN_DIR/cluster-survivor-${uuid}.json"
         if (( EXPECTED_WORKERS > 0 )); then
             this_host=$(jq -r '.this_host // empty' <<< "$topology")
-            workers=$(jq --arg h "$this_host" \
-                '(.hosts[$h].followers | length) + (if .hosts[$h].master then 1 else 0 end)' \
-                <<< "$topology")
-            role_ok=$(jq -r --arg h "$this_host" '
-                (.hosts[$h].master != null)
-                and all(.hosts[$h].followers[]?; .worker_state == "follower")
+
+            # Count followers and master SEPARATELY.
+            #
+            # This used to be followers + (1 if master else 0). Five followers
+            # and no master then sums to 5, which equals EXPECTED_WORKERS and
+            # passes -- the same number a healthy 4-followers-plus-master host
+            # produces. The arithmetic aliased the exact condition the role
+            # check below exists to catch.
+            followers=$(jq --arg h "$this_host" '[.hosts[$h].followers[]?] | length' <<< "$topology")
+            has_master=$(jq -r --arg h "$this_host" 'if .hosts[$h].master then "yes" else "no" end' <<< "$topology")
+            all_followers_ok=$(jq -r --arg h "$this_host" \
+                'all(.hosts[$h].followers[]?; .worker_state == "follower")' <<< "$topology")
+
+            # A master worker only exists in EMBEDDED / python custody, where one
+            # worker holds the sub-keys and the others reach it over a crypto
+            # socket -- /cluster only reports `master` for worker_state='master'
+            # WITH a crypto_socket_name. Under separated+rust every worker drives
+            # the custodian pool in-process, so there is no master and never will
+            # be. Demanding one here produced a critical on every probe of a
+            # perfectly healthy cluster (26 of them across the 24h run).
+            #
+            # Detected from the topology rather than configured, so the probe
+            # cannot drift from the deployment it is pointed at.
+            expect_master=$(jq -r '
+                [.hosts[]?.master] | map(select(. != null)) | length > 0
             ' <<< "$topology")
-            if (( workers != EXPECTED_WORKERS )) || [[ "$role_ok" != "true" ]]; then
-                json_failure survivor "worker coverage ${workers}/${EXPECTED_WORKERS} uuid=$uuid" critical
+
+            role_detail=""
+            if [[ "$all_followers_ok" != "true" ]]; then
+                role_detail="a follower is not in follower state"
+            elif [[ "$expect_master" == "true" && "$has_master" == "no" ]]; then
+                # Other hosts report a master, so this IS a master-bearing
+                # deployment and this host losing its own master is real.
+                role_detail="no master on this host while other hosts have one"
+            fi
+
+            # Expected worker count excludes the master where one exists, so the
+            # two deployment shapes are compared against the same number.
+            expected_followers=$EXPECTED_WORKERS
+            [[ "$has_master" == "yes" ]] && expected_followers=$(( EXPECTED_WORKERS - 1 ))
+
+            if (( followers != expected_followers )) || [[ -n "$role_detail" ]]; then
+                # Say WHICH condition failed. The old message printed only the
+                # count, so "worker coverage 5/5 critical" was unreadable.
+                json_failure survivor \
+                    "worker coverage followers=${followers}/${expected_followers} master=${has_master}${role_detail:+ -- $role_detail} uuid=$uuid" \
+                    critical
             fi
         fi
     else

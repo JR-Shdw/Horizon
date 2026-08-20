@@ -260,9 +260,14 @@ commands above are for driving compose by hand.
 
 ### Docker rootless
 
+Pass `-f` here for the same reason as Podman: a bare `docker compose up -d`
+from the repository root picks `docker-compose.yml`, the cluster file that
+binds VPN addresses.
+
 ```bash
 dockerd-rootless-setuptool.sh install
-docker compose up -d   # uses the rootless socket automatically
+# uses the rootless socket automatically
+docker compose -f tools/docker-compose.quickstart.yml up -d
 ```
 
 ### Memory locking (mlock) caveat

@@ -358,8 +358,8 @@ if [ -n "${MASTER_PW_FROM_ARGV:-}" ]; then
     printf '%s\n' \
       "WARNING: --master-password puts the secret in this process's command line" \
       "         (readable via ps / /proc) and in your shell history." \
-      "         Prefer --master-password-file FILE, or omit it and let the" \
-      "         installer generate one." >&2
+      "         Prefer --master-password-file FILE, or omit it to keep the" \
+      "         vault sealed." >&2
 fi
 # Shared layout first, then the pre-existing single-file form so an install
 # made before the layouts converged still re-runs.
