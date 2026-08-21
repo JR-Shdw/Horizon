@@ -226,6 +226,52 @@ class Settings(BaseSettings):
     # one primary lease. 0 disables. Range [0, 3600]. NULL role_changed_at =
     # no cooldown.
     cluster_auto_promote_cooldown_secs: int = 20
+    # cluster_frozen_max_secs : how long a node may stay FROZEN -- keys retained
+    # in RAM, all authority suspended -- before the hard fence seals it and the
+    # key material goes.
+    #
+    # The node stops being authoritative at cluster_primary_lease_ttl_secs; this
+    # governs only how long it waits, holding its keys, for the database to come
+    # back. That wait is the point: there is no auto-unseal, so sealing at the
+    # TTL meant every PostgreSQL outage longer than it cost a manual /unseal on
+    # the primary -- and a Patroni failover takes 10-30s against a 20s default.
+    #
+    # 300s covers a database failover comfortably while bounding how long a
+    # possibly-stale node sits on key material.
+    #
+    # There is deliberately NO "never seal" value -- see
+    # standalone_db_seal_secs. Range [30, 86400].
+    cluster_frozen_max_secs: int = 300
+    # -- standalone / embedded / custodian : seal on a dead local database --
+    #
+    # These apply ONLY when cluster_ha_enabled is false, and they are tuned the
+    # opposite way to the HA knobs above, because the evidence is different.
+    #
+    # In HA, "cannot reach the database" is ambiguous: it may be this node's
+    # NIC, a BGP/OSPF reconvergence, a VIP still settling, or load. A peer can
+    # cover, so the node freezes and waits, and recovers by self-demoting.
+    # Sealing on that signal would destroy keys over a transient network event.
+    #
+    # Standalone has no such excuse. The database is on this machine. There is
+    # no partition to blame and no peer that could be serving, so sustained
+    # unreachability IS evidence rather than ambiguity -- and the vault is
+    # already serving nothing, since every read needs the database. Keys held
+    # in RAM past that point are pure exposure. Data protection wins: freeze,
+    # then seal.
+    #
+    # standalone_db_freeze_secs : unreachable this long -> stop being
+    #   authoritative (FROZEN). Keys retained; a database that comes back
+    #   restores service with no unseal.
+    # standalone_db_seal_secs : frozen this long on top -> seal, dropping the
+    #   key material. Long enough to ride a local postgres restart or package
+    #   upgrade, short enough to bound the exposure.
+    #
+    #   There is deliberately NO "never seal" value. Ambiguity has to end in
+    #   sealed rather than in active, and an operator switch that suspends that
+    #   is an override on the one property the design exists to guarantee. The
+    #   floor below is the shortest window that still rides a service restart.
+    standalone_db_freeze_secs: int = 10
+    standalone_db_seal_secs: int = 60
     # /cluster/join idempotency cache TTL: lifetime of the (nonce ->
     # response payload) row after a successful JOIN. A joiner that lost the
     # wire response can replay the same nonce and recover the *identical*
@@ -657,6 +703,28 @@ class Settings(BaseSettings):
                 self.cluster_primary_lease_ttl_secs
             )
         return self
+
+    @field_validator("standalone_db_freeze_secs")
+    @classmethod
+    def clamp_standalone_db_freeze(cls, v: int) -> int:
+        # 3s floor: the probe interval is derived as freeze // 3, so anything
+        # lower would poll faster than once a second for no benefit.
+        return max(3, min(3600, v))
+
+    @field_validator("standalone_db_seal_secs")
+    @classmethod
+    def clamp_standalone_db_seal(cls, v: int) -> int:
+        # No zero: "freeze but never seal" would waive the invariant that
+        # ambiguity ends sealed. 15s floor still rides a systemd restart.
+        return max(15, min(86400, v))
+
+    @field_validator("cluster_frozen_max_secs")
+    @classmethod
+    def clamp_cluster_frozen_max(cls, v: int) -> int:
+        # No zero: retaining keys indefinitely on an unresolved node waives the
+        # invariant that ambiguity ends sealed. 30s floor gives a partition
+        # room to heal; 86400 bounds the accidental "effectively forever".
+        return max(30, min(86400, v))
 
     @field_validator("cluster_operator_weight")
     @classmethod

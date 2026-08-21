@@ -58,6 +58,10 @@ read path for existing rows and backups.
 | Database HA | Provider-neutral clustering (Patroni-based), streaming-replica health gating, bounded WAL retention |
 | Coordination | Cross-container layer: cluster/node identity, HMAC bootstrap join, quarantine state machine, drain/evict/promote |
 | Key sharing | Shamir-distributed master key shares, role-based master/follower workers, automatic failover reconstruction |
+| Authority model | Two independent deadlines, not one: **DB-authority freshness** (every node -- a secondary that cannot read canonical state cannot prove it is still a secondary) and the **primary lease** (the singleton write claim, primary only). Both evaluated against PostgreSQL's `clock_timestamp()`, never a host wall clock |
+| FROZEN state | Losing database authority suspends serving without dropping keys. Expressed as a deadline recomputed on read, so a dead refresher loop fails closed instead of leaving a node serving. A hard fence seals at `lease_ttl + frozen_max`, bounding how long a possibly-stale node sits on key material. That fence runs in its own loop, reading only a monotonic clock: evaluated at the end of a database tick it was never *reached* when the query hung, and a hung loop is not a dead one, so supervision did not catch it. Peers may buy a frozen node time, never the right to serve |
+| Transport | Cluster CA with per-node mTLS; `/internal/ha/status` answers with PostgreSQL unreachable (no I/O, no auth -- an endpoint that needs the authority cannot report on losing it) |
+| Planned | Peer-aware classification: today a node cannot distinguish a **shared** database outage from its **own** isolation, which warrant opposite reactions (hold vs seal). Peers contribute observations, never authority |
 
 ### Memory and audit hardening
 | Area | What |
@@ -154,4 +158,5 @@ Placeholder for post-launch priorities -- to be filled from early-adopter feedba
 | x86-64 Linux | Primary, CI-gated | - |
 | aarch64 Linux | Validated on Raspberry Pi 4 hardware | Keep the hardware lane in release validation |
 | FreeBSD / OpenBSD | Test suite validated in VM | Keep in the BSD VM matrix |
-| macOS native | Skeleton / untested | Validate on Apple hardware or a CI macOS runner |
+| macOS native (Apple Silicon) | CI-gated on `macos-latest` | Keep `macos-native.yml` in the release lane |
+| macOS native (Intel) | Unmeasured | Needs a self-hosted x86_64 runner or a real Mac: no free `macos-13` image remains |

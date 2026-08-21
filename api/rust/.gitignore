@@ -1,0 +1,16 @@
+
+# proptest seeds for failing cases. Deliberately NOT tracked.
+#
+# proptest saves a seed on every failure and replays it forever. That is right
+# for a real bug and wrong for a flaky assertion: a legitimate 1-in-256
+# collision in prop_shamir_split_uses_fresh_randomness got saved and, on a
+# reused CI workspace, turned into a permanent red that blocked deploys. The
+# assertion is fixed; keeping the directory untracked stops a future false
+# positive from becoming sticky the same way.
+proptest-regressions/
+# BOTH spellings. 84182ca ignored only the dotless form, which is what current
+# proptest writes (pipeline #8 saved to api/rust/proptest-regressions/). But the
+# repo also carried a legacy dot-prefixed .proptest-regressions/ -- deleted by
+# hand in d17568a -- so the ignore missed it entirely and it could have become
+# sticky again exactly the same way.
+.proptest-regressions/

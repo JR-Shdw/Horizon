@@ -161,15 +161,32 @@ async def test_reaped_but_live_worker_reregisters_and_survives(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_terminates_only_when_reregistration_fails(monkeypatch):
-    """Fail-close is still the last resort, not the first response."""
+async def test_failed_reregistration_retries_and_never_seals(monkeypatch):
+    """A failed re-registration is retried, never escalated to a seal.
+
+    This asserted the opposite until 2026-08-20. The escalation looked like a
+    prudent last resort, but _reregister_after_reap wraps a single un-retried
+    INSERT in a bare `except Exception`, so ANY transient database error
+    returned False -- and the reaper only deletes rows after
+    worker_reap_stale_secs of missed heartbeats, i.e. exactly while a database
+    is recovering and writes are least reliable. The mechanism was most likely
+    to fire when the condition it punished was transient, and the cost was
+    unrecoverable: seal + SIGTERM, taking this worker's Shamir share with it.
+
+    A vault SHOULD fail closed to protect its data -- but on evidence that
+    things are down, not on one ambiguous write. That evidence lives elsewhere:
+    a worker that genuinely cannot reach the database freezes on its own
+    (vault_state.frozen), and seals from there once it has held long enough to
+    be conclusive.
+    """
     import asyncio
 
     from api.app import cluster
 
-    calls = {"terminate": 0}
+    calls = {"terminate": 0, "reregister": 0}
 
     async def failed_reregister(_sf):
+        calls["reregister"] += 1
         return False
 
     async def always_reaped(_db, **_kw):
@@ -183,5 +200,11 @@ async def test_terminates_only_when_reregistration_fails(monkeypatch):
     monkeypatch.setattr(cluster, "HEARTBEAT_INTERVAL_SECS", 0.01)
 
     stop = asyncio.Event()
-    await asyncio.wait_for(cluster.heartbeat_loop(_session_factory, stop), timeout=2)
-    assert calls["terminate"] == 1
+    task = asyncio.create_task(cluster.heartbeat_loop(_session_factory, stop))
+    await asyncio.sleep(0.15)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert calls["terminate"] == 0, "a transient write failure must not seal"
+    assert calls["reregister"] >= 2, "it must keep retrying on later ticks"
+    assert calls["reregister"] < 50, "retries stay paced by the heartbeat"

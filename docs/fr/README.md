@@ -136,7 +136,6 @@ Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md).
 ### Développer
 
 - [`CONTRIBUTING.md`](../../CONTRIBUTING.md) - setup dev, stack de tests, style de code
-- [`CLAUDE.md`](../../CLAUDE.md) - référence d'architecture et du dépôt pour assistants et contributeurs
 
 ---
 

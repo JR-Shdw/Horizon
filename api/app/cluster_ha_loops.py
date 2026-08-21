@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 """Background loops for the inter-host HA cluster.
 
-Three asyncio tasks registered from the lifespan when
+Four asyncio tasks registered from the lifespan when
 ``settings.cluster_ha_enabled`` is true :
 
 - ``cluster_ha_state_machine_loop`` (cluster-wide singleton via
@@ -25,7 +25,19 @@ Three asyncio tasks registered from the lifespan when
   heartbeat still produces a liveness signal that ops can
   distinguish from "process gone".
 
-All three loops are no-ops when ``vault_state.sealed`` is true. The
+- ``cluster_ha_fence_loop`` (per-node) seals once the terminal
+  ``must_seal`` deadline has passed. Separate from the heartbeat
+  BECAUSE it must not depend on the database: the heartbeat evaluates
+  its own fence downstream of a session acquisition in the same
+  iteration, so a query that hangs -- which a blackhole route makes
+  indefinite -- means the fence is never reached. Observed in the lab:
+  one worker in five dropped its key material, the other four sat past
+  a terminal deadline with keys resident. This loop reads nothing but a
+  monotonic clock, so nothing can starve it. It is ADDITIVE -- the
+  heartbeat keeps its own OR'd fence, including the primary-only
+  lease-derived trigger.
+
+All four loops are no-ops when ``vault_state.sealed`` is true. The
 heartbeat additionally short-circuits when no row exists for the
 local ``node_uuid`` (pre-cluster-init or pre-/cluster/join state).
 """
@@ -54,6 +66,11 @@ from .node_uuid import NodeUUIDError, get_node_uuid
 from .vault_state import vault as vs
 
 log = logging.getLogger("rhorizon.cluster_ha_loops")
+
+# Serializes the fence teardown across its independent triggers. See
+# _lease_fence_seal. Created at import: asyncio.Lock no longer binds a loop at
+# construction, so this is safe before the loop exists.
+_FENCE_SEAL_LOCK = asyncio.Lock()
 
 
 # -- state machine ---------------------------------------------------------
@@ -666,6 +683,11 @@ async def _heartbeat_body(db: AsyncSession, node_uuid: str) -> bool:
     # every other node, and the self-demote comparison below reads a deadline
     # stamped by another node. Neither may involve this host's wall clock.
     primary_uuid, lease_dt, now = await cluster_membership.read_canonical_primary(db)
+    # Cache the DB's own view of our role so /internal/ha/status can report it
+    # with PostgreSQL unreachable. row.ha_state rather than an inference from
+    # primary_uuid: a joining or quarantined node is not simply "secondary",
+    # and the status endpoint must not flatten that distinction.
+    vs.note_role(row.ha_state)
     if primary_uuid == node_uuid:
         ttl_secs = settings.cluster_primary_lease_ttl_secs
         lease_expires_iso = (now + timedelta(seconds=ttl_secs)).isoformat()
@@ -1030,14 +1052,64 @@ def _lease_fence_should_seal(last_confirm: float | None, now_monotonic: float) -
     That is exactly the partitioned-primary case the DB-driven self-demote in
     ``_heartbeat_body`` cannot reach : self-demote needs a live read to observe
     the new canonical primary, but a node cut off from Patroni gets no reads at
-    all. By the time the TTL has elapsed the old lease has expired cluster-wide
-    and an eligible secondary has auto-promoted, so the caller seals : dropping
-    the CA / master keys is a fail-closed fence -- a node with no keys cannot
-    issue certs or admit members under stale authority.
+    all.
+
+    This is now the HARD fence, not the first reaction. The node stops being
+    authoritative at ``cluster_primary_lease_ttl_secs``, when its
+    ``VaultState`` authority deadline lapses and it goes FROZEN -- keys held,
+    every route refused. That transition needs no code to run, so it holds even
+    if this loop is dead. Sealing waits a further
+    ``cluster_frozen_max_secs``, and only then drops the key material.
+
+    Splitting the two is what removes the operational cost of the old design:
+    there is no auto-unseal, so sealing at the TTL made every PostgreSQL outage
+    longer than 20s cost a manual /unseal on the primary, while a routine
+    Patroni failover takes 10-30s. Freezing absorbs the failover; sealing still
+    bounds how long a possibly-stale node sits on keys.
+
+    This decides when the KEYS go. Whether the node may still serve is settled
+    independently and structurally by ``VaultState.must_seal``, which is a
+    deadline rather than an action, so a node past the seal point refuses
+    requests even if this loop is dead.
     """
     if last_confirm is None:
         return False
-    return now_monotonic - last_confirm > settings.cluster_primary_lease_ttl_secs
+    elapsed = now_monotonic - last_confirm
+    return (
+        elapsed
+        > settings.cluster_primary_lease_ttl_secs + settings.cluster_frozen_max_secs
+    )
+
+
+def _fence_should_seal(
+    last_lease_confirm: float | None, now_monotonic: float, vault_state
+) -> tuple[bool, str | None]:
+    """Decide whether the hard fence fires, and on which evidence.
+
+    Two independent triggers, OR'd, kept a pure function for the same reason
+    ``_lease_fence_should_seal`` is one: the daemon loop is untestable, the
+    decision must not be.
+
+    ``lease_loss_fence`` is the original: this node last held the primary
+    lease and can no longer confirm it. It is derived from
+    ``last_lease_confirm``, which is None on any node that is NOT the
+    canonical primary -- so it can never fire on a secondary.
+
+    ``authority_fence`` closes exactly that gap. ``must_seal`` is a monotonic
+    deadline needing no database, no peers and no network, so it stays armed
+    through total isolation and is role-independent by construction -- the
+    same property that makes ``frozen`` uniform across roles.
+
+    Returns (fire, trigger) so the caller can label the metric and the log
+    with the evidence rather than flattening both causes into one counter.
+    """
+    if vault_state.sealed:
+        return False, None
+    if _lease_fence_should_seal(last_lease_confirm, now_monotonic):
+        return True, "lease_loss_fence"
+    if vault_state.must_seal:
+        return True, "authority_fence"
+    return False, None
 
 
 async def _lease_fence_seal(vault_state) -> None:
@@ -1049,14 +1121,114 @@ async def _lease_fence_seal(vault_state) -> None:
     against). The DB is unreachable here -- that is WHY the fence fired -- so we
     stop with ``db=None`` : a local socket teardown only, no DB access. On a
     follower worker (no master server) the stop is a clean no-op.
+
+    Under Rust custody this worker is NOT where the key material lives -- the
+    custodians are (see ``seal_custodians_offline``). Sealing the API view
+    alone would zeroize the wrong process and leave the bundle resident on the
+    host, so the custodians are sealed too, over their local Unix sockets and
+    without touching the database.
+
+    ``seal_all`` accumulates per-slot failures and raises at the end, so the
+    custodian seal sits in its own try/finally: one unreachable custodian must
+    not stop this worker from dropping what it does hold. Drop what we can
+    reach rather than nothing.
     """
     from .cluster_setup import stop_master_services
+    from .rust_custody_backend import seal_custodians_offline
 
-    try:
-        await stop_master_services(vault_state, db=None)
-    except Exception:
-        log.warning("lease-fence: stop_master_services failed", exc_info=True)
-    vault_state.seal()
+    # Serialized because there are now two independent triggers -- the
+    # heartbeat's OR'd fence and ``cluster_ha_fence_loop`` -- and they can
+    # reach this within the same second. ``seal()`` is idempotent (it nulls
+    # buffers) but ``stop_master_services`` tears down a listener and a socket,
+    # and running two teardowns concurrently is how a socket ends up half
+    # removed. One choke point, so every caller is serialized by construction
+    # rather than by each caller remembering to check.
+    async with _FENCE_SEAL_LOCK:
+        try:
+            await stop_master_services(vault_state, db=None)
+        except Exception:
+            log.warning("lease-fence: stop_master_services failed", exc_info=True)
+        try:
+            if await seal_custodians_offline():
+                log.error("lease-fence: custodian pool sealed (key material dropped)")
+        except Exception:
+            log.critical(
+                "lease-fence: custodian seal FAILED -- key material may still be "
+                "held by the custodian pool on this host",
+                exc_info=True,
+            )
+        finally:
+            vault_state.seal()
+
+
+async def cluster_ha_fence_loop():  # pragma: no cover  (daemon loop)
+    """Seal on a lapsed deadline, depending on nothing that can block.
+
+    THE DEFECT THIS CLOSES. Under a real blackout, ONE worker in five dropped
+    its key material; the other four sat past a terminal deadline, refusing
+    requests, keys resident, for the life of the process. The journal showed no
+    ``hard fence error`` on any of them -- which rules out the fence raising.
+    It was never REACHED.
+
+    ``cluster_ha_heartbeat_loop`` evaluates its fence at the END of a tick that
+    begins with ``async with async_session() as db``, in the SAME iteration.
+    Nothing bounded that await: asyncpg's ``command_timeout`` defaults to None,
+    SQLAlchemy's ``pool_timeout`` bounds only the wait for a connection FROM the
+    pool and not the query on it, and ``pool_pre_ping`` adds a round-trip of its
+    own to the acquisition. The K7 fault is a blackhole route -- packets are
+    dropped, no RST, no FIN -- so a worker mid-query parks in that await
+    indefinitely and the fence below it is never evaluated. The single worker
+    that fenced was the one whose await happened to RAISE rather than hang.
+
+    ``must_seal``'s own docstring carries the safety argument: the loops,
+    "supervised, and restarted if they die -- are what make 'keys gone'
+    follow". The gap is that ``_supervised`` restarts a loop that DIES, and a
+    coroutine parked in an unbounded await is neither dead nor progressing. A
+    hang is not a death, so the supervisor never fires. Bounding the query
+    (done separately, in database.py) makes the hang recoverable, but leaving
+    the fence downstream of ANY database call keeps custody contingent on that
+    call's behaviour. It should not be contingent on anything.
+
+    So this loop evaluates the one trigger that is structurally independent:
+    ``vs.must_seal`` is a monotonic deadline comparison -- no database, no
+    peers, no network, no shared mutable state with the heartbeat. It cannot
+    block, so it cannot be starved.
+
+    ADDITIVE, not a replacement. The heartbeat keeps its own OR'd fence,
+    including the lease-derived trigger, whose ``last_lease_confirm`` is local
+    to that loop and is primary-only. Two triggers on different clocks can only
+    ever seal SOONER, never later, so the primary path cannot regress behind
+    this. ``_lease_fence_seal`` serializes the teardown, so both firing at once
+    is safe.
+
+    The interval is not a knob. The check is an integer comparison against a
+    monotonic clock, so its cost is nil and the only thing the period buys is
+    the width of the window between "stopped serving" and "keys dropped". One
+    second bounds that window at one second; a knob here would only let an
+    operator widen a custody gap.
+    """
+    interval = 1.0
+    # Mode-neutral wording: this same loop is registered for standalone, where
+    # "HA fence" would be a misleading thing to find in the journal.
+    log.info("fence loop started (independent of the database, 1s cadence)")
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            if vs.sealed:
+                continue
+            if not vs.must_seal:
+                continue
+            log.error(
+                "cluster_ha_fence: past the terminal seal deadline -- sealing "
+                "to drop key material (trigger: must_seal_independent)"
+            )
+            _metrics.seal_events.labels(trigger="must_seal_independent").inc()
+            await _lease_fence_seal(vs)
+        except Exception:
+            # Mirrors the heartbeat's fence guard. This loop is supervised, but
+            # a raise here would still cost the 1s cadence a restart+backoff,
+            # and the next tick can simply try again.
+            log.warning("cluster_ha_fence: error", exc_info=True)
 
 
 async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
@@ -1073,72 +1245,169 @@ async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
             if vs.sealed:
                 last_lease_confirm = None
                 continue
-            async with async_session() as db:
-                await _heartbeat_body(db, node_uuid)
-                # S2 rekey roll-forward rides the heartbeat BEFORE the fence:
-                # publish our rekey_pub and, if our generation lags, adopt the
-                # verified envelope. A successful roll-forward makes us current
-                # so the fence below leaves us alone; absence/rejection falls
-                # through to the fence (quarantine). Isolated so an error here
-                # never suppresses the fence or the liveness signal.
-                try:
-                    await _rekey_roll_forward_body(db, node_uuid)
-                except Exception:
-                    log.warning("rekey roll-forward error", exc_info=True)
-                # the generation fence rides the heartbeat: same per-node cadence,
-                # already gated on unsealed. Isolated so a fence error never
-                # suppresses the liveness signal above.
-                try:
-                    await _key_epoch_fence_body(db, node_uuid)
-                except Exception:
-                    log.warning("key-epoch fence error", exc_info=True)
-                # write-path guard: publish the generation this master
-                # now holds so followers on this host can fence delegated writes
-                # against a stale master. Runs AFTER roll-forward+fence, so the
-                # iteration that adopts a new generation also stamps it (no extra
-                # lag on the convergence path). Master-only -- followers hold no
-                # keys and must not clobber the marker with their inert epoch.
-                try:
-                    if vs.is_master and vs.key_epoch is not None:
-                        await stamp_node_generation(db, node_uuid, vs.key_epoch)
-                except Exception:
-                    log.warning("active_key_epoch stamp error", exc_info=True)
-                # Red-timing reconciler rides the heartbeat AFTER the fence: the
-                # primary re-seals the current-epoch envelope for peers the fence
-                # just quarantined (they published their rekey_pub after the
-                # one-shot publish). Isolated so an error never suppresses
-                # liveness ; a noop on every non-primary / converged tick.
-                try:
-                    await _rekey_republish_body(db, node_uuid)
-                except Exception:
-                    log.warning("rekey republish error", exc_info=True)
-                # Arm / disarm the lease-loss self-fence : a successful tick
-                # that still sees us as the canonical primary refreshes the
-                # lease we must keep proving ; anything else (secondary, no
-                # primary) disarms. This read rides the same tx -- if it raises
-                # (DB unreachable) we fall through to the except below with
-                # last_lease_confirm UNCHANGED, which is precisely what arms the
-                # fence.
-                primary_uuid, _, _ = await cluster_membership.read_canonical_primary(db)
-                last_lease_confirm = (
-                    time.monotonic() if primary_uuid == node_uuid else None
-                )
+            # BOUNDED, because nothing else bounds it. asyncpg's
+            # command_timeout defaults to None, SQLAlchemy's pool_timeout
+            # bounds only the wait for a connection FROM the pool (not the
+            # query on it), and pool_pre_ping adds a round-trip to the
+            # acquisition itself. Against a blackhole route -- packets
+            # dropped, no RST, no FIN -- this await never returns: the kernel
+            # just retransmits, and at the default tcp_retries2=15 (confirmed
+            # on the lab nodes) it does so for ~15 minutes before surfacing an
+            # error, far past the 320s fence. Observed: workers parked here,
+            # never re-renewing, sealing permanently over an outage that had
+            # already ended.
+            #
+            # The budget is the TTL, and is derived rather than configured: a
+            # confirmation that arrives after the deadline it would renew is
+            # not a confirmation. Timing out leaves last_lease_confirm
+            # UNCHANGED and falls through to the except below, which is
+            # exactly what arms the fence.
+            #
+            # Not a global command_timeout on the engine: this same engine
+            # serves /admin/rotate-dek-key (re-wraps every DEK), /backup/export
+            # and /audit/verify (walk the whole chain), which legitimately run
+            # long. Bounding the daemon loop is the precise instrument;
+            # bounding every query would break those.
+            async with asyncio.timeout(settings.cluster_primary_lease_ttl_secs):
+                async with async_session() as db:
+                    await _heartbeat_body(db, node_uuid)
+                    # S2 rekey roll-forward rides the heartbeat BEFORE the fence:
+                    # publish our rekey_pub and, if our generation lags, adopt the
+                    # verified envelope. A successful roll-forward makes us current
+                    # so the fence below leaves us alone; absence/rejection falls
+                    # through to the fence (quarantine). Isolated so an error here
+                    # never suppresses the fence or the liveness signal.
+                    try:
+                        await _rekey_roll_forward_body(db, node_uuid)
+                    except Exception:
+                        log.warning("rekey roll-forward error", exc_info=True)
+                    # the generation fence rides the heartbeat: same per-node cadence,
+                    # already gated on unsealed. Isolated so a fence error never
+                    # suppresses the liveness signal above.
+                    try:
+                        await _key_epoch_fence_body(db, node_uuid)
+                    except Exception:
+                        log.warning("key-epoch fence error", exc_info=True)
+                    # write-path guard: publish the generation this master
+                    # now holds so followers on this host can fence delegated writes
+                    # against a stale master. Runs AFTER roll-forward+fence, so the
+                    # iteration that adopts a new generation also stamps it (no extra
+                    # lag on the convergence path). Master-only -- followers hold no
+                    # keys and must not clobber the marker with their inert epoch.
+                    try:
+                        if vs.is_master and vs.key_epoch is not None:
+                            await stamp_node_generation(db, node_uuid, vs.key_epoch)
+                    except Exception:
+                        log.warning("active_key_epoch stamp error", exc_info=True)
+                    # Red-timing reconciler rides the heartbeat AFTER the fence: the
+                    # primary re-seals the current-epoch envelope for peers the fence
+                    # just quarantined (they published their rekey_pub after the
+                    # one-shot publish). Isolated so an error never suppresses
+                    # liveness ; a noop on every non-primary / converged tick.
+                    try:
+                        await _rekey_republish_body(db, node_uuid)
+                    except Exception:
+                        log.warning("rekey republish error", exc_info=True)
+                    # Arm / disarm the lease-loss self-fence : a successful tick
+                    # that still sees us as the canonical primary refreshes the
+                    # lease we must keep proving ; anything else (secondary, no
+                    # primary) disarms. This read rides the same tx -- if it raises
+                    # (DB unreachable) we fall through to the except below with
+                    # last_lease_confirm UNCHANGED, which is precisely what arms the
+                    # fence.
+                    # Two independent facts, refreshed from the same round-trip.
+                    #
+                    # DB CONFIRMATION -- every node, whatever its role. Reaching
+                    # this line means we just read canonical cluster state from the
+                    # writable authority, which is the only thing that lets ANY
+                    # node keep serving. Renewing it for secondaries too is the fix
+                    # for a hole a real blackout exposed: a secondary cut off from
+                    # PostgreSQL used to hold no deadline at all, so it never
+                    # froze and answered requests with raw database exceptions
+                    # (500s) instead of refusing them. It could no longer prove it
+                    # was still a secondary -- the primary, its epoch, its tokens
+                    # and its ACLs may all have moved since its last read.
+                    #
+                    # PRIMARY LEASE -- the singleton write claim, primary only. It
+                    # does not gate serving; a secondary serves perfectly well
+                    # without one.
+                    (
+                        primary_uuid,
+                        _,
+                        _,
+                    ) = await cluster_membership.read_canonical_primary(db)
+                    was_frozen = vs.frozen
+                    vs.renew_db_confirmation(
+                        settings.cluster_primary_lease_ttl_secs,
+                        settings.cluster_frozen_max_secs,
+                    )
+                    if was_frozen:
+                        log.warning(
+                            "cluster_ha_heartbeat: FROZEN -> ACTIVE, canonical "
+                            "cluster state readable again (role=%s)",
+                            "primary" if primary_uuid == node_uuid else "secondary",
+                        )
+                        _metrics.cluster_state_transitions.labels(
+                            from_state="frozen", to_state="active"
+                        ).inc()
+                    if primary_uuid == node_uuid:
+                        vs.renew_primary_lease(settings.cluster_primary_lease_ttl_secs)
+                    else:
+                        vs.release_primary_lease()
+                    last_lease_confirm = (
+                        time.monotonic() if primary_uuid == node_uuid else None
+                    )
         except Exception:
             log.warning("cluster_ha_heartbeat_loop error", exc_info=True)
-        # Lease-loss self-fence : runs every tick INCLUDING after the body
-        # raised -- a Patroni partition is precisely when the DB-driven
-        # self-demote cannot fire. If we last held the primary lease but could
-        # not re-confirm it within the TTL, we may no longer be the leader;
-        # seal to fence a possibly-stale primary control plane.
-        if not vs.sealed and _lease_fence_should_seal(
-            last_lease_confirm, time.monotonic()
-        ):
-            log.error(
-                "cluster_ha_heartbeat: primary lease unconfirmed for >%ds -- "
-                "self-sealing to fence a possibly-stale primary (cannot reach "
-                "the DB to self-demote)",
-                settings.cluster_primary_lease_ttl_secs,
-            )
-            _metrics.seal_events.labels(trigger="lease_loss_fence").inc()
-            await _lease_fence_seal(vs)
-            last_lease_confirm = None
+        # Hard fence : the node is ALREADY frozen by now (its VaultState
+        # authority deadline lapsed at the TTL, with no code required), so this
+        # is not what stops it serving. It only decides when a node that has
+        # been frozen for cluster_frozen_max_secs stops holding key material
+        # too.
+        #
+        # Wrapped: this block used to sit bare after the try, and
+        # _lease_fence_seal ends in an unguarded vault_state.seal(). A raise
+        # there killed the task -- and main.py registers no done-callback on
+        # asyncio.create_task, so nothing noticed. Reproduced before changing
+        # it. Freezing no longer depends on this loop surviving, but the
+        # heartbeat's liveness signal still does, so it must not die here.
+        #
+        # TWO triggers, OR'd. The lease fence below is derived from
+        # ``last_lease_confirm``, which is None on any node that is not the
+        # canonical primary -- so ``_lease_fence_should_seal`` returns False
+        # before it looks at a clock, and A SECONDARY COULD NEVER FIRE IT. That
+        # is the same blind spot that motivated FROZEN itself ("a secondary
+        # holds no primary lease, so a lease-derived fence cannot see it"):
+        # `frozen` was made role-independent, this path was not. The result was
+        # observable -- a blacked-out secondary parks in `sealing` (it stops
+        # serving, because must_seal is a deadline) while keeping its keys in
+        # RAM for the life of the process. An attacker chooses when that starts:
+        # cut the database link, then snapshot the guest at leisure. mlock stops
+        # swap and zeroize stops post-drop recovery; neither touches a live-VM
+        # memory snapshot, so actually sealing is the only control that removes
+        # the material.
+        #
+        # ``vs.must_seal`` is the role-independent half and needs nothing but a
+        # monotonic clock -- no database, no peers, no network -- so it stays
+        # armed through total isolation. It is ADDITIVE rather than a
+        # replacement: the two run off different clocks (lease confirmation vs
+        # _seal_deadline), and OR-ing can only ever seal MORE, never less, so
+        # the primary path cannot regress behind this change.
+        #
+        # It also inherits the peer invariant for free: prolong_frozen moves
+        # _seal_deadline but is bounded by _seal_deadline_cap, so a peer can buy
+        # a frozen node time and still never buy it immunity.
+        try:
+            fire, trigger = _fence_should_seal(last_lease_confirm, time.monotonic(), vs)
+            if fire:
+                log.error(
+                    "cluster_ha_heartbeat: frozen for >%ds without reaching the "
+                    "database -- sealing to drop key material (trigger: %s)",
+                    settings.cluster_frozen_max_secs,
+                    trigger,
+                )
+                _metrics.seal_events.labels(trigger=trigger).inc()
+                await _lease_fence_seal(vs)
+                last_lease_confirm = None
+        except Exception:
+            log.warning("cluster_ha_heartbeat: hard fence error", exc_info=True)

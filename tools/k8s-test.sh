@@ -31,7 +31,19 @@ echo "[k8s] creating ephemeral k3d cluster: $CLUSTER"
 # On a rootless-podman host without user-systemd (e.g. node-5) there is no
 # reachable Docker socket and k3s cannot run -- fail with guidance, not a
 # cryptic dump. Run this tier on a Docker host or via the CI k8s job.
-if ! k3d cluster create "$CLUSTER" --wait --timeout 120s; then
+# The API server is bound to LOOPBACK on purpose. Without --api-port, k3d
+# publishes the load balancer's 6443 to a RANDOM host port on 0.0.0.0 -- seen
+# live on the antares runner as `0.0.0.0:38563->6443/tcp`, i.e. the Kubernetes
+# API reachable from every network the CI host sits on, for the length of the
+# run. Nothing off-host consumes it, so that is exposure with no upside, on a
+# machine that also holds Docker API access and CI credentials; k3d writes an
+# admin kubeconfig into the workspace, and loopback is what keeps that
+# credential useless to anyone without host access. The random port made it
+# invisible to a routine port audit.
+# Fixed loopback port per script (6552) rather than a shared one, so the
+# test cluster and its sibling can coexist on one host.
+if ! k3d cluster create "$CLUSTER" --api-port 127.0.0.1:6552 \
+        --wait --timeout 120s; then
   echo "[k8s] k3d could not create a cluster -- no reachable Docker API." >&2
   echo "      Set DOCKER_HOST to a Docker/rootless-podman socket, or run this" >&2
   echo "      tier on a Docker-capable host / in CI (node-5 can't run k3s)." >&2

@@ -932,7 +932,27 @@ class MasterRpcServer:
 
     def _dispatch(self, op: str, args: dict) -> str:
         """Map RPC ops to vault local methods. Returns a string (hex for
-        binary outputs, plain str for audit signatures)."""
+        binary outputs, plain str for audit signatures).
+
+        Gated on SEALED (in the ``_local`` methods) but deliberately NOT on
+        FROZEN, which was considered and rejected.
+
+        node_uuid is read from a file on disk, so every worker on a host shares
+        it, heartbeats the same ``vault_cluster_nodes`` row, and derives its
+        authority deadline from the same PostgreSQL reads. They freeze and
+        unfreeze together. In the failure FROZEN exists for -- the database is
+        unreachable -- the *callers* are frozen too and refuse at
+        ``require_unsealed()`` long before reaching this socket, so a frozen
+        gate here would never fire.
+
+        Where it WOULD fire is the divergent case: one worker's heartbeat task
+        died while its siblings are healthy and PostgreSQL still names this
+        node primary. Refusing there would convert a single dead task into a
+        host-wide outage, and the callers would be right and the refusal
+        wrong -- their view of authority is the one backed by the database.
+        That fault is handled where it belongs, by ``main._supervised``, which
+        replaces the process rather than having its peers work around it.
+        """
         if op == "hmac_sha512":
             msg = bytes.fromhex(args["message"])
             return self.vault._hmac_sha512_hex_local(msg)

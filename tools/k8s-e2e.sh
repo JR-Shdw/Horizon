@@ -45,7 +45,19 @@ trap cleanup EXIT
 
 # --- ephemeral k3d cluster --------------------------------------------------
 say "creating k3d cluster: $CLUSTER (db=$DB)"
-if ! k3d cluster create "$CLUSTER" --wait --timeout 120s; then
+# The API server is bound to LOOPBACK on purpose. Without --api-port, k3d
+# publishes the load balancer's 6443 to a RANDOM host port on 0.0.0.0 -- seen
+# live on the antares runner as `0.0.0.0:38563->6443/tcp`, i.e. the Kubernetes
+# API reachable from every network the CI host sits on, for the length of the
+# run. Nothing off-host consumes it, so that is exposure with no upside, on a
+# machine that also holds Docker API access and CI credentials; k3d writes an
+# admin kubeconfig into the workspace, and loopback is what keeps that
+# credential useless to anyone without host access. The random port made it
+# invisible to a routine port audit.
+# Fixed loopback port per script (6551) rather than a shared one, so the
+# e2e cluster and its sibling can coexist on one host.
+if ! k3d cluster create "$CLUSTER" --api-port 127.0.0.1:6551 \
+        --wait --timeout 120s; then
   echo "[k8s-e2e] k3d could not create a cluster -- no reachable Docker API." >&2
   echo "          Run on a Docker-capable host / CI (node-5 can't run k3s)." >&2
   exit 2

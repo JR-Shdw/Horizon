@@ -1353,17 +1353,38 @@ mod proptests {
             extra in 0u8..=4,
         ) {
             let total = threshold + extra;
-            let split_a = shamir_split(&secret, threshold, total).unwrap();
-            let split_b = shamir_split(&secret, threshold, total).unwrap();
-            // x-coords match (deterministic indices) but the y-payloads
-            // must differ on at least one share.
+            // RETRY, do not assert on a single pair.
+            //
+            // A single collision is NOT evidence of a broken RNG. The random
+            // material in a split is (threshold - 1) * secret.len() bytes, so
+            // the smallest case this strategy generates -- threshold = 2 with a
+            // 1-byte secret -- has exactly ONE random GF(256) coefficient, and
+            // two independent splits agree with probability 1/256. Measured at
+            // 0.00399 over 200k trials against an expectation of 0.00391.
+            //
+            // proptest duly found it (minimal input secret = [5], threshold = 2)
+            // and reported "RNG broken", then SAVED THE SEED to
+            // proptest-regressions/. On a reused CI workspace that replays every
+            // run, so a legitimate 1-in-256 draw became a permanent red that
+            // blocked deploys.
+            //
+            // A broken RNG repeats forever; a coincidence does not. Six fresh
+            // pairs put a false positive at (1/256)^6 ~ 3e-15 while still
+            // failing instantly on an RNG that is actually stuck.
             let mut any_diff = false;
-            for (a, b) in split_a.iter().zip(split_b.iter()) {
-                prop_assert_eq!(a[0], b[0]);  // same x-coord
-                if a[1..] != b[1..] { any_diff = true; }
+            for _ in 0..6 {
+                let split_a = shamir_split(&secret, threshold, total).unwrap();
+                let split_b = shamir_split(&secret, threshold, total).unwrap();
+                for (a, b) in split_a.iter().zip(split_b.iter()) {
+                    // x-coords are deterministic indices and must always match.
+                    prop_assert_eq!(a[0], b[0]);
+                    if a[1..] != b[1..] { any_diff = true; }
+                }
+                if any_diff { break; }
             }
             prop_assert!(any_diff,
-                "shamir_split produced identical y-coords across two calls - RNG broken ?");
+                "shamir_split produced identical y-coords across SIX independent \
+                 pairs - RNG is stuck (a chance collision is ~3e-15 here)");
         }
 
         // BOUNDS : threshold < 2 and total < threshold must error.

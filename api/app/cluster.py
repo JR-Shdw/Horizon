@@ -563,18 +563,53 @@ async def heartbeat_loop(session_factory, stop_event: asyncio.Event | None = Non
             async with session_factory() as db:
                 await heartbeat_once(db)
         except WorkerRegistrationLost:
-            # Alive process, missing row: restore it rather than destroying a
-            # live Shamir share. Only fail-close if the row cannot be restored.
+            # Alive process, missing row: restore it and keep going. A failed
+            # restore is retried on the next tick -- it is NEVER a reason to
+            # fail-close this process.
+            #
+            # This used to call _terminate_lost_worker(), which seals and
+            # SIGTERMs. _reregister_after_reap wraps a single un-retried INSERT
+            # in a bare `except Exception`, so ANY transient database error
+            # returned False -- and the reaper only deletes rows after
+            # worker_reap_stale_secs of missed heartbeats, i.e. exactly during
+            # recovery from a database outage, when writes are least reliable.
+            # The mechanism was therefore most likely to fire precisely when
+            # the condition it punished was transient.
+            #
+            # This is NOT an argument that a vault should never fail closed.
+            # It holds very important data and sealing is the correct
+            # protective response -- but only on EVIDENCE that things are
+            # actually down, never on one ambiguous signal. A single failed
+            # INSERT is not evidence: it is one write, at the worst possible
+            # moment, against a database that is by construction still
+            # settling. The cost of acting on it is unrecoverable and scales
+            # with how little we knew :
+            #   HA multi-node      -- costs a healthy member AND a Shamir share,
+            #                         which is minted once at unseal and never
+            #                         replenished (this file's own history
+            #                         records a cluster going 5 -> 2 -> 1 and
+            #                         sealing on all three nodes)
+            #   standalone, N>1    -- costs a share, degrading local failover
+            #   standalone, N=1    -- kills the only worker: total outage, and
+            #                         sealed, so it needs a manual unseal
+            #
+            # Sealing on real evidence belongs elsewhere, where the evidence
+            # exists: a worker that genuinely cannot reach the database stops
+            # being authoritative on its own, because its VaultState authority
+            # deadline lapses and it goes FROZEN -- keys retained, recovering
+            # by itself once the database confirms it (see vault_state.frozen)
+            # -- and the hard fence seals it once that has held long enough to
+            # be conclusive. A missing bookkeeping row on a live process is a
+            # different and much weaker signal, so it gets a retry, not a seal.
+            #
             # Deliberately no `continue` -- fall through to the normal sleep so
             # a persistent reap does not turn into a tight DB retry loop.
             if not await _reregister_after_reap(session_factory):
-                log.critical(
-                    "worker registration was reaped and could not be restored; "
-                    "terminating pid=%d for supervisor replacement",
+                log.error(
+                    "worker registration was reaped and could not be restored "
+                    "for pid=%d; retrying on the next heartbeat",
                     os.getpid(),
                 )
-                _terminate_lost_worker()
-                return
         except Exception:
             log.warning("heartbeat update failed", exc_info=True)
         try:

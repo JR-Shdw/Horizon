@@ -66,6 +66,12 @@ _RUNTIME_KEY_BYTES = 32
 _RUNTIME_BUNDLE_BYTES = len(_RUNTIME_KEY_NAMES) * _RUNTIME_KEY_BYTES
 _SHAMIR_SHARE_BYTES = 1 + _RUNTIME_BUNDLE_BYTES
 _SHAMIR_PENDING_TTL_SECS = 300
+# How far past the normal seal point peer evidence may push, as a multiple of
+# the mode's seal grace. Not a setting: the peer protocol that would use it
+# does not exist yet, and a knob for an unbuilt feature is a knob nobody can
+# size. 3x lets a cluster-wide database outage be ridden out rather than
+# forcing an operator to unseal every node, while keeping the total bounded.
+_PEER_PROLONG_FACTOR = 3
 _RpcRecoveryHook = Callable[[], Coroutine[Any, Any, bool]]
 
 
@@ -73,6 +79,68 @@ class VaultState:
     def __init__(self):
         self._sealed = True
         self._unsealed_at: float | None = None
+        # -- FROZEN : two independent facts, both time.monotonic() --
+        #
+        # They are deliberately NOT one deadline. Conflating them left a hole
+        # that only a real network fault exposed: a secondary blacked out from
+        # PostgreSQL never froze, because it holds no primary lease, and went
+        # on answering requests with unhandled database exceptions (500s).
+        #
+        #   _db_confirmation_deadline : "can I still read canonical cluster
+        #       state?" -- EVERY node, whatever its role. A secondary without
+        #       the database cannot prove it is still a secondary: since its
+        #       last read the primary may have changed, its epoch may have
+        #       moved, it may have been promoted or demoted, tokens and ACLs
+        #       may have been rewritten. It has no authority to serve on.
+        #
+        #   _primary_lease_deadline : "am I still allowed to be application
+        #       primary?" -- the singleton write claim. Primary only, and
+        #       meaningless on a secondary.
+        #
+        # FROZEN derives from the FIRST. That is what makes the rule uniform:
+        # any node that cannot confirm canonical state stops serving,
+        # regardless of role.
+        #
+        # None means "no lease obligation" : cluster HA is off, or this node is
+        # not the canonical primary. Every non-HA deployment leaves it None and
+        # is completely unaffected -- the loops that set it only run under
+        # settings.cluster_ha_enabled.
+        #
+        # When set, it is a DEADLINE, not a flag. `frozen` recomputes from the
+        # clock on every read, so nothing has to push a state transition. That
+        # is deliberate: the previous design armed the fence inside the
+        # heartbeat loop and sealed from there, and the seal call sits OUTSIDE
+        # that loop's try -- a raise from it killed the task, and
+        # asyncio.create_task() in main.py registers no done-callback, so the
+        # node went on serving with its keys and nothing noticed. Reproduced.
+        #
+        # Expressed as a deadline the failure mode inverts: if the refresher
+        # dies, the deadline simply passes and every caller fails closed. There
+        # is no code path that has to run for the node to stop being
+        # authoritative, which is what makes the invariant hold.
+        self._db_confirmation_deadline: float | None = None
+        # The ttl the deadline was built from, so the AGE of the last
+        # confirmation can be reported without a second clock.
+        self._db_confirmation_ttl: float | None = None
+        # The singleton primary claim. Separate lifetime: a node can hold fresh
+        # DB confirmation while legitimately not being primary.
+        self._primary_lease_deadline: float | None = None
+        # Last role PostgreSQL reported for this node, cached so a status
+        # endpoint can answer WITHOUT the database. An endpoint that needs
+        # PostgreSQL to describe a node is unusable in exactly the situation it
+        # exists for -- the blackout test found /api/v1/vault/status simply not
+        # answering for the whole outage. None until the first confirmation.
+        self._last_known_role: str | None = None
+        # Companion deadline: past this, frozen is no longer a recoverable
+        # state and the node must be treated as sealed. Kept as state for the
+        # same reason as the one above -- so the transition cannot be missed by
+        # a loop that died.
+        self._seal_deadline: float | None = None
+        # Hard ceiling on _seal_deadline, fixed at renewal from the last moment
+        # write authority was actually proven. Peer evidence may push the seal
+        # deadline out (see prolong_frozen) but never past this, so peer input
+        # cannot turn "eventually sealed" into "never sealed".
+        self._seal_deadline_cap: float | None = None
         # Previous hmac_key for lazy token migration after password rotation
         self._prev_hmac_enc = None
         # Monotonic, process-local cache generation. Cleanup snapshots it before
@@ -1154,6 +1222,29 @@ class VaultState:
         self._sealed = False
         self._unsealed_at = time.monotonic()
         self._2fa_cache = None
+        # Drop the authority deadlines from the PREVIOUS life of this vault.
+        #
+        # A fence seals on a lapsed _seal_deadline, and seal() does not clear
+        # it. Without this, the deadline outlives the seal: the operator
+        # unseals, `must_seal` is STILL true because it is comparing against a
+        # timestamp from before the outage, and the fence drops the keys again
+        # -- within a second, on a vault that was just authenticated.
+        #
+        # Observed on the lab: `POST /unseal 200 OK` and "past the terminal
+        # seal deadline -- sealing" in the same second. It only reproduced
+        # once the fence moved into its own loop; the heartbeat's fence was
+        # accidentally immune because it evaluates AFTER a round-trip that
+        # calls renew_db_confirmation() first, so the deadline it read had
+        # always just been refreshed. Making the fence independent of the
+        # database removed that incidental ordering, so the invariant has to
+        # be stated here instead of relied upon there.
+        #
+        # Correct on the merits, not just as a fix: an unseal is an
+        # authenticated statement that this node is authoritative again. It
+        # re-derives the keys from the master password. A deadline that
+        # expired while the node held DIFFERENT state has nothing to say about
+        # the node that exists after it. The next heartbeat sets a fresh one.
+        self.release_db_confirmation()
         # If this worker is already serving as master, refresh the running
         # RPC listener's snapshot to the generation we just derived. The
         # Rust MasterRpcServer freezes its sub-keys at construction (its
@@ -1304,10 +1395,186 @@ class VaultState:
         self._shamir_shares.clear()
         self._shamir_started_at = None
 
+    # -- FROZEN : authority lease --
+
+    def renew_db_confirmation(self, ttl_secs: float, seal_grace_secs: float) -> None:
+        """Record that this node just confirmed canonical state in PostgreSQL.
+
+        Called by EVERY node after a round-trip that proved it can read the
+        canonical cluster state from the writable authority -- not only by the
+        primary. A secondary that cannot do this has no more right to serve
+        than a primary that cannot: it can no longer demonstrate that it is
+        still a secondary, that its epoch is current, or that the tokens it
+        would authenticate still exist.
+
+        This is the single way out of FROZEN, which is what makes "a frozen
+        node never serves again without database revalidation" hold.
+
+        ``seal_grace_secs`` sets how long past the freeze point this node may
+        remain merely frozen before it must be treated as sealed. Storing it as
+        a DEADLINE rather than leaving it to a loop is what makes "ambiguity
+        eventually ends in sealed, never in active" structural: the transition
+        needs no code to run, so it holds even if every background loop is
+        dead. See :attr:`must_seal`.
+        """
+        now = time.monotonic()
+        self._db_confirmation_ttl = ttl_secs
+        self._db_confirmation_deadline = now + ttl_secs
+        self._seal_deadline = now + ttl_secs + seal_grace_secs
+        self._seal_deadline_cap = (
+            now + ttl_secs + seal_grace_secs * _PEER_PROLONG_FACTOR
+        )
+
+    def note_role(self, role: str | None) -> None:
+        """Cache the role PostgreSQL last reported, for DB-free status."""
+        self._last_known_role = role
+
+    @property
+    def last_known_role(self) -> str | None:
+        """Role as of the last successful confirmation. May be stale by design.
+
+        Reported alongside the confirmation age so a reader can judge it: while
+        frozen it is precisely the thing this node can no longer verify.
+        """
+        return self._last_known_role
+
+    def db_confirmation_age(self) -> float | None:
+        """Seconds since canonical state was last confirmed, None if never."""
+        deadline = self._db_confirmation_deadline
+        if deadline is None or self._db_confirmation_ttl is None:
+            return None
+        return max(0.0, time.monotonic() - (deadline - self._db_confirmation_ttl))
+
+    def renew_primary_lease(self, ttl_secs: float) -> None:
+        """Record that PostgreSQL still names this node the canonical primary.
+
+        Strictly the singleton write claim, and strictly primary-only. It does
+        NOT gate serving -- :attr:`frozen` reads the DB-confirmation deadline
+        instead -- because a node can be perfectly able to serve while
+        legitimately not being primary. Kept apart so the safety argument reads
+        cleanly: one deadline answers "may I serve?", the other "may I be
+        primary?".
+        """
+        self._primary_lease_deadline = time.monotonic() + ttl_secs
+
+    def release_primary_lease(self) -> None:
+        """This node is not the canonical primary. Says nothing about serving."""
+        self._primary_lease_deadline = None
+
+    @property
+    def holds_primary_lease(self) -> bool:
+        """True while this node's singleton primary claim is still valid."""
+        deadline = self._primary_lease_deadline
+        return deadline is not None and time.monotonic() < deadline
+
+    def release_db_confirmation(self) -> None:
+        """Drop the obligation entirely (sealed, or cluster HA off).
+
+        Distinct from letting it expire: a node carrying no deadline at all is
+        neither frozen nor due to be sealed. Used where there is nothing to
+        confirm rather than a failure to confirm it.
+        """
+        self._db_confirmation_deadline = None
+        self._db_confirmation_ttl = None
+        self._primary_lease_deadline = None
+        self._seal_deadline = None
+        self._seal_deadline_cap = None
+
+    def prolong_frozen(self, secs: float) -> bool:
+        """Peer evidence may extend how long this node stays frozen.
+
+        Returns True if the seal deadline moved.
+
+        This is the ONLY thing peers are permitted to influence, and the method
+        is shaped so that no caller can exceed it: it moves ``_seal_deadline``
+        and nothing else. ``frozen`` is derived from
+        ``_db_confirmation_deadline``, which only a confirmed round-trip
+        against the canonical PostgreSQL can push
+        (:meth:`renew_db_confirmation`). So a peer -- or a compromised peer,
+        or a stale cached roster -- can buy a node time before its keys are
+        dropped, and can never make it serve. Encoded here rather than left as
+        a rule for the peer code to remember.
+
+        Bounded on purpose. Peers confirming "the database is down for all of
+        us" is a good reason to keep key material a while longer instead of
+        forcing an operator to unseal every node after a cluster-wide outage.
+        It is not a reason to hold keys forever: unbounded prolongation would
+        let peer input waive the property that ambiguity ends sealed. The cap
+        is fixed at renewal time, from the last moment authority was actually
+        proven, so no amount of peer chatter can walk it forward.
+        """
+        cap = self._seal_deadline_cap
+        current = self._seal_deadline
+        if cap is None or current is None:
+            return False
+        target = min(time.monotonic() + secs, cap)
+        if target <= current:
+            return False
+        self._seal_deadline = target
+        return True
+
+    @property
+    def must_seal(self) -> bool:
+        """True once this node has been frozen long enough to be conclusive.
+
+        Answers the "ambiguity ends in SEALED, not ACTIVE" invariant on the
+        half that can be made structural. Because it is derived from a
+        deadline rather than set by a loop, a node past this point CANNOT
+        serve, regardless of whether any background task is still alive to
+        perform the actual seal.
+
+        The other half -- zeroing the key material -- unavoidably needs code to
+        run, and is done by the mode's loop (the HA hard fence, or the
+        standalone watchdog). Sealing cannot be done from the request path:
+        ``seal()`` is sync and does not stop the master RPC server, so calling
+        it there would leak the crypto-ops socket and wedge the next /unseal.
+        So the guarantee this property provides is precisely "will not serve",
+        and the loops -- supervised, and restarted if they die -- are what make
+        "keys gone" follow.
+        """
+        deadline = self._seal_deadline
+        return deadline is not None and time.monotonic() >= deadline
+
+    @property
+    def frozen(self) -> bool:
+        """True once this node can no longer confirm canonical state.
+
+        Role-independent on purpose. A secondary that cannot reach PostgreSQL
+        is as unable to serve as a primary that cannot: it can no longer show
+        that it is still a secondary, that its key epoch is current, or that
+        the tokens it would accept have not been revoked.
+
+        Keys are retained -- frozen is not sealed. The node simply stops
+        exercising authority until it can revalidate against the database.
+        """
+        deadline = self._db_confirmation_deadline
+        return deadline is not None and time.monotonic() >= deadline
+
+    def frozen_for(self) -> float:
+        """Seconds spent frozen, 0.0 when serving. Drives the hard fence."""
+        deadline = self._db_confirmation_deadline
+        if deadline is None:
+            return 0.0
+        return max(0.0, time.monotonic() - deadline)
+
     def require_unsealed(self) -> None:
-        """Raise if vault is sealed."""
+        """Raise if the vault is sealed, or frozen (lost database authority).
+
+        Both are checked here because this is the one gate every route already
+        passes through, so FROZEN covers the request surface without touching
+        each handler.
+        """
         if self._sealed:
             raise VaultSealedError()
+        if self.must_seal:
+            # Past the point where frozen was still a recoverable state. The
+            # keys may not be zeroed yet -- that needs the mode's loop -- but
+            # this node must not serve either way, so it reports sealed rather
+            # than frozen: frozen advertises "I will come back by myself",
+            # which is no longer true.
+            raise VaultSealedError()
+        if self.frozen:
+            raise VaultFrozenError()
 
     # -- 2FA status cache --
 
@@ -1337,6 +1604,19 @@ class VaultState:
 
 
 class VaultSealedError(Exception):
+    pass
+
+
+class VaultFrozenError(Exception):
+    """This node holds its keys but has lost PostgreSQL authority.
+
+    Distinct from VaultSealedError on purpose. Sealed means the key material is
+    gone and an operator must /unseal. Frozen means the keys are still in RAM
+    and the node recovers by itself the moment it can confirm, against the
+    database, that it is still the canonical primary -- which is the whole
+    point: a routine Patroni failover should not cost a manual unseal.
+    """
+
     pass
 
 

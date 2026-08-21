@@ -223,6 +223,42 @@ async def deactivate_rust_custody(
             await _seal_api_view(vault)
 
 
+async def seal_custodians_offline() -> bool:
+    """Drop the custodians' key material with NO database access.
+
+    ``deactivate_rust_custody`` is the operator path and cannot be reused by
+    the fence: it persists ``unsealed=False`` FIRST, and that is a database
+    write. The fence fires precisely because the database is unreachable, so
+    routing through it would block on the write and never reach the seal --
+    the same shape as the bug it exists to prevent.
+
+    Skipping the persistence is safe, and specifically NOT a weaker seal. The
+    flag is a RECORD of a decision this function has already enforced
+    locally; the key material is gone either way, and the row reconciles when
+    the database comes back. Deferring a record is recoverable. Retaining keys
+    is not.
+
+    This matters more than "the API view is sealed" suggests. Under Rust
+    custody the runtime bundle lives in the custodians, not in this worker --
+    ``activate_rust_custody_from_local`` says so outright: the local keys are
+    wiped either way and "the custodians stay the only holders of the runtime
+    bundle". Sealing only the API view would therefore zeroize the wrong
+    process and leave the actual key material resident on the host.
+
+    ``pool.seal_all()`` reaches the custodians over local Unix sockets
+    (``cluster_rpc.CustodianPoolController``), so it stays available in exactly
+    the isolation this runs under.
+
+    Returns True if a pool was configured and sealed, False when custody is not
+    in use in this process (a no-op, not a failure).
+    """
+    pool = _configured_pool
+    if pool is None:
+        return False
+    await pool.seal_all()
+    return True
+
+
 async def _verify_attached_master_generation(
     vault: VaultState,
     *,

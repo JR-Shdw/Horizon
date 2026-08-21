@@ -25,7 +25,8 @@ The per-OS component checklist used to reassess support lives in
 | OpenBSD 7.x | Tested | **1753 passed** on a 7.8 VM, HA cluster mTLS included. Base LibreSSL's CPython `ssl` can't load the Ed25519 cluster certs, so `install-openbsd.sh` builds CPython 3.12 from source against the OpenSSL port (eopenssl36), Ed25519 kept. `tools/install-openbsd.sh` |
 | NetBSD 10.x | Tested | full suite green on a 10.1 VM (anita-built golden); `tools/install-netbsd.sh` |
 | Windows (WSL2) | Supported | via the Linux container or native path under WSL2 |
-| macOS (Apple silicon / Intel) | Skeleton (untested) | `tools/install-macos.sh --mode user`; Homebrew deps, Apple Library paths, LaunchAgent |
+| macOS (Apple Silicon) | Tested | `tools/install-macos.sh --mode user` runs green end-to-end on GitHub-hosted `macos-latest` (`.github/workflows/macos-native.yml`): Homebrew deps, PostgreSQL, venv, Rust extension wheel (built, imported, AEAD round-tripped), LaunchAgent, first unseal. User mode only |
+| macOS (Intel) | Untested | Not known-broken, unmeasured: GitHub retired the `macos-13` image and there is no free x86_64 darwin runner to replace it |
 | aarch64 Linux stack | Validated | Raspberry Pi 4 hardware; full stack: PostgreSQL 18 + API + Rust crypto + frontend |
 | arm64 agent (rh-fetch/inject/watch) | Verified (emulated) | Builds for arm64 (incl. under QEMU) via aws-lc-sys pre-generated bindings (`aws-lc-rs` without `bindgen` -- no libclang panic). Post-quantum TLS (X25519MLKEM768) preserved, wire-verified by `tools/pq-verify.sh` (OpenSSL 3.5 + aws-lc-rs both negotiate it). Built multi-arch in CI (`build.yml`). |
 

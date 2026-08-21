@@ -136,9 +136,16 @@ harness/infra, one real deployment bug. All resolved:
 | **OpenBSD: HA cluster mTLS fails** | 5 failed: `ssl.SSLError: UNKNOWN_CERTIFICATE_TYPE` | Base **LibreSSL**'s CPython `ssl` can't load the **Ed25519** TLS certs the cluster CA mints. | `install-openbsd.sh`: **build CPython 3.12 from source against the OpenSSL port** (eopenssl36, via aliased pkg-config) + cryptography against the same OpenSSL. Ed25519 kept. (Plus a test-only `CA:TRUE` fix for one db-ssl fixture LibreSSL's `openssl` CLI didn't flag.) |
 | **OpenBSD: pkg_add truncates mid-batch** (recurring, 2026-06-24) | `Premature end of archive` on a cdn tarball -> batch aborts, postgresql uninstalled -> cryptic `install: unknown group _postgresql` (the old `pkg_add ... \|\| true` masked it). | `install-openbsd.sh`: **retry the batch 3x + hard-verify the `_postgresql` group**, fail loud + specific. Bypass: `export PKG_PATH` to a healthier mirror. Same family as the NetBSD rsync `\|\| true` bug - a transient must be retried+verified in-script, not re-run by hand. |
 
-`tools/install-macos.sh` is an **untested skeleton**: Homebrew deps,
-Apple `Library` paths, and a LaunchAgent user service. Can't be validated on
-node-5 (no Apple HW); run on a Mac / `macos-latest`.
+`tools/install-macos.sh` was an untested skeleton at the time of this run --
+node-5 has no Apple hardware. It **has since been validated on `macos-latest`**
+(`.github/workflows/macos-native.yml`), which runs it end to end in user mode:
+Homebrew deps, PostgreSQL, venv, the Rust extension (built, imported, and AEAD
+round-tripped -- a wheel that links but computes wrongly on another arch is
+worse than one that fails to load), the LaunchAgent, and first unseal.
+
+Apple Silicon only. Intel darwin stays unmeasured: GitHub retired the
+`macos-13` image and a job pinned to it now queues indefinitely rather than
+failing, so there is no free x86_64 lane to move to.
 
 Gotchas for re-runs on node-5: ports `2222` (forgejo) / `5433` are taken - pass
 `SSH_PORT=`/`PG_PORT=`. `/tmp` is RAM-backed tmpfs (clean workdirs as you go).

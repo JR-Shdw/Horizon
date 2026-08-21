@@ -64,6 +64,15 @@ seal_events = Counter(
     ["trigger"],  # manual | shutdown | broadcast | failover
 )
 
+# An HA daemon loop exited. Always a fault: these loops never return. A
+# non-zero value means a process was replaced because it could no longer prove
+# its authority -- alert on any increase, not on a rate.
+ha_loop_deaths = Counter(
+    "rhorizon_ha_loop_deaths_total",
+    "HA background loops that exited unexpectedly (always a fault)",
+    ["loop"],  # ha-heartbeat | ha-state-machine | ha-reaper
+)
+
 # Admission control / load shedding (per-worker concurrency cap).
 # livesum so /metrics shows the cluster-wide in-flight sum across workers.
 requests_inflight = Gauge(

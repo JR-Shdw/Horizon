@@ -58,7 +58,7 @@ from .routes import (
 from .routes import (
     cluster as cluster_route,
 )
-from .vault_state import VaultSealedError
+from .vault_state import VaultFrozenError, VaultSealedError
 from .vault_state import vault as vs
 
 log = logging.getLogger("rhorizon")
@@ -828,6 +828,183 @@ async def _reaper_loop():
             )
 
 
+def _supervised(coro_fn, name: str) -> asyncio.Task:
+    """Spawn an HA daemon loop whose death cannot pass unnoticed.
+
+    ``asyncio.create_task`` alone drops the exception of a task nobody awaits:
+    the coroutine dies, the reference lingers in a list, and the process keeps
+    serving as if the loop were running. That is not hypothetical here --
+    ``cluster_ha_heartbeat_loop`` ends each tick in a hard-fence block that
+    calls ``vault_state.seal()``, and a raise from it killed the task silently.
+    Reproduced.
+
+    Since FROZEN became a deadline rather than a flag, a dead heartbeat is at
+    least fail-CLOSED on its own: nothing renews the authority lease, it
+    lapses, and the node stops being authoritative without any code running.
+    What it is not is fail-*visible*, and it never recovers -- the loop that
+    would renew the lease is gone, so the node stays frozen until someone
+    restarts it.
+
+    So the supervisor's job is not to make the failure safe (the deadline
+    already does) but to make it loud and RECOVERABLE: log at CRITICAL, count
+    it, and restart the loop with capped exponential backoff.
+
+    It deliberately does NOT terminate the process, which was the first thing
+    tried here. ``cluster._terminate_lost_worker`` seals, and seal() drops this
+    worker's Shamir share -- its own docstring notes the share "cannot be
+    reissued while the vault is unsealed, so reaching this path costs the node
+    one unit of failover capacity permanently". A bug that kills a loop kills
+    it on EVERY worker, since they run identical code against identical state,
+    so escalating to termination would have burned the whole Shamir quorum and
+    left the cluster unable to reconstruct on a real master failure. That is
+    strictly worse than the fault being handled.
+
+    Restarting is safe because these loops are idempotent -- each tick re-reads
+    its state from PostgreSQL and holds nothing across iterations that matters.
+    The backoff caps at 60s so a loop failing persistently cannot become a hot
+    loop, and while it is broken the node simply stays frozen, which is already
+    the correct and harmless state.
+
+    CancelledError is normal shutdown and propagates.
+    """
+
+    async def _runner() -> None:
+        delay = 1.0
+        while True:
+            try:
+                await coro_fn()
+                # These are `while True`; returning at all is a fault.
+                log.warning("HA loop %s returned; loops never exit -- restarting", name)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.critical(
+                    "HA loop %s died: %r -- restarting in %.0fs", name, exc, delay
+                )
+                try:
+                    from .metrics import ha_loop_deaths
+
+                    ha_loop_deaths.labels(loop=name).inc()
+                except Exception:
+                    pass
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60.0)
+
+    return asyncio.create_task(_runner(), name=name)
+
+
+async def _standalone_db_watchdog():  # pragma: no cover  (daemon loop)
+    """Standalone only: freeze on a dead local database, then seal.
+
+    Runs when ``cluster_ha_enabled`` is false. In HA the equivalent job is done
+    by ``cluster_ha_heartbeat_loop``, which renews the authority lease from a
+    round-trip that also confirms this node is still the canonical primary.
+
+    Standalone had NEITHER half. The HA loops do not start, so nothing ever set
+    an authority deadline, and nothing sealed: PostgreSQL could die and the
+    process would sit there failing every request with the master key live in
+    RAM, indefinitely. That is the exposure this closes.
+
+    The evidence bar is different here, which is why the thresholds are. In HA,
+    "cannot reach the database" is ambiguous -- a reconvergence, a VIP still
+    settling, this node's own NIC -- and a peer may be covering, so freezing
+    and waiting is right and sealing would destroy keys over a transient event.
+    Standalone has no partition to blame and no peer that could be serving: the
+    database is on this machine, so sustained unreachability is evidence.
+
+    Deliberately reuses the FROZEN deadline rather than adding a second
+    mechanism: a successful probe pushes the deadline, so a failing probe needs
+    no code at all to stop the node being authoritative -- it simply lapses.
+    If this task dies the node still freezes, which is the safe direction. The
+    seal does need the loop, exactly as the HA hard fence does; a dead watchdog
+    therefore leaves a frozen, non-serving node rather than a serving one.
+
+    The probe tests WRITE AUTHORITY, not reachability. ``SELECT 1`` was the
+    first version and it was wrong: it succeeds against a read-only standby, so
+    a node pointed at a replica would renew its lease forever while unable to
+    write a single audit row. Losing write authority IS losing authority --
+    the same event that makes the HA path freeze, where it is caught only
+    incidentally, because ``_heartbeat_body`` happens to open with an UPDATE
+    that throws on a standby.
+
+    ``pg_is_in_recovery()`` catches the replica case and
+    ``transaction_read_only`` catches a primary put into read-only by
+    configuration or by a full disk. Neither writes, so the probe adds no WAL
+    churn at its 3-second cadence. It is deliberately not an application query:
+    an unrelated bug in vault logic must not be mistaken for a dead database.
+    """
+    from sqlalchemy import text as sa_text
+
+    # Reused rather than reimplemented: seal() alone does NOT stop the master
+    # RPC server, so a bare seal leaks the crypto-ops socket and wedges the
+    # next /unseal. _lease_fence_seal stops master services first, with
+    # db=None, which is correct here because the database is why we are here.
+    from .cluster_ha_loops import _lease_fence_seal
+    from .database import async_session
+
+    freeze_after = settings.standalone_db_freeze_secs
+    seal_after = settings.standalone_db_seal_secs
+    # Derived, not another knob: three probes inside the freeze window, so a
+    # single dropped packet cannot trip it.
+    interval = max(1, freeze_after // 3)
+    log.info(
+        "standalone db watchdog: freeze after %ds unreachable, seal after a "
+        "further %ds (probe every %ds)",
+        freeze_after,
+        seal_after or 0,
+        interval,
+    )
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            if vs.sealed:
+                # Nothing to protect and nothing to renew.
+                vs.release_db_confirmation()
+                continue
+            try:
+                async with async_session() as db:
+                    row = (
+                        await db.execute(
+                            sa_text(
+                                "SELECT pg_is_in_recovery() AS in_recovery, "
+                                "current_setting('transaction_read_only') "
+                                "  AS read_only"
+                            )
+                        )
+                    ).fetchone()
+                authoritative = (
+                    row is not None and not row.in_recovery and row.read_only == "off"
+                )
+            except Exception:
+                authoritative = False
+
+            if authoritative:
+                if vs.frozen:
+                    log.warning(
+                        "standalone db watchdog: FROZEN -> ACTIVE, local "
+                        "database reachable again"
+                    )
+                vs.renew_db_confirmation(freeze_after, seal_after)
+                # Single node: there is no cluster role to read, and calling
+                # it "primary" would imply a peer relationship that does not
+                # exist.
+                vs.note_role("standalone")
+                continue
+
+            log.warning("standalone db watchdog: local database unreachable")
+            if vs.must_seal:
+                log.error(
+                    "standalone db watchdog: local database unreachable and "
+                    "frozen for >%ds -- sealing to protect the data at rest",
+                    seal_after,
+                )
+                _metrics.seal_events.labels(trigger="standalone_db_lost").inc()
+                await _lease_fence_seal(vs)
+                vs.release_db_confirmation()
+        except Exception:
+            log.warning("standalone db watchdog error", exc_info=True)
+
+
 async def _audit_lite_checkpoint_loop():
     """Periodically seal read-audit windows into the signed audit chain."""
     if not settings.audit_lite_checkpoint_enabled:
@@ -1543,23 +1720,55 @@ async def lifespan(app: FastAPI):
     ha_loop_tasks: list[asyncio.Task] = []
     if settings.cluster_ha_enabled:
         from .cluster_ha_loops import (
+            cluster_ha_fence_loop,
             cluster_ha_heartbeat_loop,
             cluster_ha_reaper_loop,
             cluster_ha_state_machine_loop,
         )
 
+        # Always paired with the heartbeat, never folded into it. The heartbeat
+        # evaluates its fence downstream of a database round-trip in the same
+        # iteration, so a query that hangs -- which a blackhole route makes
+        # indefinite -- means the fence is never reached. Observed: one worker
+        # in five sealed. This loop touches nothing but a monotonic clock, so
+        # no database behaviour can starve it. See cluster_ha_fence_loop.
         if is_custodian():
             # Only the custody master can publish/recover the node rekey
             # generation. The loop is otherwise harmless on share followers.
-            ha_loop_tasks = [asyncio.create_task(cluster_ha_heartbeat_loop())]
+            ha_loop_tasks = [
+                _supervised(cluster_ha_heartbeat_loop, "ha-heartbeat"),
+                _supervised(cluster_ha_fence_loop, "ha-fence"),
+            ]
             log.info("custodian HA key-holder heartbeat started")
         else:
             ha_loop_tasks = [
-                asyncio.create_task(cluster_ha_state_machine_loop()),
-                asyncio.create_task(cluster_ha_reaper_loop()),
-                asyncio.create_task(cluster_ha_heartbeat_loop()),
+                _supervised(cluster_ha_state_machine_loop, "ha-state-machine"),
+                _supervised(cluster_ha_reaper_loop, "ha-reaper"),
+                _supervised(cluster_ha_heartbeat_loop, "ha-heartbeat"),
+                _supervised(cluster_ha_fence_loop, "ha-fence"),
             ]
-            log.info("HA loops started (state-machine + reaper + heartbeat)")
+            log.info("HA loops started (state-machine + reaper + heartbeat + fence)")
+    else:
+        # Standalone / embedded / custodian. No HA loop renews the authority
+        # lease here, so without this the node would never freeze and never
+        # seal on a dead local database -- it would fail every request with the
+        # master key live in RAM, forever. Supervised like the HA loops: if it
+        # dies the node still freezes (the deadline is state), it just stops
+        # being able to seal, which is the safe direction.
+        # Same pairing, same reason. The watchdog evaluates `if vs.must_seal`
+        # after its own probe, in the same iteration, and that probe is as
+        # unbounded as the HA one -- so a database that accepts the connection
+        # and then never answers leaves this node frozen with its keys
+        # resident. The fence loop makes the seal follow from the deadline
+        # alone. `must_seal` is set here by the same renew_db_confirmation, so
+        # the HA loop is correct as-is for standalone.
+        from .cluster_ha_loops import cluster_ha_fence_loop
+
+        ha_loop_tasks = [
+            _supervised(_standalone_db_watchdog, "standalone-db-watchdog"),
+            _supervised(cluster_ha_fence_loop, "standalone-fence"),
+        ]
+        log.info("standalone db watchdog + fence loop started (HA disabled)")
 
     # one-shot auto-JOIN task. The task gates
     # itself on the unseal transition and the absence of an on-disk
@@ -1917,6 +2126,41 @@ async def sealed_handler(request: Request, exc: VaultSealedError):
     )
 
 
+@app.exception_handler(VaultFrozenError)
+async def frozen_handler(request: Request, exc: VaultFrozenError):
+    """This node holds its keys but has lost PostgreSQL authority.
+
+    503 with Retry-After, NOT the sealed body: sealed tells an operator to run
+    /unseal, and doing that here would be wrong advice -- the keys are already
+    in RAM and the node recovers by itself the moment it can confirm against
+    the database that it is still the canonical primary. Distinguishing the two
+    is the difference between "wait" and "wake someone up".
+
+    Without this handler the error would surface as a 500, since
+    require_unsealed() raises it from inside every route.
+    """
+    return JSONResponse(
+        status_code=503,
+        headers={"Retry-After": str(settings.cluster_heartbeat_interval_secs)},
+        content={
+            # Machine-readable first: a client seeing this should retry ANOTHER
+            # node and back off, not treat it as an application bug. That is
+            # the whole reason it is not a 500 -- and a stable `error` slug
+            # plus an explicit `state` is what lets a client tell "this node is
+            # temporarily out" from "this request was wrong".
+            "error": "vault_temporarily_unavailable",
+            "state": "frozen",
+            "serving": False,
+            "detail": (
+                "this node cannot confirm canonical cluster state in "
+                "PostgreSQL and has suspended serving; it resumes "
+                "automatically once the database is readable again. No "
+                "unseal is required."
+            ),
+        },
+    )
+
+
 @app.exception_handler(MasterUnreachable)
 async def _master_unreachable_handler(request: Request, exc: MasterUnreachable):
     """A crypto-op exhausted this worker's RPC recovery budget.
@@ -2037,6 +2281,64 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/internal/ha/status")
+async def internal_ha_status():
+    """Local HA state, answerable with PostgreSQL completely unreachable.
+
+    This is the endpoint that has to work when nothing else does. Fault
+    injection showed the problem it solves: during a database blackout
+    /api/v1/vault/status did not answer AT ALL for the whole outage, because
+    describing the vault needed the database. An endpoint that needs the
+    authority to report on losing the authority is unusable exactly when it is
+    wanted.
+
+    So this touches NO I/O. Every field is process-local:
+      - node_id, role       : cached from the last successful confirmation
+      - state, serving      : monotonic deadlines, recomputed on read
+      - db_authority_confirmed / confirmation_age_seconds : how stale that
+        cached view is, so a reader can judge it rather than trust it
+
+    ``role`` is reported as of the last confirmation and may be stale by
+    design -- while frozen it is precisely what this node can no longer
+    verify. It is paired with the age for that reason.
+
+    Unauthenticated, like /health and /readiness: it carries no secret, only
+    this node's opinion of itself, and requiring a token would make it
+    unusable during the incidents it exists for -- token validation needs the
+    database.
+
+    Always 200. The HTTP status says "this process answered"; the body says
+    what state it is in. A peer needs to tell "frozen" from "unreachable", and
+    folding the state into the status code destroys that distinction.
+    """
+    from .node_uuid import NodeUUIDError, get_node_uuid
+
+    try:
+        node_id = get_node_uuid()
+    except NodeUUIDError:
+        node_id = None
+
+    if vs.sealed:
+        state = "sealed"
+    elif vs.must_seal:
+        state = "sealing"
+    elif vs.frozen:
+        state = "frozen"
+    else:
+        state = "active"
+
+    age = vs.db_confirmation_age()
+    return {
+        "node_id": node_id,
+        "role": vs.last_known_role,
+        "state": state,
+        "serving": state == "active",
+        "holds_primary_lease": vs.holds_primary_lease,
+        "db_authority_confirmed": not vs.frozen and not vs.sealed,
+        "confirmation_age_seconds": None if age is None else round(age, 3),
+    }
+
+
 @app.get("/readiness")
 async def readiness():
     """Readiness probe - 200 only if vault is unsealed.
@@ -2055,6 +2357,23 @@ async def readiness():
     """
     if vs.sealed:
         return JSONResponse({"status": "sealed"}, status_code=503)
+    # Checked BEFORE the database probe on purpose. A frozen node is exactly
+    # the case where that probe hangs or times out, and readiness must answer
+    # promptly precisely when the node is in trouble -- a load balancer cannot
+    # act on a probe that never returns. This branch needs no I/O: `frozen` is
+    # a monotonic deadline recomputed on read.
+    if vs.frozen:
+        return JSONResponse(
+            {
+                "status": "frozen",
+                "serving": False,
+                "detail": (
+                    "cannot confirm canonical cluster state in PostgreSQL; "
+                    "not serving until it is readable again"
+                ),
+            },
+            status_code=503,
+        )
     if not await _database_ready():
         return JSONResponse(
             {

@@ -145,14 +145,19 @@ async def test_heartbeat_loop_swallows_db_errors(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_loop_terminates_worker_it_cannot_reregister(monkeypatch):
-    """A reaped row that cannot be restored must request replacement.
+async def test_heartbeat_loop_retries_a_reregistration_it_could_not_do(monkeypatch):
+    """A reaped row that cannot be restored is retried, not fail-closed.
 
-    Replacement is the LAST resort, not the response to a reap: destroying a
-    live process destroys the Shamir share it holds. The loop only terminates
-    once re-registration has failed, so a test that does not stub that failure
-    never reaches the terminate branch at all -- and with no stop_event it then
-    spins forever instead of failing.
+    Asserted the opposite until 2026-08-20, on the reasoning that replacement
+    was a prudent last resort. It was not: _reregister_after_reap returns False
+    on ANY exception from one un-retried INSERT, and the reaper only deletes
+    rows after a run of missed heartbeats -- so the trigger was a transient
+    write failure during database recovery, and the penalty was seal + SIGTERM,
+    destroying the Shamir share the process held.
+
+    Sealing to protect the data is right on EVIDENCE; one ambiguous write is
+    not evidence. A worker that truly cannot reach the database freezes on its
+    own and seals from there.
     """
     from api.app import cluster as cluster_mod
 
@@ -160,18 +165,25 @@ async def test_heartbeat_loop_terminates_worker_it_cannot_reregister(monkeypatch
         raise cluster_mod.WorkerRegistrationLost("reaped")
 
     async def cannot_reregister(session_factory):
+        attempts.append(1)
+        if len(attempts) >= 3:
+            stop.set()
         return False
 
+    attempts: list[int] = []
+    stop = asyncio.Event()
     terminated = []
     monkeypatch.setattr(cluster_mod, "heartbeat_once", lost)
     monkeypatch.setattr(cluster_mod, "_reregister_after_reap", cannot_reregister)
+    monkeypatch.setattr(cluster_mod, "HEARTBEAT_INTERVAL_SECS", 0.01)
     monkeypatch.setattr(
         cluster_mod, "_terminate_lost_worker", lambda: terminated.append(True)
     )
 
-    await heartbeat_loop(async_session)
+    await asyncio.wait_for(heartbeat_loop(async_session, stop_event=stop), timeout=2)
 
-    assert terminated == [True]
+    assert terminated == [], "a transient failure must not seal the worker"
+    assert len(attempts) >= 3, "it must keep retrying on later ticks"
 
 
 @pytest.mark.asyncio
