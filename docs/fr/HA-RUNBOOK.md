@@ -16,7 +16,7 @@ HA ? Sautez cette section, voir [DEPLOYMENT.md](DEPLOYMENT.md).)
 
 Patroni est le fournisseur de référence sous Linux et dans les opérateurs
 Kubernetes.
-[`rhorizon-pgha`](../PGHA.md)
+[`rhorizon-pgha`](PGHA.md)
 (`pgha`) est le fournisseur natif sous FreeBSD, OpenBSD et NetBSD. Les deux
 doivent présenter un endpoint PostgreSQL d'écriture stable et un statut
 normalisable dans le composant `database_ha` de `/cluster/health`.
@@ -118,9 +118,9 @@ applicative rhorizon, possèdent le quorum de base, la promotion, la supervision
 de réplication et le VIP d'écriture. Tous leurs rapports doivent être frais et
 s'accorder sur un leader de base unique ; ce leader seul doit posséder le VIP.
 Les commandes d'installation et de supervision se trouvent dans
-[le design `pgha`](../PGHA.md)
+[le design `pgha`](PGHA.md)
 et
-[le guide de déploiement BSD](../PGHA.md)
+[le guide de déploiement BSD](PGHA.md)
 du dépôt d'infrastructure HA rhorizon.
 
 Ne pas appliquer `patronictl`, Patroni REST ou les procédures DCS à un
@@ -486,6 +486,30 @@ Réservé au master crypto local (503 retry-after si routé sur un worker
 follower), `admin:w`. Le reload nginx passe par
 `RH_CLUSTER_NGINX_RELOAD_CMD` (lié sudoers à `systemctl reload nginx`).
 
+#### Vérifier chaque nœud, pas seulement le primary
+
+`issue-server-cert` ne tourne que contre le primary applicatif. Les joiners
+récupèrent leur cert serveur signé par la CA cluster via la boucle de
+renouvellement par-nœud ; un joiner qui n'en a jamais terminé une garde donc le
+cert self-signed avec lequel nginx a démarré. Ce cert **fonctionne** — le TLS
+réussit, l'API répond — donc rien n'échoue visiblement ; simplement, les pairs
+ne peuvent pas vérifier l'identité de ce nœud.
+
+Interrogez chaque nœud directement, pas à travers le load balancer :
+
+```bash
+for h in rhorizon-1 rhorizon-2 rhorizon-3; do
+  printf '%s ' "$h"
+  echo | openssl s_client -connect "$h:8443" 2>/dev/null \
+    | openssl x509 -noout -issuer -subject -enddate
+done
+```
+
+`issuer` doit être la CA cluster. Si `issuer` est égal à `subject`, le nœud est
+encore self-signed. Un second indice est la durée de vie : les certs signés par
+la CA cluster portent `cluster_node_cert_validity_days` (90 par défaut), alors
+que le placeholder de bootstrap est émis pour 10 ans.
+
 ### 3.8 Livraison portable du ha_password (age + vault)
 
 Une alternative cross-platform au flow tmpfs `RH_HA_PASSWORD_FILE`. Une
@@ -531,11 +555,11 @@ Garder `/var/lib/rhorizon/node-uuid` pour que le joiner réutilise le même UUID
 nœud, wiper les rows cluster de `vault_cluster_nodes` + `vault_cluster_config`
 en psql, re-run `/cluster/init` sur le nouveau primary applicatif,
 re-distribuer le `ha_password`, démarrer les joiners depuis des chemins de cert
-propres. R2 casse la liaison HMAC de la chaîne d'audit des JOINs pré-reset -
+propres. R2 casse la liaison signée de la chaîne d'audit des JOINs pré-reset -
 préférer R1 pour les contextes de conformité.
 
 ## 4. Références
 
 - [HA-CLUSTER.md](HA-CLUSTER.md) - architecture, machine à états, options, endpoints
 - [HA-BENCH.md](HA-BENCH.md) - timing de failover sous charge
-- [DISASTER-RECOVERY.md](../DISASTER-RECOVERY.md) - backup/restore, réparation de chaîne d'audit
+- [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md) - backup/restore, réparation de chaîne d'audit

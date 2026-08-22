@@ -1,8 +1,14 @@
 # Resurgamus Horizon - Threat Model & Security Assessment
 
-Version: 1.1
-Date: 2026-08-04
+Version: 1.2
+Date: 2026-08-22 (assessment 2026-08-04, claims re-verified against the tree 2026-08-22)
 Scope: Resurgamus Horizon self-hosted secrets vault (API + Frontend + Agent + PostgreSQL). Extended coverage for PKI, dynamic secrets, MCP/agent integration, multi-worker RPC, and LDAP/SSO proxy auth, all shipped after the 1.0 assessment.
+
+> Both summary tables below were recounted row by row and are exact: the ATT&CK
+> matrix totals 20 COVERED / 23 PARTIAL / 0 out-of-scope, and the ASVS summary
+> totals 42 MET / 1 PARTIAL / 0 NOT MET / 2 N/A. Numeric crypto claims
+> (Argon2id m=256MB t=3, 16-byte salt, the escalating rate-limit tiers) were
+> checked against `api/app/crypto.py` and `api/app/rate_limit.py`.
 
 ---
 
@@ -124,7 +130,7 @@ Classification:
 |-----|-------------|--------|---------------|
 | 2.1.1 | Password min 12 characters | **N/A** | Master password has no minimum length enforced (user responsibility - Argon2id makes short passwords expensive to crack but not impossible). Consider adding. |
 | 2.1.7 | Check against compromised password lists | **N/A** | Resurgamus Horizon has a single master password (no user accounts, no email). HIBP integration has no value here. Argon2id (256MB) makes brute-force of even weak passwords expensive. |
-| 2.2.1 | Anti-automation: max failed attempts | **MET** | Rate limiting on /unseal endpoint. Escalating fail2ban-style lockout, fixed thresholds (20 failures/30s, 50/300s, 200/3600s). Whitelist via `RH_RATE_LIMIT_WHITELIST`; counting window via `rate_limit_findtime`. |
+| 2.2.1 | Anti-automation: max failed attempts | **MET** | Escalating fail2ban-style lockout on `/unseal`. `RATE_LIMITS = [(20, 30), (50, 300), (200, 3600)]` is `(failure_count, lockout_seconds)`: 20 failures locks the IP out for 30s, 50 for 300s, 200 for 3600s. The counting window is separate (`rate_limit_findtime`, 3600s default). Whitelist via `RH_RATE_LIMIT_WHITELIST`. Deliberately permissive — a 256-bit token is infeasible to brute-force and Argon2id already costs ~500ms per master-password attempt, so this is the second line, not the first. |
 | 2.4.1 | Approved KDF for password storage | **MET** | Argon2id (m=256MB, t=3, p=1 - libsodium's `crypto_pwhash` fixes parallelism at 1, not configurable). |
 | 2.4.2 | Random salt min 32 bits | **MET** | 16-byte (128-bit) random salt per vault instance, stored in vault_config. |
 | 2.6.1 | Single-use lookup secrets | **MET** | Challenges are single-use (DELETE+RETURNING). TOTP codes validated once per period. |
@@ -192,7 +198,7 @@ Classification:
 |-----|-------------|--------|---------------|
 | 9.1.1 | TLS for all client connections | **MET** | Frontend Nginx supports TLS natively (`TLS_ENABLED=true`, cert/key mounted). API listens on HTTP behind Nginx (same compose stack). External traffic is encrypted by the operator's VPN (IPsec / OpenVPN). |
 | 9.1.3 | TLS 1.2+ only | **MET** | Nginx TLS configuration enforces TLS 1.2+ (`ssl_protocols TLSv1.2 TLSv1.3`). VPN tunnels use cryptography equivalent to or stronger than TLS 1.2+. |
-| 9.2.2 | TLS on all connections including internal | **MET** | API-to-PostgreSQL uses TLS (self-signed cert, CERT_NONE verification - acceptable for same-host Docker bridge). Configurable via `RH_DATABASE_SSL`. |
+| 9.2.2 | TLS on all connections including internal | **MET** | API-to-PostgreSQL is always encrypted. `RH_DATABASE_SSL` defaults to `require` (no certificate verification — fine on a same-host Docker bridge, not against an active MITM); `verify-full` pins `RH_DATABASE_CA_CERT` and is the correct setting once the database is off-host. |
 
 ### V13 - API & Web Services
 
@@ -252,7 +258,7 @@ What Resurgamus Horizon does NOT protect against:
 | **No certificate pinning** | No mutual TLS between API clients and vault. TLS via Nginx + operator's VPN, but no client cert pinning. |
 | **No anomaly detection** | Audit logs detect tampering but don't alert on suspicious patterns (e.g., bulk secret reads at 3 AM). Requires external SIEM integration. |
 | **Backup decryption** | age-encrypted backups require the age key. If the age key is lost, the backup is unrecoverable. No key escrow. |
-| **PostgreSQL TLS self-signed** | API-to-DB uses TLS but with CERT_NONE (no CA verification). Protects against passive sniffing but not active MITM on the Docker bridge. Acceptable for single-host. |
+| **PostgreSQL TLS unverified by default** | `database_ssl` defaults to `require`: encrypted, but the server certificate is not verified, so this stops passive sniffing and not an active MITM on the DB path. `verify-full` **is** supported and pins `database_ca_cert` — it is opt-in, not absent. The default suits single-host; set `verify-full` for any deployment where the database is reached across a network you do not own. |
 
 ### 3.4 - Agent (rh-inject) Limitations
 
@@ -267,7 +273,7 @@ What Resurgamus Horizon does NOT protect against:
 | Threat | Status |
 |--------|--------|
 | **Prompt injection via a rogue upstream** | `rhorizon-mcp-hub` forwards tool results from federated upstreams verbatim to the agent. A malicious or compromised upstream MCP server can inject instructions into a tool result the agent then treats as trusted context. This is not a MITRE ATT&CK Enterprise technique (LLM-specific; the adjacent framework is [MITRE ATLAS](https://atlas.mitre.org/) [AML.T0051 - LLM Prompt Injection](https://atlas.mitre.org/techniques/AML.T0051)) and rhorizon has no code-level mitigation for it beyond the operational recommendation: every federated upstream must be under the operator's own control, never a public or third-party MCP server. |
-| **Read-only by design, not by proof** | The MCP tool catalog exposes 6 read-only tools (status, whoami, list-namespaces, list-secrets, get-secret, audit-tail); there is no write, seal/unseal, or token-management tool. This bounds what a compromised or manipulated agent can do to *reading* whatever the token's `policy.toml` allows - but a broad `policy.toml` whitelist still means a manipulated agent can read (and potentially exfiltrate via its own output) every secret the operator granted it. |
+| **Read-only by design, not by proof** | The MCP tool catalog exposes 7 read-only tools (status, whoami, list-namespaces, list-secrets, get-secret, audit-tail, cluster-health); there is no write, seal/unseal, or token-management tool. This bounds what a compromised or manipulated agent can do to *reading* whatever the token's `policy.toml` allows - but a broad `policy.toml` whitelist still means a manipulated agent can read (and potentially exfiltrate via its own output) every secret the operator granted it. |
 | **Operator-token discovery** | Tool discovery (the catalog presented to the agent at startup) runs under the hub's own operator token, not the calling agent's. A `mcp-hub` misconfiguration that widens discovery scope affects every agent behind that hub. |
 
 ### 3.6 - Deployment Dependencies (Operator Responsibility)
@@ -286,7 +292,7 @@ Resurgamus Horizon's auth model is self-contained: master password + 2FA (WebAut
 | Improvement | Effort | Impact |
 |-------------|--------|--------|
 | Minimum password length enforcement | Low | Prevent trivially weak master passwords |
-| PostgreSQL TLS with CA verification | Low | Upgrade from CERT_NONE to proper CA chain for distributed deployments |
+| Make `database_ssl=verify-full` the default | Low | The verified mode already exists and is documented; what remains is flipping the default and shipping a CA path, which is a migration question rather than a missing control |
 | Mutual TLS for API clients | Medium | Stronger client authentication |
 | HSM integration (PKCS#11) | High | FIPS 140-2 compliance, hardware key protection |
 | SIEM integration (anomaly alerting) | Medium | Detection of bulk exfiltration patterns |

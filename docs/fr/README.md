@@ -61,7 +61,7 @@ avec Ansible, la CI/CD, Kubernetes, les scripts et les agents IA.
   sous `/run/rhorizon`, shares Shamir distribuées et failover automatique. Le
   cluster applicatif s'appuie sur une couche Database HA supervisée :
   Patroni est la référence Linux/Kubernetes testée ;
-  [`rhorizon-pgha`](../PGHA.md)
+  [`rhorizon-pgha`](PGHA.md)
   est supporté nativement sous BSD.
 - **Containers durcis** - filesystem read-only, non-root uid 1500, `cap_drop ALL`, `no-new-privileges`, tmpfs `noexec/nosuid`, limites pids/mémoire.
 - **Protection mémoire** - extension Rust avec `mlock` (pas de swap) et `zeroize` au drop garanti par le compilateur. La wrap key n'entre jamais dans le heap Python.
@@ -77,17 +77,32 @@ avec Ansible, la CI/CD, Kubernetes, les scripts et les agents IA.
 ## Essai local
 
 ```bash
-git clone https://github.com/JR-Shdw/Horizon.git
+git clone https://github.com/JR-Shdw/Horizon.git rhorizon
 cd rhorizon
-cp env.example .env && $EDITOR .env       # définir POSTGRES_PASSWORD
-docker compose up -d
-
-# Ouvrir l'UI, choisir le mot de passe maître et effectuer le premier unseal.
-# Stocker le root token à usage unique dans un gestionnaire de mots de passe.
-xdg-open http://localhost:8200
+sh tools/install.sh
 ```
 
-Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md).
+Ça prend le chemin conteneur, monte un stack limité à localhost, et affiche
+l'URL et l'étape suivante. **Le TLS est obligatoire et mis en place pour
+vous** : l'installeur génère un certificat auto-signé, donc l'UI est sur
+`https://127.0.0.1:8443`. Ouvrez-la, choisissez le mot de passe maître, et
+effectuez le premier descellement. Stockez le root token à usage unique dans un
+gestionnaire de mots de passe ; ne le mettez ni dans un chat, ni dans
+l'historique du shell, ni dans le contrôle de version.
+
+L'installeur affiche aussi deux lignes à ajouter à votre profil shell. Le
+fichier de CA est ce qui rend le certificat généré digne de confiance pour le
+CLI et les agents `rh-*` — sans lui ils refusent de se connecter, à juste
+titre, et il n'existe pas d'option skip-verify :
+
+```bash
+export RH_ADDR=https://127.0.0.1:8443
+export RH_CA_FILE=~/rhorizon/certs/cert.pem
+```
+
+Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md). La référence
+d'installation complète — tous les chemins, vérification, mise à jour,
+désinstallation — est dans [`docs/fr/INSTALL.md`](INSTALL.md).
 
 ---
 
@@ -103,6 +118,9 @@ Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md).
 
 ### Déployer
 
+- [`docs/fr/INSTALL.md`](INSTALL.md) - référence d'installation complète : tous les chemins d'entrée, vérification, mise à jour, désinstallation
+- [`docs/fr/COMPATIBILITY.md`](COMPATIBILITY.md) - ce sur quoi rhorizon tourne et ce avec quoi il s'intègre (OS, init, orchestration, auth, livraison de secrets, observabilité) avec niveaux de support
+- [`docs/fr/INSTALL-NATIVE.md`](INSTALL-NATIVE.md) - installation sans Docker : tableau de statut par OS, mode système vs utilisateur, units systemd, build source `--pq-nginx`
 - [`docs/fr/DEPLOYMENT.md`](DEPLOYMENT.md) - local, privé/VPN, reverse proxy + SSO, LDAP/AD, clustering, backup, checklist de durcissement
 - [`docs/fr/DOCKER.md`](DOCKER.md) - anatomie du stack compose, Dockerfile multi-stage, volumes/réseaux, patterns d'override, rootless/Podman
 - [`docs/fr/K8S.md`](K8S.md) - patterns agent (rh-fetch / rh-inject / rh-watch / cronjob), NetworkPolicy, RBAC, TLS depuis le vault
@@ -115,6 +133,7 @@ Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md).
 - [`docs/fr/CLI.md`](CLI.md) - référence complète des commandes `rhorizon` (vault / secrets / tokens / audit / master / oneshot) avec recettes
 - [`docs/fr/TLS.md`](TLS.md) - HTTPS natif, sources de certificats, contextes de déploiement
 - [`docs/fr/FAIL2BAN.md`](FAIL2BAN.md) - protection brute-force au niveau IP
+- [`docs/fr/DISASTER-RECOVERY.md`](DISASTER-RECOVERY.md) - les deux chemins de reprise (`pg_dump` complet, restauration logique partielle), rotations de tokens en attente, break-glass
 - [`docs/docs/howto/observability-alerts.md`](../docs/howto/observability-alerts.md) - cookbook d'alerting Prometheus (critique / sérieux / capacité) + routing Matrix _(EN)_
 - [`docs/fr/ROADMAP.md`](ROADMAP.md) - ce qui est stable, ce qui arrive
 

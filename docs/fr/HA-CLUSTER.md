@@ -11,7 +11,7 @@ une élection auto-promote, et s'authentifient mutuellement en mTLS par-nœud
 émis par une CA de cluster. Le tout repose sur une couche PostgreSQL HA
 neutre vis-à-vis du fournisseur, appelée **Database HA**. Patroni est le
 fournisseur de référence sous Linux ;
-[`rhorizon-pgha`](../PGHA.md)
+[`rhorizon-pgha`](PGHA.md)
 (`pgha`) est le fournisseur natif BSD. Un serveur PostgreSQL isolé n'est pas
 une base HA.
 

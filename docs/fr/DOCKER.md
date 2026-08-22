@@ -27,9 +27,9 @@ flowchart TD
 
 | Service | Image | Rôle | Limites de ressources (défauts) |
 |---|---|---|---|
-| `postgres` | `postgres:18-trixie` | Stockage des secrets chiffrés, chaîne d'audit, config | 512 Mo / 100 PIDs |
-| `api` | construite depuis `api/Dockerfile` | FastAPI + crypto | 768 Mo / 150 PIDs |
-| `frontend` | construite depuis `frontend/Dockerfile` | nginx (UI + reverse proxy vers API) | 64 Mo / 20 PIDs |
+| `postgres` | `postgres:18-trixie` | Stockage des secrets chiffrés, chaîne d'audit, config | 1 Go / 100 PIDs |
+| `api` | construite depuis `api/Dockerfile` | FastAPI + crypto | 1,5 Go / 150 PIDs |
+| `frontend` | construite depuis `frontend/Dockerfile` | nginx (UI + reverse proxy vers API) | 64 Mo / 50 PIDs |
 
 Le réseau interne `rhorizon_internal` a `internal: true` - les pods
 sur ce réseau ne peuvent pas joindre l'Internet public. Le réseau
@@ -77,16 +77,25 @@ Ce qui est retiré :
 | `security_opt: no-new-privileges` | yes | yes | yes |
 | Non-root | user postgres | uid 1500 (`rhorizon`) | uid 101 (`nginx`) |
 | `tmpfs` | - | `/tmp:16M`, `/dev/shm:1M` (noexec, nosuid) | `/tmp:1M`, `/var/cache/nginx:8M`, `/run:1M`, `/etc/nginx/conf.d:1M` (noexec, nosuid) |
-| Limite mémoire | 512 M | 768 M | 64 M |
-| Limite pids | 100 | 150 | 20 |
+| Limite mémoire | 1 G (`POSTGRES_MEM`) | 1.5 G (`RH_API_MEM`) | 64 M (`RH_FRONTEND_MEM`) |
+| Limite pids | 100 | 150 | 50 |
 | TLS | server.crt/key généré au premier boot | utilise libsodium pour le handshake TLS vers PG | TLS natif nginx optionnel |
 
-Le Compose par défaut ne demande ni `IPC_LOCK` ni ulimit memlock illimité, afin
-de démarrer sans privilège et en rootless. Si `mlock` échoue, l'API continue,
-et affiche `zeroize-only`. Elle avertit seulement si le swap est non chiffré ou
-impossible à vérifier. Avec un swap chiffré, zram ou sans swap, aucune action
-n'est nécessaire. Pour imposer le verrouillage sur un hôte avec swap non
-chiffré :
+Les buffers de secrets Rust utilisent `RH_MEMORY_LOCK_MODE=best-effort` par
+défaut. Si un verrouillage échoue, l'API continue et rapporte
+`memory_protection: zeroize-only` ; les buffers sont quand même effacés à la
+libération. Elle avertit quand le swap est non chiffré ou que sa protection ne
+peut pas être vérifiée. Un swap chiffré, zram, ou un hôte sans swap n'ont pas
+besoin de verrouillage mémoire pour cette menace. Mettez
+`RH_MEMORY_LOCK_MODE=required` pour faire échouer fermé le verrouillage des
+buffers — et le verrouillage du process entier quand le swap est exposé. Le
+statut séparé `process_memory_protection` indique si `mlockall` a protégé les
+pages des secrets servis.
+
+Le Compose par défaut ne demande délibérément ni `IPC_LOCK` ni ulimit illimité,
+afin que les installations rootless et non privilégiées puissent démarrer. Sur
+un hôte avec swap non chiffré, accordez la capability et échouez fermé avec
+l'override explicite :
 
 ```bash
 docker compose -f docker-compose.yml \
@@ -179,8 +188,12 @@ défaut `0` sauf besoin d'un quorum asymétrique ; voir
 
 ### 6.2 Build depuis un fork
 
+Forkez <https://github.com/JR-Shdw/Horizon> (le miroir public), puis clonez
+votre fork. Remplacez `YOUR-FORK` par votre compte GitHub ; un fork conserve le
+nom du dépôt amont, donc le chemin reste `Horizon`.
+
 ```bash
-git clone https://github.com/YOUR-FORK/rhorizon.git
+git clone https://github.com/YOUR-FORK/Horizon.git rhorizon
 cd rhorizon
 docker compose build           # build api ET frontend
 docker compose up -d

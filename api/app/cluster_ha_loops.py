@@ -184,7 +184,9 @@ async def _maybe_auto_promote(db: AsyncSession) -> int:
     # by the database, so measuring them against a local wall clock made every
     # gate here sensitive to NTP drift between nodes. See
     # cluster_membership.read_canonical_primary.
-    current_primary, lease_dt, now = await cluster_membership.read_canonical_primary(db)
+    current_primary, lease_dt, now, _ = await cluster_membership.read_canonical_primary(
+        db
+    )
     if current_primary == node_uuid:
         return 0
     if lease_dt is None:
@@ -253,6 +255,7 @@ async def _maybe_auto_promote(db: AsyncSession) -> int:
             primary_under_lock,
             lease_under_lock,
             now_under_lock,
+            _,
         ) = await cluster_membership.read_canonical_primary(db)
         if primary_under_lock == node_uuid:
             return  # Defensive : a concurrent path won us (e.g. operator
@@ -682,7 +685,7 @@ async def _heartbeat_body(db: AsyncSession, node_uuid: str) -> bool:
     # PostgreSQL's clock on both sides : the deadline we STAMP here is read by
     # every other node, and the self-demote comparison below reads a deadline
     # stamped by another node. Neither may involve this host's wall clock.
-    primary_uuid, lease_dt, now = await cluster_membership.read_canonical_primary(db)
+    primary_uuid, lease_dt, now, _ = await cluster_membership.read_canonical_primary(db)
     # Cache the DB's own view of our role so /internal/ha/status can report it
     # with PostgreSQL unreachable. row.ha_state rather than an inference from
     # primary_uuid: a joining or quarantined node is not simply "secondary",
@@ -1335,11 +1338,19 @@ async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
                         primary_uuid,
                         _,
                         _,
+                        primary_since,
                     ) = await cluster_membership.read_canonical_primary(db)
                     was_frozen = vs.frozen
                     vs.renew_db_confirmation(
                         settings.cluster_primary_lease_ttl_secs,
                         settings.cluster_frozen_max_secs,
+                    )
+                    # Cached on the SAME round-trip that renewed the
+                    # confirmation, so it ages with it. Step 1 of the
+                    # peer-aware classifier: publish the referent, do not act
+                    # on it. See vault_state.last_primary_since.
+                    vs.note_primary_since(
+                        None if primary_since is None else primary_since.isoformat()
                     )
                     if was_frozen:
                         log.warning(

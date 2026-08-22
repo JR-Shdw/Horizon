@@ -34,7 +34,7 @@ moins de cinq minutes, avec des défauts sûrs qui ne bindent rien
 publiquement.
 
 ```bash
-git clone https://github.com/JR-Shdw/Horizon.git
+git clone https://github.com/JR-Shdw/Horizon.git rhorizon
 cd rhorizon
 cp env.example .env
 sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 32)|" .env

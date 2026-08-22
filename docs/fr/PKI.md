@@ -16,9 +16,14 @@ L'algorithme de signature de la CA est choisi une fois par namespace, à l'init 
 
 | Algorithme | Type | Quand le choisir |
 |---|---|---|
-| `ed25519` | classique | Défaut. Supporté partout par les stacks TLS actuelles. |
-| `ml-dsa-65` | post-quantique (FIPS 204) | Identités de service que vous voulez résistantes au quantique. Nécessite un vérifieur ML-DSA (OpenSSL 3.5+, tout ce qui implémente FIPS 204). |
-| `ed25519-mldsa65` | hybride composite (classique + PQ) | Identités longue durée qui doivent satisfaire l'hybridation ANSSI/BSI : une signature Ed25519 **et** une signature ML-DSA-65, toutes deux requises pour vérifier. Survit à une cassure classique ou à une cassure par réseau euclidien. Vérifieurs internes uniquement (voir plus bas). |
+| `ed25519-mldsa65` | hybride composite (classique + PQ) | **Défaut.** Identités longue durée qui doivent satisfaire l'hybridation ANSSI/BSI : une signature Ed25519 **et** une signature ML-DSA-65, toutes deux requises pour vérifier. Survit à une cassure classique ou à une cassure par réseau euclidien. Vérifieurs internes uniquement (voir plus bas). |
+| `ed25519` | classique | À choisir explicitement quand le leaf doit être vérifié par des stacks TLS ordinaires. Supporté partout aujourd'hui. |
+| `ml-dsa-65` | post-quantique (FIPS 204) | Identités de service que vous voulez résistantes au quantique. Nécessite un vérifieur ML-DSA (OpenSSL 3.5+, tout ce qui implémente FIPS 204). PQ mais *pas* hybride, donc ne satisfait pas ANSSI/BSI à lui seul. |
+
+Le défaut est délibérément l'hybride : c'est le seul des trois à satisfaire
+l'hybridation ANSSI/BSI. La contrepartie, c'est que les certs composites se
+vérifient **en interne uniquement** (OID privé) — si le consommateur est une
+stack TLS standard, initialisez ce namespace en `ed25519` à la place.
 
 Les certificats ML-DSA sont produits par le signeur Rust intégré (`fips204`) et
 sont interopérables avec OpenSSL 3.5+/`cryptography` 49+ : le cert CA, les certs
@@ -172,7 +177,8 @@ Préfixe `/api/v1/vault/pki`. Le coffre doit être déverrouillé.
 
 | Méthode | Endpoint | Scope | Rôle |
 |---|---|---|---|
-| `POST` | `/init` | `admin:w` | Initialiser la CA une fois (409 si déjà fait) |
+| `POST` | `/init` | `admin:w` | Initialiser la CA une fois par namespace (409 si déjà fait) |
+| `GET`  | `/cas` | `secrets:r` | Lister les namespaces qui ont une CA |
 | `GET`  | `/ca` | `secrets:r` | Cert CA PEM (+ cert précédent pendant la grâce) |
 | `POST` | `/issue` | `secrets:w` | Émettre un leaf ; rend cert + clé UNE fois (namespace-checké) |
 | `POST` | `/kem/issue` | `secrets:w` | Émettre un cert KEM (clé de sujet ML-KEM, signée par la CA) ; rend cert + clé de decaps UNE fois |
@@ -217,7 +223,23 @@ sont révélés une seule fois avec des boutons de copie.
 
 ## Vérifier un leaf
 
+La recette dépend de l'algorithme de la CA. **Le défaut (`ed25519-mldsa65`)
+n'est pas vérifiable par `openssl`** — il utilise un OID privé, donc
+l'outillage standard ne sait pas analyser la signature composite. Pour
+celui-là, utilisez le vérifieur interne.
+
 ```bash
+# ed25519-mldsa65 (DÉFAUT) -- interne uniquement, pas d'OpenSSL
+python - <<'PY'
+from app import pki_ca
+ca = open('rhorizon-ca.pem','rb').read()
+leaf = open('svc.pem','rb').read()
+ed_pub, mldsa_pub = pki_ca.composite_component_pubs(ca)
+# Accepte si et seulement si les DEUX signatures composantes vérifient (une
+# seule jambe valide est un trou de downgrade, et elle est rejetée).
+print('ok' if pki_ca.verify_composite_cert(leaf, ed_pub, mldsa_pub) else 'FAIL')
+PY
+
 # ed25519 (n'importe quel OpenSSL)
 openssl verify -CAfile rhorizon-ca.pem svc.pem
 

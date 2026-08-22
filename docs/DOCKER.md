@@ -27,9 +27,9 @@ flowchart TD
 
 | Service | Image | Role | Resource limits (defaults) |
 |---|---|---|---|
-| `postgres` | `postgres:18-trixie` | Storage of encrypted secrets, audit chain, config | 512 MB / 100 PIDs |
-| `api` | built from `api/Dockerfile` | FastAPI + crypto | 768 MB / 150 PIDs |
-| `frontend` | built from `frontend/Dockerfile` | nginx (UI + reverse proxy to API) | 64 MB / 20 PIDs |
+| `postgres` | `postgres:18-trixie` | Storage of encrypted secrets, audit chain, config | 1 G / 100 PIDs |
+| `api` | built from `api/Dockerfile` | FastAPI + crypto | 1.5 G / 150 PIDs |
+| `frontend` | built from `frontend/Dockerfile` | nginx (UI + reverse proxy to API) | 64 M / 50 PIDs |
 
 The internal network `rhorizon_internal` has `internal: true` - pods on
 this network cannot reach the public internet. The optional

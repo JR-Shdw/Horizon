@@ -28,9 +28,35 @@ VPN / VLAN privé, ajustez `VAULT_API_BIND`, `VAULT_API_BIND_M2M`,
 
 ## 2. Démarrer
 
+**Choisissez le bon fichier compose — le dépôt en livre deux.**
+
 ```bash
-docker compose up -d
+# Recommandé : génère le certificat TLS, l'active, et affiche les URLs
+sh tools/install.sh
 ```
+
+C'est le seul chemin qui met TLS en place pour vous. Piloter compose
+directement fonctionne aussi, mais démarre **sans** certificat (`TLS_ENABLED`
+vaut `false` par défaut), donc le stack est en clair tant que vous n'en
+fournissez pas un dans `./certs` :
+
+```bash
+docker compose -f tools/docker-compose.quickstart.yml up -d
+```
+
+| Fichier | Publie sur | À utiliser pour |
+|---|---|---|
+| `tools/docker-compose.quickstart.yml` | `127.0.0.1` — API `:8200`, UI `:8080` (HTTP) et `:8443` (TLS) | Laptops, hôtes uniques, évaluation |
+| `docker-compose.yml` (racine) | `${WG_IP:-10.0.0.1}` et `10.0.1.1` — API `:8200`, UI `:8201` | La stack opérateur/VPN |
+
+Le fichier racine code en dur des adresses VPN, donc sur un hôte qui ne les a
+pas, Docker refuse de démarrer le stack (*« Couldn't listen on requested
+ports »*). Surchargez les binds du quickstart avec `RH_API_BIND`,
+`RH_FRONTEND_BIND`, `RH_API_PORT`, `RH_FRONTEND_PORT` et
+`RH_FRONTEND_HTTP_PORT` ; le fichier racine utilise `WG_IP` et `WG1_IP` à la
+place.
+
+`sh tools/install.sh` choisit le fichier quickstart pour vous et affiche l'URL.
 
 Trois conteneurs démarrent : PostgreSQL, API, Frontend.
 Le schéma est appliqué automatiquement au premier démarrage.
@@ -39,25 +65,47 @@ Le schéma est appliqué automatiquement au premier démarrage.
 
 ```bash
 # Santé
-curl http://localhost:8200/health
+curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/health
 # {"status": "ok"}
 
 # Status (scellé par défaut)
-curl http://localhost:8200/api/v1/vault/status
+curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/api/v1/vault/status
 # {"sealed": true, "version": "1.0.0-beta", ...}
 ```
 
 ## 4. Premier descellement
 
-Le premier descellement crée la clé maître à partir de votre mot de passe.
-**Choisissez un mot de passe fort - il protège tout.**
+L'installeur laisse le vault **scellé** et n'invente pas de mot de passe
+maître. Le premier descellement crée la clé maître à partir de votre mot de
+passe. **Choisissez un mot de passe fort - il protège tout.**
+
+> **Installs non assistées.** `tools/install.sh --master-password VALEUR` (ou
+> `RH_MASTER_PASSWORD`) descelle à votre place. C'est le *seul* chemin qui
+> écrit des credentials sur disque, et il en écrit deux :
+>
+> ```
+> ~/rhorizon/secrets/master-password
+> ~/rhorizon/secrets/root-token
+> ```
+>
+> En mode 0400, et ensemble ils suffisent à prendre le contrôle complet de
+> l'instance. Déplacez-les dans un gestionnaire de mots de passe et supprimez
+> les fichiers une fois la sauvegarde vérifiée. Notez que la valeur atterrit
+> aussi dans l'historique de votre shell et, le temps de vie du process, dans
+> `/proc/<pid>/cmdline`.
+>
+> L'installeur natif (`tools/install-native.sh`) utilise la même disposition
+> sous son propre répertoire de config, `~/.config/rhorizon/secrets/` en mode
+> utilisateur, et vous en avertit en fin de run.
 
 ```bash
 cd cli
 python -m venv .venv
 . .venv/bin/activate
 pip install -e .
-RH_ADDR=http://localhost:8200 rhorizon unseal
+export RH_ADDR=https://127.0.0.1:8443
+export RH_CA_FILE=~/rhorizon/certs/cert.pem
+rhorizon unseal
 # Master password: ********
 # Status: unsealed
 ```
@@ -66,15 +114,35 @@ Le CLI lit le mot de passe sans l'afficher ni l'inscrire dans l'historique du
 shell. Stockez le root token à usage unique dans votre gestionnaire de mots de
 passe.
 
+> **Le stack démarre en TLS.** `tools/install.sh` génère un certificat
+> auto-signé (SAN `localhost` + `127.0.0.1`, 825 jours) et pose
+> `TLS_ENABLED=true`, donc l'UI et l'API sont sur `https://127.0.0.1:8443`. Il
+> affiche deux lignes à ajouter à votre profil shell :
+>
+> ```bash
+> export RH_ADDR=https://127.0.0.1:8443
+> export RH_CA_FILE=~/rhorizon/certs/cert.pem
+> ```
+>
+> `RH_CA_FILE` est ce qui rend le certificat auto-signé digne de confiance pour
+> le CLI et les agents `rh-*` — sans lui, ils refusent de se connecter, à juste
+> titre. Il n'existe pas d'option skip-verify.
+>
+> Le HTTP en clair écoute toujours sur `:8080` et `:8200` pour le débogage,
+> mais le vault journalise un avertissement `PLAINTEXT TRANSPORT` pour
+> **chaque** appel qui l'emprunte, loopback compris — le trafic same-host reste
+> lisible par tout process ayant `CAP_NET_RAW`, et dans un pod « same host »
+> signifie un conteneur voisin.
+
 ## 5. Configurer votre token admin
 
-Ouvrez l'UI à `http://localhost:8200`, allez dans **Core** (icône paramètres),
+Ouvrez l'UI à `https://127.0.0.1:8443`, allez dans **Core** (icône paramètres),
 collez votre token admin. Il est nécessaire pour toutes les opérations.
 
 Ou via le CLI :
 
 ```bash
-rhorizon login http://localhost:8200
+rhorizon login 127.0.0.1:8443      # un hôte nu vaut https par défaut
 # Entrez votre token quand demandé
 
 rhorizon status
@@ -106,17 +174,20 @@ rhorizon token create ops-reader '{"secrets":"r"}'
 ### TOTP
 
 ```bash
-curl -X POST http://localhost:8200/api/v1/vault/totp/setup \
+curl --cacert ~/rhorizon/certs/cert.pem \
+  -X POST https://127.0.0.1:8443/api/v1/vault/totp/setup \
   -H "Authorization: Bearer $TOKEN"
 # {"secret": "BASE32SECRET", "uri": "otpauth://..."}
 # Scannez l'URI comme QR code dans votre app d'authentification, puis :
 
-curl -X POST http://localhost:8200/api/v1/vault/totp/enable \
+curl --cacert ~/rhorizon/certs/cert.pem \
+  -X POST https://127.0.0.1:8443/api/v1/vault/totp/enable \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"code": "123456"}'
 
-curl -X PUT "http://localhost:8200/api/v1/vault/2fa?mode=totp" \
+curl --cacert ~/rhorizon/certs/cert.pem \
+  -X PUT "https://127.0.0.1:8443/api/v1/vault/2fa?mode=totp" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -161,29 +232,7 @@ l'historique du shell.
 
 ### Shamir (découpage M-sur-N)
 
-```bash
-curl -X POST http://localhost:8200/api/v1/vault/shamir/init \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"threshold": 3, "total": 5}'
-# Retourne 5 parts - distribuez-les aux détenteurs de clés
-```
-
-Pour desceller un déploiement multi-worker, réunissez le quorum par un canal
-opérateur sécurisé puis envoyez toutes les parts dans **une seule requête** :
-
-```bash
-# Saisie sans écho ni historique, puis envoi direct du quorum.
-python3 - <<'PY' | curl -X POST http://localhost:8200/api/v1/vault/unseal \
-  -H "Content-Type: application/json" \
-  --data-binary @-
-import getpass, json
-print(json.dumps({"shares": [getpass.getpass(f"Part {i}: ") for i in range(1, 4)]}))
-PY
-```
-
-Le champ historique `share` reste accepté une part à la fois pendant cinq
-minutes, mais ces requêtes ne bénéficient pas d’une affinité worker garantie.
+Avancé, multi-worker uniquement. Voir [`multiworker.md`](multiworker.md).
 
 ## 9. Sauvegarde
 
@@ -193,6 +242,85 @@ rhorizon backup export ./rhorizon-backup.age
 ```
 
 Utilisez `pg_dump | age` pour une reprise après sinistre complète.
+
+## Podman / Docker rootless
+
+rhorizon tourne tel quel sur Podman et Docker rootless. Le fichier compose
+n'utilise que des primitives standard (`cap_drop`, `no-new-privileges`,
+`read_only`, `tmpfs`, `pids_limit`, limites `memory`) supportées par les deux
+runtimes.
+
+### Podman
+
+Passez `-f tools/docker-compose.quickstart.podman.yml`. Sans `-f`, compose
+récupère le `docker-compose.yml` du répertoire courant — le fichier cluster qui
+bind des adresses VPN, celui que ce guide vous a dit de ne pas utiliser sur un
+laptop. La variante Podman cible localhost et utilise les formes portables de
+`tmpfs` et le `depends_on` simple dont Podman rootless a besoin.
+
+```bash
+# Soit invoquer podman-compose directement :
+podman-compose -f tools/docker-compose.quickstart.podman.yml up -d
+
+# Soit générer des units Quadlet pour systemd (recommandé sur EL/Fedora) :
+podman compose -f tools/docker-compose.quickstart.podman.yml --in-pod=true up -d
+```
+
+`sh tools/install.sh` sélectionne ce fichier pour vous quand il détecte Podman ;
+les commandes ci-dessus servent à piloter compose à la main.
+
+### Docker rootless
+
+Passez `-f` ici pour la même raison que Podman : un `docker compose up -d` nu
+depuis la racine du dépôt prend `docker-compose.yml`, le fichier cluster qui
+bind des adresses VPN.
+
+```bash
+dockerd-rootless-setuptool.sh install
+# utilise automatiquement le socket rootless
+docker compose -f tools/docker-compose.quickstart.yml up -d
+```
+
+### Caveat sur le verrouillage mémoire (mlock)
+
+Le défaut portable ne demande ni `IPC_LOCK` ni ulimit memlock illimité. L'API
+rapporte le verrouillage des buffers Rust dans `memory_protection`, et le
+verrouillage du process entier dans `process_memory_protection`. L'effacement
+implémenté par `zeroize` tourne quand même au drop, donc les clés sont purgées
+du tas à la libération. Un avertissement n'est nécessaire que si le swap est non
+chiffré ou invérifiable ; un swap chiffré, zram, ou pas de swap du tout
+préviennent déjà cette exposition persistante.
+
+Le quickstart détecte cela sur l'hôte et écrit `RH_SWAP_PROTECTION` dans son
+`.env`. Un déploiement Compose géré à la main reste à `unknown` tant que
+l'opérateur n'y a pas inscrit `protected` ou `unencrypted`.
+
+Sur un hôte avec swap non chiffré, imposez le verrouillage mémoire sur un
+runtime qui le permet :
+
+```bash
+cd ~/rhorizon
+docker compose -f docker-compose.yml \
+  -f docker-compose.memory-lock.yml --env-file .env up -d
+```
+
+Cet override demande `IPC_LOCK`, pose un ulimit memlock illimité et passe la
+politique applicative à `required`. Si le runtime ne peut pas les fournir, le
+démarrage explicitement durci échoue ; retirez l'override pour revenir au
+best-effort.
+
+### Contraintes rootless
+
+- Bind sur des ports < 1024 — bindez `127.0.0.1:8200` et mettez un reverse
+  proxy rootful devant si vous avez besoin du :443.
+- Les noms de profils AppArmor / SELinux diffèrent — les profils fournis
+  supposent un Docker rootful. Utilisez les défauts du runtime tant que vous
+  n'avez pas écrit les équivalents rootless.
+- `docker exec` depuis un autre utilisateur — seul l'utilisateur qui fait
+  tourner le stack peut s'attacher.
+
+Pour un déploiement souverain / mono-tenant on-prem, rootless + Podman est le
+chemin recommandé.
 
 ## Architecture
 

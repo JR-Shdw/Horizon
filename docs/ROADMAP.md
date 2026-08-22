@@ -73,7 +73,8 @@ read path for existing rows and backups.
 ### Supply chain
 Multi-arch images (amd64 + arm64), cosign signatures + SLSA provenance + SBOM,
 Trivy / bandit / pip-audit / detect-secrets, `cargo audit` / `deny` / `clippy` /
-`miri`, cargo-fuzz targets. 2227 Python + 154 Rust tests.
+`miri`, cargo-fuzz targets. Test counts move every week; `make test` is the
+canonical number, not this page.
 
 ---
 

@@ -343,8 +343,9 @@ LLM :   [se connecte IMAP, lit, résume]
 Toi :   [lit le résumé]
 ```
 
-Chaque secret lu par le LLM finit dans le log d'audit chaîné. Tu peux
-vérifier après coup ce qu'il a touché.
+Chaque secret lu par le LLM finit dans l'audit de lecture protégé par Merkle.
+Ses checkpoints signés permettent de vérifier après coup ce qu'il a touché, et
+de détecter une modification des preuves déjà checkpointées.
 
 ### B. Le LLM essaie d'aller trop loin
 

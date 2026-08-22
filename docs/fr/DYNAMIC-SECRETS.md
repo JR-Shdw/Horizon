@@ -182,7 +182,7 @@ Content-Type: application/json
 Une cible joignable hors de la matrice renvoie `connected_unvalidated` et n'est
 pas bloquee. Le probe ne renvoie ni n'audite l'URL de connexion. La matrice de
 release et ses preuves sont maintenues dans
-[COMPATIBILITY.md](../COMPATIBILITY.md).
+[COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Options
 

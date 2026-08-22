@@ -49,7 +49,7 @@ pas exposé Internet).
    scénario est hors-scope pour ce guide.
 8. **Aucune commande non approuvée par l'utilisateur.** Surtout rien
    de destructif (pas de `rm -rf`, pas de `docker system prune`, pas
-   de `docker compose down -v` sans confirmation explicite).
+   de `docker compose -f tools/docker-compose.quickstart.yml down -v` sans confirmation explicite).
 
 ### Limites de sécurité
 
@@ -174,7 +174,7 @@ docker compose version
 mkdir -p ~/projects && cd ~/projects
 
 # Cloner le miroir public
-git clone https://github.com/JR-Shdw/Horizon.git
+git clone https://github.com/JR-Shdw/Horizon.git rhorizon
 cd rhorizon
 ```
 
@@ -226,21 +226,26 @@ password de l'utilisateur. Il n'a pas besoin de le retenir.
 ## Étape 4 - Démarrer le stack
 
 ```bash
-docker compose up -d
+docker compose -f tools/docker-compose.quickstart.yml up -d
 ```
+
+**Utilisez exactement ce fichier.** Le dépôt a aussi un `docker-compose.yml` à sa racine, mais celui-là est la stack
+opérateur/VPN : il publie sur `10.0.0.1` et `10.0.1.1`, donc sur un laptop normal Docker refuse de
+démarrer et affiche *« Couldn't listen on requested ports »*. Le fichier quickstart ne bind que
+`127.0.0.1`, ce qui est ce que vous voulez ici.
 
 Ça pull l'image Postgres (~150 Mo) et build les images API et frontend
 localement. **Le premier build prend 5-15 minutes** selon la machine.
 Les runs suivants sont instantanés.
 
 Si le build est lent, dis à l'utilisateur que c'est normal. Il peut
-suivre la progression avec `docker compose logs -f` dans un autre
+suivre la progression avec `docker compose -f tools/docker-compose.quickstart.yml logs -f` dans un autre
 terminal s'il le souhaite, mais ce n'est pas nécessaire.
 
 Quand le prompt revient, vérifier :
 
 ```bash
-docker compose ps
+docker compose -f tools/docker-compose.quickstart.yml ps
 ```
 
 Sortie attendue : trois services au statut `running` ou `running (healthy)` :
@@ -405,13 +410,13 @@ Félicite l'utilisateur. Puis suggère ces étapes (dans cet ordre) :
 | `command not found: docker` | Docker pas installé | Étape 1 |
 | `permission denied while trying to connect to the Docker daemon socket` | User pas dans le groupe `docker`, ou pas déconnecté/reconnecté après l'étape 1 | Lancer `groups` - si `docker` n'est pas là, `sudo usermod -aG docker $USER` puis se déconnecter / reconnecter. Sur les systèmes sans support de groupes, utiliser `sudo` devant chaque commande `docker`. |
 | `bind: address already in use` sur port 8200 | Un autre service utilise ce port | `ss -tlnp \| grep 8200` (Linux) ou `lsof -i :8200` (mac) pour trouver le conflit. L'arrêter, ou changer `VAULT_API_BIND` / le port mapping (avancé - voir `DEPLOYMENT.md`). |
-| `docker compose up` reste bloqué sur "Building" | Internet lent / CPU lent | Patience. Le premier build prend vraiment 5-15 min sur du matos moyen. |
+| `docker compose -f tools/docker-compose.quickstart.yml up` reste bloqué sur "Building" | Internet lent / CPU lent | Patience. Le premier build prend vraiment 5-15 min sur du matos moyen. |
 | `pull access denied for postgres` | Souci DNS ou réseau, peut-être derrière un proxy entreprise | Tester `docker pull postgres:18-trixie` directement. Si ça échoue, vérifier `~/.docker/config.json` pour les paramètres proxy, ou questionner l'utilisateur sur son réseau. |
-| `unhealthy` sur `rhorizon_postgres` | Postgres a échoué à démarrer | `docker compose logs postgres` et lire les 30 dernières lignes. Le plus souvent : pas assez de RAM, ou `POSTGRES_PASSWORD` vide dans `.env`. |
-| `connection refused` sur `curl http://localhost:8200/health` | API pas encore prête | Attendre 30 secondes et retry. Si toujours en échec, `docker compose logs api` |
+| `unhealthy` sur `rhorizon_postgres` | Postgres a échoué à démarrer | `docker compose -f tools/docker-compose.quickstart.yml logs postgres` et lire les 30 dernières lignes. Le plus souvent : pas assez de RAM, ou `POSTGRES_PASSWORD` vide dans `.env`. |
+| `connection refused` sur `curl http://localhost:8200/health` | API pas encore prête | Attendre 30 secondes et retry. Si toujours en échec, `docker compose -f tools/docker-compose.quickstart.yml logs api` |
 | `{"sealed": true}` après unseal | Mauvais password ou 2FA mal configurée | Re-vérifier le password (sensible à la casse !). Si la 2FA est activée mais qu'aucun token n'est fourni, la requête unseal échoue. |
-| L'UI web affiche "Cannot connect" | Container API pas en marche | `docker compose ps`, puis `docker compose logs api` |
-| L'utilisateur veut tout recommencer | Master password foiré et pas de données auxquelles il/elle tient | `docker compose down -v` - **ATTENTION** : supprime la base. Confirmer avec l'utilisateur. Puis recommencer à l'étape 4. |
+| L'UI web affiche "Cannot connect" | Container API pas en marche | `docker compose -f tools/docker-compose.quickstart.yml ps`, puis `docker compose -f tools/docker-compose.quickstart.yml logs api` |
+| L'utilisateur veut tout recommencer | Master password foiré et pas de données auxquelles il/elle tient | `docker compose -f tools/docker-compose.quickstart.yml down -v` - **ATTENTION** : supprime la base. Confirmer avec l'utilisateur. Puis recommencer à l'étape 4. |
 | Le build échoue avec `cargo: command not found` ou erreurs Rust | Souci de cache de build | `docker compose build --no-cache api` |
 | Erreurs `disk full` | Plus d'espace disque | Vérifier `df -h`. Libérer ou ajouter du disque. Les images Docker seules ont besoin de ~3 Go. |
 
@@ -427,7 +432,7 @@ ou retour à la doc) si :
 - Il/elle veut intégrer avec Ansible / CI / agents -> pointer vers `docs/USE-CASES.md`
 - Il/elle signale une vulnérabilité de sécurité -> pointer vers `SECURITY.md`
 - Il/elle veut contribuer / fixer un bug -> pointer vers `CONTRIBUTING.md`
-- Il/elle perd son master password -> dis-le honnêtement : **le vault est irrécupérable**. Les données sont chiffrées avec une clé dérivée de ce password et il n'y a pas de backdoor par design. Il/elle devra recommencer avec `docker compose down -v` et un nouveau password.
+- Il/elle perd son master password -> dis-le honnêtement : **le vault est irrécupérable**. Les données sont chiffrées avec une clé dérivée de ce password et il n'y a pas de backdoor par design. Il/elle devra recommencer avec `docker compose -f tools/docker-compose.quickstart.yml down -v` et un nouveau password.
 
 ---
 
@@ -435,7 +440,7 @@ ou retour à la doc) si :
 
 Avant de déclarer l'install réussie :
 
-- [ ] Les trois containers affichent `running (healthy)` dans `docker compose ps`
+- [ ] Les trois containers affichent `running (healthy)` dans `docker compose -f tools/docker-compose.quickstart.yml ps`
 - [ ] `curl http://localhost:8200/health` retourne `{"status": "ok"}`
 - [ ] `curl http://localhost:8200/api/v1/vault/status` retourne `"sealed": false`
 - [ ] L'utilisateur a sauvegardé son master password ET son root token à deux endroits (password manager + offline)

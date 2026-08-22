@@ -131,6 +131,9 @@ class VaultState:
         # exists for -- the blackout test found /api/v1/vault/status simply not
         # answering for the whole outage. None until the first confirmation.
         self._last_known_role: str | None = None
+        # Term start of the primary as of the last confirmation. See
+        # note_primary_since / last_primary_since.
+        self._last_primary_since: str | None = None
         # Companion deadline: past this, frozen is no longer a recoverable
         # state and the node must be treated as sealed. Kept as state for the
         # same reason as the one above -- so the transition cannot be missed by
@@ -1338,6 +1341,29 @@ class VaultState:
                 self._cluster_share_server = None
         self._cluster_share_task = None
         self._cluster_share = None
+        # Drop the authority deadlines -- a sealed process holds no authority,
+        # so it has no deadline to hold. Exactly the case
+        # release_db_confirmation() describes: "nothing to confirm rather than
+        # a failure to confirm it".
+        #
+        # Without this the pair below deadlocks. cluster_ha_heartbeat_loop
+        # returns early on `if vs.sealed: continue`, so the only thing that
+        # renews these deadlines does not run while sealed -- and the deadline
+        # stays frozen at its lapsed value for the life of the process. Anything
+        # that brings the worker back (a custody re-attach) inherits it, and
+        # cluster_ha_fence_loop at 1s beats the heartbeat at 3s, so the worker
+        # is re-sealed before it can ever renew. Re-attach, re-seal, repeat.
+        #
+        # Measured on the lab: the custodian pool re-sealed 14 times in 4
+        # minutes and the node flapped for minutes after a hard fence. That is a
+        # regression from the independent fence loop -- before it, nothing
+        # re-read the stale deadline, so nothing acted on it.
+        #
+        # Safe because sealed is checked first everywhere it matters:
+        # require_unsealed() raises on _sealed before consulting must_seal or
+        # frozen, and /internal/ha/status reports "sealed" before it looks at
+        # either. Clearing them cannot make a sealed worker look like it serves.
+        self.release_db_confirmation()
 
     # -- Shamir share accumulation --
 
@@ -1437,6 +1463,35 @@ class VaultState:
         frozen it is precisely the thing this node can no longer verify.
         """
         return self._last_known_role
+
+    def note_primary_since(self, since_iso: str | None) -> None:
+        """Cache the ``primary_since`` PostgreSQL last reported, for DB-free status.
+
+        Set on the SAME round-trip that renews the confirmation, so it ages
+        with ``db_confirmation_age()`` and cannot claim to be fresher than the
+        confirmation that produced it.
+        """
+        self._last_primary_since = since_iso
+
+    @property
+    def last_primary_since(self) -> str | None:
+        """The current primary's term start, as of the last confirmation.
+
+        The referent a peer needs to answer the one question local rules
+        cannot: has the cluster elected a new primary WITHOUT me? It is stamped
+        with the PostgreSQL clock under the election lock on every promote, so
+        it moves at every failover -- unlike ``key_epoch``, which tracks key
+        rotations and does not move when the primary changes.
+
+        A peer reporting a value strictly NEWER than this one has proved an
+        election completed while this node was away, which is positive evidence
+        of isolation rather than of a shared outage. Nothing consumes it yet;
+        publishing it is deliberately separated from acting on it.
+
+        Stale by design while frozen, exactly like ``last_known_role``, and
+        reported next to the confirmation age for the same reason.
+        """
+        return self._last_primary_since
 
     def db_confirmation_age(self) -> float | None:
         """Seconds since canonical state was last confirmed, None if never."""

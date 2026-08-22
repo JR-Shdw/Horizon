@@ -140,10 +140,10 @@ ce qui a été lu et quand.
 
 **Ce que ça fait** : récupère les 50 dernières entrées du journal
 d'audit pour le token MCP et les affiche en tableau. Le journal
-d'audit du coffre-fort est **chaîné** - chaque entrée signe la
-précédente - donc une modification devient détectable. Si quelqu'un (y
-compris toi) modifiait la base pour cacher une lecture, la chaîne
-casse.
+d'audit du coffre-fort est protégé par des checkpoints Merkle signés, donc
+modifier ou supprimer une lecture déjà checkpointée casse la vérification
+d'intégrité. La queue la plus récente reste en attente jusqu'à son prochain
+checkpoint.
 
 ---
 

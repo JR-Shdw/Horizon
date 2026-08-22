@@ -654,9 +654,9 @@ async def test_read_canonical_primary_clock_advances_within_transaction(fresh):
     from api.app import cluster_membership
 
     async with async_session() as db:
-        _, _, first = await cluster_membership.read_canonical_primary(db)
+        _, _, first, _ = await cluster_membership.read_canonical_primary(db)
         await asyncio.sleep(1.1)
-        _, _, second = await cluster_membership.read_canonical_primary(db)
+        _, _, second, _ = await cluster_membership.read_canonical_primary(db)
 
     advanced = (second - first).total_seconds()
     assert advanced > 1.0, (

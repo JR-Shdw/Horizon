@@ -1,352 +1,171 @@
-# Resurgamus Horizon - Roadmap v1.0 -> v2.0
+# Resurgamus Horizon - Roadmap
 
-## Vue d'ensemble
+**Statut : bêta, cœur fonctionnellement complet.** Tout ce qui figure sous
+« Livré » est implémenté et exercé par les suites de tests Python + Rust
+(`make test` fait foi). La surface d'API est stable ; les ruptures sont
+annoncées dans le CHANGELOG. Ce document suit ce qui existe, le durcissement
+d'avant-release encore en vol, et la direction du projet.
 
-10 fonctionnalites reparties sur 3 tiers, ordonnees par impact d'adoption.
-
-```
-Beta (maintenant)  ->  v1.0 (CLI+UI+versioning)  ->  v1.1 (LDAP+RBAC)  ->  v1.2 (import+inject)  ->  v2.0 (dynamic)
-```
-
----
-
-## Tier 1 - Bloquants adoption
-
-### 1. Web UI complete
-
-**Objectif** : un sysadmin gere le vault au quotidien sans curl.
-
-**Etat actuel** : un frontend en JS vanilla existe mais ne couvre pas tous les endpoints.
-
-**Ecrans requis** :
-
-| Ecran | Fonctionnalites |
-|--------|----------|
-| Dashboard | Sealed/unsealed, uptime, nombre de secrets/tokens, dernieres actions d'audit |
-| Secrets | Liste avec filtre namespace, create/read/update/delete, copie valeur, voir versions |
-| Tokens | Liste, create (permissions JSON : scope + namespaces), revoke, delete |
-| Namespaces | Liste avec compteurs, creation namespace (implicite via secret), delete |
-| Audit | Table paginee, filtres (acteur, action, plage de dates), indicateur chain intact |
-| Unseal | Formulaire password + 2FA, progression Shamir (barre M/N) |
-| Shamir | Init (slider threshold/total), affichage unique des shares |
-| 2FA | Setup TOTP (QR code), enregistrement YubiKey, selecteur de mode |
-| Settings | Infos vault (version, uptime), rotation DEK en masse, export/import |
-
-**Principes UI** :
-- JS vanilla (pas de build step, pas de framework)
-- Pattern existant : `renderXxx(el)`, routage par hash, helper `api()`
-- Valeurs sensibles masquees par defaut, bouton "reveal" avec copie presse-papiers
-- Aucun secret en clair dans le DOM sauf demande explicite de l'utilisateur
-
-**Estimation** : 2-3 jours
+Règle de release (vaut pour chaque point ci-dessous) : ne jamais imposer aux
+utilisateurs existants une migration de schéma destructrice ni un ré-import des
+secrets. Les colonnes de chiffré stockées et les tailles de nonce restent
+compatibles octet à octet. Un changement de métadonnées versionnées doit
+conserver un chemin de lecture pour les lignes et sauvegardes existantes.
 
 ---
 
-### 2. CLI (`rhorizon`)
+## Livré
 
-**Objectif** : utiliser rhorizon dans les scripts, les pipelines CI/CD, et le terminal au quotidien.
+### Cœur du vault
+| Domaine | Quoi |
+|---|---|
+| Crypto | Pile à 5 couches (Argon2id -> HKDF-SHA512 -> XChaCha20-Poly1305 -> AES-256-GCM -> HMAC-SHA512), double enveloppe avec DEK par secret, seal/unseal, rotation hiérarchique de `dek_key` autorisée par l'opérateur avec surveillance de l'âge |
+| Secrets | CRUD, versioning + rollback, rotation par secret avec fenêtre de grâce, namespaces |
+| Tokens | Scopes, allowlist d'IP par token (CIDR), éphémères (TTL court), rotate/renew, `whoami` |
+| Oneshot | Scellé par défaut : unseal -> lecture d'un secret -> re-seal en un seul appel |
 
-**Stack** : Python + typer (coherent avec le reste du projet)
+### Authentification et accès
+| Domaine | Quoi |
+|---|---|
+| 2FA | WebAuthn/FIDO2 (navigateur), YubiKey HMAC-SHA1 (CLI), TOTP ; modes none/yubikey/totp/any avec repli automatique |
+| Auth externe | Bind LDAP/AD + mapping de groupes ; en-têtes SSO proxy (Authelia/Authentik/Keycloak) |
+| RBAC | Groupes (locaux + mappés LDAP), sous-admin de namespace par composition de scopes |
 
-**Commandes** :
+### Interfaces et exploitation
+| Domaine | Quoi |
+|---|---|
+| Web UI | Frontend vanilla-JS complet : dashboard, secrets, tokens, audit, groupes, backup, notifications, réglages, observabilité, PKI |
+| CLI | `rhorizon` (typer) : unseal/seal, secrets, tokens, audit, PKI |
+| Notifications | Matrix, webhook générique, email (SMTP) |
+| Backup/restore | Export/restore logique chiffré age + `pg_dump | age` pour un DR fidèle |
 
-```
-rhorizon login URL                     # Authentifie, stocke le token dans ~/.config/rhorizon/
-rhorizon status                        # Sealed/unsealed, version, mode 2FA
-rhorizon unseal                        # Prompt password (+ TOTP/YubiKey si configure)
-rhorizon seal                          # Scelle le vault
+### Automatisation et livraison
+| Domaine | Quoi |
+|---|---|
+| Agents | `rh-fetch` (init container), `rh-inject` (wrapper d'env), `rh-watch` (sidecar + rotation de token éphémère), binaires musl statiques |
+| MCP | Serveur stdio zéro-dépendance ; **hub gateway** optionnel avec identité par agent, chaîne d'audit MCP côté serveur (`vault_audit_mcp`) et sidecar PQ-TLS |
+| Secrets dynamiques | Credentials modulaires PostgreSQL, MySQL/MariaDB, LDAP, Redis ACL et Cassandra avec leases et auto-révocation ; collection Ansible séparée |
 
-# Secrets
-rhorizon get NAME                      # Affiche la valeur (stdout, pipeable)
-rhorizon get NAME --json               # JSON complet (name, value, version, namespace)
-rhorizon set NAME VALUE                # Cree ou met a jour
-rhorizon set NAME --file=path          # Valeur depuis un fichier
-rhorizon set NAME --stdin              # Valeur depuis stdin
-rhorizon delete NAME                   # Supprime
-rhorizon list                          # Liste (noms uniquement)
-rhorizon list --namespace=prod         # Filtre par namespace
-rhorizon rotate NAME                   # Rotation DEK
-rhorizon rotate --all                  # Rotation en masse
+### Cryptographie et PKI
+| Domaine | Quoi |
+|---|---|
+| Moteur PKI | CA dédiée émettant des feuilles X.509 courtes ; algorithme de signature sélectionnable : Ed25519, ML-DSA-65 (FIPS 204), ou **composite Ed25519 + ML-DSA-65** |
+| Certificats KEM PQ | Certificats KEM **hybrides X25519 + ML-KEM-768** |
+| Transport PQ | TLS 1.3 post-quantique (X25519MLKEM768) sur le chemin agent <-> vault |
 
-# Tokens
-rhorizon token create NAME --perms '{"secrets":"rw"}'
-rhorizon token list
-rhorizon token revoke ID
+### Haute disponibilité
+| Domaine | Quoi |
+|---|---|
+| Database HA | Clustering neutre vis-à-vis du fournisseur (basé Patroni), gating de santé des réplicas en streaming, rétention WAL bornée |
+| Coordination | Couche inter-conteneurs : identité cluster/nœud, JOIN bootstrap HMAC, machine à états de quarantaine, drain/evict/promote |
+| Partage de clé | Parts Shamir du master distribuées, workers master/follower par rôle, reconstruction automatique au failover |
+| Modèle d'autorité | Deux deadlines indépendantes, pas une : la **fraîcheur d'autorité DB** (tout nœud — un secondaire incapable de lire l'état canonique ne peut plus prouver qu'il est encore secondaire) et le **bail primary** (la revendication d'écriture singleton, primary uniquement). Les deux évaluées contre le `clock_timestamp()` de PostgreSQL, jamais contre une horloge hôte |
+| État FROZEN | Perdre l'autorité DB suspend le service sans larguer les clés. Exprimé comme une deadline recalculée à la lecture, donc une boucle de rafraîchissement morte échoue fermé au lieu de laisser un nœud servir. Un hard fence scelle à `lease_ttl + frozen_max`, bornant le temps qu'un nœud possiblement périmé passe assis sur de la matière clé. Ce fence tourne dans sa propre boucle, ne lisant qu'une horloge monotone : évalué en fin de tick base de données, il n'était jamais *atteint* quand la requête pendait, et une boucle pendue n'est pas une boucle morte, donc la supervision ne l'attrapait pas. Les pairs peuvent acheter du temps à un nœud gelé, jamais le droit de servir |
+| Transport | CA de cluster avec mTLS par nœud ; `/internal/ha/status` répond avec PostgreSQL injoignable (aucune I/O, aucune auth — un endpoint qui a besoin de l'autorité ne peut pas rendre compte de sa perte) |
+| Prévu | Classification peer-aware : aujourd'hui un nœud ne peut pas distinguer une panne DB **partagée** de son **propre** isolement, qui appellent des réactions opposées (tenir vs sceller). Les pairs contribuent des observations, jamais de l'autorité |
 
-# Namespaces
-rhorizon ns list
-rhorizon ns delete NAME
+### Durcissement mémoire et audit
+| Domaine | Quoi |
+|---|---|
+| Hygiène des clés | Cœur crypto en Rust (PyO3) : master / `dek_key` / `hmac_key` / `audit_key` tenus mlock'd et zeroize-on-drop ; la wrap key n'existe jamais en Python |
+| Crypto en volume | CRUD de secrets, lectures de versions, rollback, rotation et backup/restore chaînés en Rust ; les DEK en clair restent dans Rust |
+| Audit | Signatures versionnées de lignes complètes ; journal de lecture à haut débit avec checkpoints Merkle signés ; racines conscientes du pruning ; vérification complète durable et ancres de préflight incrémentales signées |
 
-# Import/Migration (voir feature 5)
-rhorizon import --from=dotenv .env
-rhorizon migrate vault --dry-run
-
-# Shamir
-rhorizon shamir init --threshold=3 --total=5
-rhorizon shamir unseal                 # Prompt pour chaque share
-```
-
-**Configuration** (`~/.config/rhorizon/config.toml`) :
-```toml
-[default]
-url = "https://vault.internal:8200"
-token_file = "~/.config/rhorizon/token"
-# token stocke mode 0600, pas dans le TOML
-```
-
-**Livrable** : paquet pip-installable (`pip install rhorizon-cli` ou script standalone)
-
-**Estimation** : 2-3 jours
-
----
-
-### 3. LDAP / Active Directory
-
-**Objectif** : les utilisateurs se connectent avec leurs credentials AD/LDAP. Les groupes AD mappent vers les permissions rhorizon.
-
-**Modes supportes** :
-1. **Bind LDAP direct** - rhorizon contacte LDAP pour verifier les credentials
-2. **Headers SSO proxy** - Authelia/Authentik/Keycloak en frontal (`Remote-User` + `Remote-Groups`)
-Les deux modes sont implementes. Le bind LDAP ne necessite pas de reverse proxy. Le mode SSO proxy necessite un reverse proxy de confiance (Traefik + Authelia/Authentik/Keycloak) et `RH_PROXY_AUTH_ENABLED=true`.
-
-**Flux LDAP** :
-```
-User -> POST /api/v1/vault/auth/ldap {"username":"jdoe","password":"..."}
-  -> rhorizon bind sur LDAP avec les credentials
-  -> recherche les groupes de l'utilisateur
-  -> mappe les groupes -> role rhorizon (admin/ops/viewer)
-  -> cree un token de session (TTL configurable)
-  -> retourne le token
-```
-
-**Configuration** (table `vault_config` ou env vars) :
-```
-LDAP_URL=ldaps://dc.corp.local:636
-LDAP_BIND_DN=cn=rhorizon,ou=services,dc=corp,dc=local
-LDAP_BIND_PASSWORD=...
-LDAP_USER_BASE=ou=users,dc=corp,dc=local
-LDAP_USER_FILTER=(sAMAccountName={username})
-LDAP_GROUP_BASE=ou=groups,dc=corp,dc=local
-LDAP_GROUP_FILTER=(member={user_dn})
-LDAP_GROUP_ATTR=cn
-LDAP_TLS_VERIFY=true
-```
-
-**Mapping groupe -> role** (configurable via API/UI) :
-```json
-{
-  "vault-admins": {"admin": "rw"},
-  "vault-ops": {"secrets": "rw", "audit": "r"},
-  "vault-readers": {"secrets": "r"},
-  "dba-team": {"secrets": "rw", "namespaces": ["prod/db", "staging/db"]}
-}
-```
-
-**Estimation** : 3-4 jours
+### Chaîne d'approvisionnement
+Images multi-arch (amd64 + arm64), signatures cosign + provenance SLSA + SBOM,
+Trivy / bandit / pip-audit / detect-secrets, `cargo audit` / `deny` / `clippy` /
+`miri`, cibles cargo-fuzz. Le nombre de tests bouge chaque semaine ; `make test`
+fait foi, pas cette page.
 
 ---
 
-### 4. Secret versioning + rollback
+## Durcissement avant release
 
-**Objectif** : conserver l'historique des N dernieres versions d'un secret. Permettre le rollback.
+Suivi en détail dans
+[`SECURITY-HARDENING-ROADMAP.md`](../SECURITY-HARDENING-ROADMAP.md) (EN). Le
+durcissement mémoire et audit est terminé. Le travail restant se limite à la
+validation plateforme et release :
 
-**Etat actuel** : l'historique des versions et le rollback sont implementes.
-Les valeurs courantes vivent dans `vault_secrets`; les anciennes versions
-retenues vivent dans `vault_secret_versions`.
+| Point | Portée | Priorité |
+|---|---|---|
+| Install macOS native | Valider `quickstart-laptop-native.sh` sur du matériel Apple (ou un runner CI macOS). Aujourd'hui, sur macOS, chemin conteneur seulement. | Moyenne |
+| Binaires de release agent multi-arch | Le blocage du build arm64 est levé ; publier les binaires musl `rh-*` pour aarch64 dans `release.yml`. | Moyenne |
 
-**Forme implementee** :
+---
 
-**Schema** - nouvelle table `vault_secret_versions` :
-```sql
-CREATE TABLE IF NOT EXISTS vault_secret_versions (
-    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    secret_id   uuid NOT NULL REFERENCES vault_secrets(id) ON DELETE CASCADE,
-    version     integer NOT NULL,
-    ciphertext  bytea NOT NULL,
-    nonce       bytea NOT NULL,
-    dek_id      uuid NOT NULL REFERENCES vault_dek(id),
-    created_at  timestamptz DEFAULT now(),
-    created_by  text,
-    UNIQUE (secret_id, version)
-);
+## Suite
+
+### Vaisseau amiral : unseal adossé au matériel (seal-wrap / racine de confiance matérielle)
+
+La seule dimension où les vaults commerciaux mènent réellement, c'est une
+**racine de confiance matérielle pour la master key**. Aujourd'hui rhorizon
+dérive la master key du mot de passe via Argon2id et la tient mlock'd dans le
+tas Rust. Cette fonctionnalité permet à la master (ou à une clé de chiffrement
+de clé qui l'enveloppe) de vivre dans du matériel, donc d'être déballée *par le
+périphérique* et de ne pas être dérivable d'un mot de passe fuité seul.
+
+**Limite honnête (annoncée d'emblée) :** ça protège la **racine**. Ça ne rend
+*pas* la mémoire du process immunisée — les clés de travail dérivées
+(`dek_key`, etc.) doivent toujours entrer en RAM pour chiffrer/déchiffrer à
+débit ; router chaque opération par secret à travers un HSM est trop lent pour
+un vault généraliste. C'est la même limite que le seal-wrap dans les vaults
+commerciaux. Le gain, c'est l'ancrage matériel et la suppression de l'exposition
+« la master key est en RAM comme unique racine » — pas « aucune matière clé
+jamais en RAM ».
+
+**Backends open-source auto-hébergés uniquement** (pas de KMS cloud — une
+dépendance SaaS est hors doctrine). Implémenté comme un fournisseur de seal
+enfichable, comme les modes 2FA, et **composable avec Shamir** (présence
+matérielle *et* M-parmi-N) :
+
+| Backend | Matériel | Outillage |
+|---|---|---|
+| TPM 2.0 | présent sur la plupart des hôtes modernes | `tpm2-tss` / `tpm2-tools` ; sceller une KEK à des PCR -> l'unseal exige cette machine + le mot de passe |
+| HSM PKCS#11 | Nitrokey HSM 2 / YubiHSM 2 | `cryptoki` (Rust), OpenSC ; KEK tenue dans le périphérique, master déballée dans le HSM |
+| YubiKey PIV | réutilise les YubiKeys existantes | OpenSC/PIV ; une clé de slot enveloppe la master |
+
+**Interface de fournisseur de seal proposée** (esquisse — vit dans la frontière
+crypto Rust pour que les octets de clé déballés ne remontent jamais en Python) :
+
+```python
+class SealProvider(Protocol):
+    name: str                                  # "password" | "tpm2" | "pkcs11" | "yubikey-piv"
+
+    def present(self) -> bool: ...             # périphérique disponible + authentifié
+    def wrap(self, kek: bytes) -> bytes: ...   # protéger la KEK du vault via le périphérique
+    def unwrap(self, wrapped: bytes) -> bytes: ...  # la relâcher via le périphérique (dans le HW pour un HSM)
+    def rotate(self) -> None: ...              # re-keyer le secret tenu par le matériel
 ```
 
-**Flux** :
-- `POST /secrets/` - cree la version 1, insere dans `vault_secret_versions`
-- `PUT /secrets/{name}` - incremente la version, insere la nouvelle, garde les anciennes
-- `GET /secrets/{name}` - retourne la version courante (comme aujourd'hui)
-- `GET /secrets/{name}/versions` - liste les versions (sans les valeurs)
-- `GET /secrets/{name}/versions/{v}` - lit une version specifique
-- `POST /secrets/{name}/rollback/{v}` - restaure une ancienne version (cree une nouvelle version avec l'ancienne valeur)
+Le défaut reste `seal_mode = password` ; le matériel est opt-in et compatible
+octet à octet (seule change la façon dont la master/KEK est protégée — le
+chiffré des secrets stockés est intact).
 
-**Retention** : configurable, defaut 10 versions. Les plus anciennes sont purgees automatiquement.
+**Les deux parties difficiles (travail de conception, pas de plomberie) :**
+- **Récupération.** Un périphérique mort ou perdu ne doit pas faire perdre le
+  vault. Le matériel est *un* facteur, branché sur le chemin Shamir + recovery
+  handle existant — jamais un point de défaillance unique.
+- **CI sans matériel.** `swtpm` (TPM logiciel) + `SoftHSM2` donnent une
+  couverture TPM/PKCS#11 dans le pipeline ; valider contre une vraie
+  Nitrokey/YubiKey avant de livrer.
 
-**Estimation** : 1-2 jours
+**Phasage :** (1) abstraction de fournisseur de seal + TPM 2.0 (gratuit,
+universel) ; (2) PKCS#11 (Nitrokey/YubiHSM, le vrai HSM amovible) ; (3) YubiKey
+PIV (réutiliser le matériel existant).
 
----
+### Directions candidates (non engagées)
 
-## Tier 2 - Differenciateurs
-
-### 5. Import migration / backup
-
-**Objectif** : faciliter la migration vers rhorizon sans réintroduire d'export bulk en clair.
-
-**Formats supportes** :
-
-| Source / format | Import | Export | Usage |
-|--------|--------|--------|-------|
-| `.env` (dotenv) | Oui | Non | Migration depuis des fichiers .env |
-| JSON | Oui | Non | Import de migration côté client seulement |
-| HashiCorp Vault | Oui | Non | Migration de vault externe via le CLI |
-| Infisical | Expérimental | Non | Migration de vault externe via le CLI |
-| backup age | Restore | Oui | Backup / restore logique chiffré |
-
-**Estimation** : 2-3 jours
+Emplacement pour les priorités post-lancement — à remplir à partir des retours
+des premiers utilisateurs.
 
 ---
 
-### 6. Injection de secrets dans les containers
+## Validation plateforme
 
-**Objectif** : les containers recuperent leurs secrets au demarrage sans les hardcoder dans docker-compose.yml.
-
-**Deux mecanismes** :
-
-#### 6a. Init container (simple)
-
-Un container qui tire les secrets et les ecrit comme fichiers dans un volume partage :
-
-```yaml
-services:
-  secrets-init:
-    image: rhorizon-agent:latest
-    environment:
-      RH_ADDR: https://vault.internal:8200
-      RH_TOKEN: rh_xxx
-      RH_SECRETS: "prod/db-password:/secrets/db-pass,prod/api-key:/secrets/api-key"
-    volumes:
-      - secrets:/secrets
-
-  app:
-    image: myapp
-    depends_on:
-      secrets-init:
-        condition: service_completed_successfully
-    volumes:
-      - secrets:/secrets:ro
-
-volumes:
-  secrets:
-    driver_opts:
-      type: tmpfs
-      device: tmpfs  # RAM uniquement, jamais sur disque
-```
-
-#### 6b. Injection en env var (avance)
-
-Un wrapper qui resout les references rhorizon dans les env vars :
-
-```yaml
-services:
-  app:
-    image: myapp
-    entrypoint: ["/usr/local/bin/rh-inject", "--", "/app/start.sh"]
-    environment:
-      RH_ADDR: https://vault.internal:8200
-      RH_TOKEN: rh_xxx
-      DB_PASSWORD: "rh://prod/db-password"
-      API_KEY: "rh://prod/api-key"
-    # rh-inject resout rh:// avant d'exec l'app
-```
-
-**Estimation** : 2-3 jours
-
----
-
-### 7. Groupes / RBAC simple
-
-**Objectif** : gerer les permissions par groupe (LDAP ou local), pas par token individuel.
-
-**Estimation** : 2 jours
-
----
-
-### 8. Notifications
-
-**Objectif** : alerter quand un secret est modifie, un token revoque, ou un unseal echoue.
-
-**Canaux** :
-- Matrix (natif)
-- Webhook generique (Slack, Mattermost, Discord, ntfy)
-- Email (SMTP)
-
-**Estimation** : 1-2 jours
-
----
-
-## Tier 3 - Credibilite enterprise
-
-### 9. Backup / Restore chiffre
-
-**Objectif** : deux chemins explicites de recuperation : `pg_dump | age` pour
-la DR full-fidelity (tokens, 2FA, moteurs dynamiques et audit inclus), et le
-backup age API pour une migration logique partielle vers une instance vierge.
-
-**Estimation** : 2 jours
-
----
-
-### 10. Dynamic secrets modulaires
-
-**Objectif** : generer des credentials temporaires de base de donnees ou
-d'annuaire avec TTL.
-
-**Scope livre** : PostgreSQL, MySQL/MariaDB, LDAP, Redis ACL et Cassandra, plus
-une collection Ansible separee. Chaque backend a son dossier et son lock de
-dependances ; l'INI choisit le code importe et le build peut retirer les drivers
-optionnels. Les preuves live restent distinguees du simple statut implemente
-dans `docs/COMPATIBILITY.md`. Pas d'AWS IAM, pas de PKI, pas de SSH.
-
-**Estimation** : 4-5 jours
-
----
-
-## Resume estimations
-
-| # | Fonctionnalite | Jours | Phase |
-|---|---------|------|-------|
-| 1 | Web UI complete | 2-3 | v1.0 |
-| 2 | CLI (`rhorizon`) | 2-3 | v1.0 |
-| 3 | LDAP / Active Directory | 3-4 | v1.1 |
-| 4 | Secret versioning + rollback | 1-2 | v1.0 |
-| 5 | Import migration / backup | 2-3 | v1.2 |
-| 6 | Injection container | 2-3 | v1.2 |
-| 7 | Groupes / RBAC | 2 | v1.1 |
-| 8 | Notifications | 1-2 | v1.1 |
-| 9 | Backup / restore chiffre | 2 | v1.2 |
-| 10 | Dynamic secrets modulaires | 4-5 | v2.0 |
-| | **Total** | **~25 jours** | |
-
-## Ordre d'implementation recommande
-
-```
-v1.0-beta (maintenant)
-  +-- Publication GitHub, retours early adopters
-
-v1.0
-  +-- #4  Secret versioning (fondation, impacte le schema)
-  +-- #1  Web UI complete
-  +-- #2  CLI (rhorizon)
-
-v1.1
-  +-- #3  LDAP / AD
-  +-- #7  Groupes / RBAC
-  +-- #8  Notifications
-
-v1.2
-  +-- #5  Import migration / backup
-  +-- #6  Injection container
-  +-- #9  Backup / Restore
-
-v2.0
-  +-- #10 Dynamic secrets modulaires
-```
+| Cible | Statut | Étape suivante |
+|---|---|---|
+| Linux x86-64 | Principal, gardé par la CI | - |
+| Linux aarch64 | Validé sur du matériel Raspberry Pi 4 | Garder la voie matérielle dans la validation de release |
+| FreeBSD / OpenBSD | Suite de tests validée en VM | Garder dans la matrice VM BSD |
+| macOS natif (Apple Silicon) | Gardé par la CI sur `macos-latest` | Garder `macos-native.yml` dans la voie release |
+| macOS natif (Intel) | Non mesuré | Nécessite un runner x86_64 auto-hébergé ou un vrai Mac : plus aucune image `macos-13` gratuite |

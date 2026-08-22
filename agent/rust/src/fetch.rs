@@ -18,6 +18,7 @@
 use std::fs;
 use std::process;
 
+use rhorizon_agent::http::encode_component;
 use rhorizon_agent::{atomic_write, build_client, env_var, load_token, parse_secrets_spec};
 
 #[derive(serde::Deserialize)]
@@ -65,7 +66,10 @@ fn main() {
         let dest_path = spec.path.as_str();
         let namespace = spec.namespace.as_deref();
 
-        let url = format!("{addr}/api/v1/vault/secrets/{secret_name}");
+        let url = format!(
+            "{addr}/api/v1/vault/secrets/{}",
+            encode_component(secret_name)
+        );
         let mut req = client
             .get(&url)
             .header("Authorization", format!("Bearer {}", token.as_bearer()));

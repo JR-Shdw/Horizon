@@ -217,7 +217,7 @@ local pour simplifier l'usage. Active le chiffrement complet du disque
 et verrouille ta session. Un disque non chiffré volé, un accès root ou
 la compromission de ton compte peut exposer la base chiffrée et son
 matériel de recovery. Garde le matériel de recovery hors hôte
-séparément, selon [`DISASTER-RECOVERY.md`](../DISASTER-RECOVERY.md).
+séparément, selon [`DISASTER-RECOVERY.md`](DISASTER-RECOVERY.md).
 
 Deux propriétés restent garanties :
 
@@ -228,9 +228,11 @@ Deux propriétés restent garanties :
    client l'an prochain n'ouvre pas l'accès aux secrets du
    premier.
 
-2. **Les lectures sont auditées.** Chaque lecture par l'assistant
-   enregistre l'acteur, la cible et le timestamp dans la chaîne d'audit
-   tamper-evident. Vérifie la chaîne avant de l'utiliser comme preuve.
+2. **Chaque lecture est consignée.** Quand ton assistant ouvre un secret, le
+   vault enregistre qui a demandé, quel secret, et quand, dans un journal
+   construit pour que modifier ou supprimer une entrée après coup soit
+   détectable. Si tu as un jour besoin de ce journal comme preuve, vérifie-le
+   d'abord — le vault te dira s'il est intact.
 
 ---
 

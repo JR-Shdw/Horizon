@@ -825,4 +825,35 @@ mod tests {
         );
         unsafe { std::env::remove_var("RHORIZON_TOKEN_FILE") };
     }
+
+    #[test]
+    fn percent_encode_keeps_the_unreserved_set_verbatim() {
+        // RFC 3986 unreserved: ALPHA / DIGIT / "-" / "." / "_" / "~".
+        // Ordinary secret names must survive untouched, or every existing
+        // deployment's URLs change shape on upgrade.
+        let plain = "abcXYZ019-._~";
+        assert_eq!(http::encode_component(plain), plain);
+    }
+
+    #[test]
+    fn percent_encode_neutralises_path_traversal_and_query_injection() {
+        // The point of the fix. Each of these silently changed WHICH url was
+        // requested when interpolated raw.
+        assert_eq!(http::encode_component("a/b"), "a%2Fb");
+        assert_eq!(http::encode_component("../admin"), "..%2Fadmin");
+        assert_eq!(
+            http::encode_component("x?namespace=prod"),
+            "x%3Fnamespace%3Dprod"
+        );
+        assert_eq!(http::encode_component("x#frag"), "x%23frag");
+        assert_eq!(http::encode_component("a b"), "a%20b");
+        assert_eq!(http::encode_component("100%"), "100%25");
+    }
+
+    #[test]
+    fn percent_encode_is_byte_wise_for_non_ascii() {
+        // Encodes UTF-8 bytes, not chars: "é" is two bytes and must become two
+        // escapes, not one mangled char.
+        assert_eq!(http::encode_component("é"), "%C3%A9");
+    }
 }

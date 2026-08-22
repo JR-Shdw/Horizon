@@ -59,6 +59,7 @@ use std::env;
 use std::io::{self, Read, Write};
 use std::process;
 
+use rhorizon_agent::http::encode_component;
 use rhorizon_agent::{build_client, env_var, load_token};
 
 #[derive(serde::Serialize)]
@@ -111,7 +112,10 @@ fn cmd_list() -> i32 {
         }
     };
     let client = http_client();
-    let url = format!("{addr}/api/v1/vault/secrets/?namespace={ns}");
+    let url = format!(
+        "{addr}/api/v1/vault/secrets/?namespace={}",
+        encode_component(&ns)
+    );
     let resp = match client.get(&url).bearer_auth(token.as_bearer()).send() {
         Ok(r) => r,
         Err(e) => {
@@ -171,7 +175,11 @@ fn cmd_lookup() -> i32 {
         }
     };
     let client = http_client();
-    let url = format!("{addr}/api/v1/vault/secrets/{id}?namespace={ns}");
+    let url = format!(
+        "{addr}/api/v1/vault/secrets/{}?namespace={}",
+        encode_component(&id),
+        encode_component(&ns)
+    );
     let resp = match client.get(&url).bearer_auth(token.as_bearer()).send() {
         Ok(r) => r,
         Err(e) => {
@@ -283,7 +291,11 @@ fn cmd_delete() -> i32 {
         }
     };
     let client = http_client();
-    let url = format!("{addr}/api/v1/vault/secrets/{id}?namespace={ns}");
+    let url = format!(
+        "{addr}/api/v1/vault/secrets/{}?namespace={}",
+        encode_component(&id),
+        encode_component(&ns)
+    );
     let resp = match client.delete(&url).bearer_auth(token.as_bearer()).send() {
         Ok(r) => r,
         Err(e) => {

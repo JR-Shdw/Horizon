@@ -28,6 +28,7 @@ use std::process;
 use std::thread;
 use std::time::Duration;
 
+use rhorizon_agent::http::encode_component;
 use rhorizon_agent::{
     atomic_write, build_client, env_var, load_token, parse_secrets_spec, EphemeralMinter,
     SecureToken,
@@ -45,7 +46,7 @@ fn fetch_secret(
     name: &str,
     namespace: Option<&str>,
 ) -> Result<String, String> {
-    let url = format!("{addr}/api/v1/vault/secrets/{name}");
+    let url = format!("{addr}/api/v1/vault/secrets/{}", encode_component(name));
     let mut req = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token.as_bearer()));

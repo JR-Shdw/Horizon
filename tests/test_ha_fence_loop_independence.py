@@ -355,3 +355,47 @@ async def test_concurrent_triggers_do_not_overlap_the_teardown(monkeypatch):
 
     assert overlap["max"] == 1, "fence teardowns ran concurrently"
     assert all(v.seal_calls == 1 for v in vaults)
+
+
+def test_sealing_drops_the_authority_deadline_it_can_no_longer_renew():
+    """A sealed vault must not keep a deadline only the heartbeat can renew.
+
+    THE DEADLOCK, and the regression the independent fence loop introduced.
+
+    Two facts combine badly. cluster_ha_heartbeat_loop returns early on
+    `if vs.sealed: continue`, so the only code that renews the authority
+    deadlines does not run while a worker is sealed. And seal() used not to
+    clear them. So a sealed worker's `_seal_deadline` stayed frozen at its
+    lapsed value for the life of the process.
+
+    Anything that then brought the worker back -- in custody mode a re-attach
+    to the custodian pool -- inherited that stale deadline, and
+    cluster_ha_fence_loop (1s) beat the heartbeat (3s) to it, sealing the
+    worker again before it could renew. Re-attach, re-seal, repeat.
+
+    Measured on the lab after a hard fence: the custodian pool was re-sealed 14
+    times in 4 minutes and the node flapped between wholly sealed and wholly
+    active for minutes. Before the fence loop existed nothing re-read the stale
+    deadline, so nothing acted on it -- which is what makes this a regression
+    rather than a latent bug.
+
+    FROZEN is a property of the NODE (can it reach PostgreSQL), not of a
+    worker, so every worker on a host should march together: unsealed ->
+    frozen -> sealed. Per-worker divergence that outlives a heartbeat interval
+    is the symptom this guards.
+    """
+    from api.app.vault_state import VaultState
+
+    v = VaultState()
+    v.renew_db_confirmation(ttl_secs=-100.0, seal_grace_secs=0.0)
+    assert v.must_seal, "precondition: past the terminal deadline"
+
+    v.seal()
+
+    assert v.sealed
+    assert not v.must_seal, (
+        "a sealed worker kept a deadline it cannot renew: the fence will "
+        "re-seal it the moment anything re-attaches it"
+    )
+    assert not v.frozen
+    assert v.db_confirmation_age() is None

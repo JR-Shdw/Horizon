@@ -16,6 +16,7 @@ use std::env;
 use std::os::unix::process::CommandExt;
 use std::process;
 
+use rhorizon_agent::http::encode_component;
 use rhorizon_agent::{build_client, env_var, load_token, parse_rh_reference};
 use zeroize::Zeroize;
 
@@ -80,7 +81,10 @@ fn main() {
             let secret_name = parsed.name.as_str();
             let namespace = parsed.namespace.as_deref();
 
-            let url = format!("{addr}/api/v1/vault/secrets/{secret_name}");
+            let url = format!(
+                "{addr}/api/v1/vault/secrets/{}",
+                encode_component(secret_name)
+            );
             let mut builder = client
                 .get(&url)
                 .header("Authorization", format!("Bearer {}", token.as_bearer()));

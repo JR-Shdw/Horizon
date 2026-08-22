@@ -55,6 +55,10 @@ export RH_CA_FILE=~/rhorizon/certs/cert.pem
 > docker compose -f tools/docker-compose.quickstart.yml up -d
 > ```
 
+That is the quick path, and it stops at a running laptop. The complete install
+reference -- every supported path, verification, upgrade and uninstall -- is
+[`docs/INSTALL.md`](docs/INSTALL.md).
+
 Full walkthrough: [`docs/QUICKSTART.md`](docs/QUICKSTART.md). Native,
 Kubernetes, Podman, BSD, and production paths are listed in
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
@@ -165,6 +169,9 @@ nginx lacks ML-KEM and has to be built against an OpenSSL that has it:
 sh tools/install-native.sh --mode system --pq-nginx
 ```
 
+Full native walkthrough, including the per-OS status table this section
+summarises: [`docs/INSTALL-NATIVE.md`](docs/INSTALL-NATIVE.md).
+
 **Post-quantum** (X25519MLKEM768) protects traffic recorded *today* from a
 future quantum computer. Opt-in only because it is a source build.
 
@@ -261,7 +268,9 @@ Full matrix with per-row notes: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 
 ### Deploy
 
+- [`docs/INSTALL.md`](docs/INSTALL.md) - complete install reference: every path in, verification, upgrade, uninstall
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) - what rhorizon runs on and integrates with (OS, init, orchestration, auth, secret delivery, observability) with support tiers
+- [`docs/INSTALL-NATIVE.md`](docs/INSTALL-NATIVE.md) - install without Docker: per-OS status table, system vs user mode, systemd units, `--pq-nginx` source build
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) - local, private/VPN, reverse proxy + SSO, LDAP/AD, clustering, backup, hardening checklist
 - [`docs/DOCKER.md`](docs/DOCKER.md) - compose stack anatomy, multi-stage Dockerfile, volumes/networks, override patterns, rootless/Podman
 - [`docs/K8S.md`](docs/K8S.md) - agent patterns (rh-fetch / rh-inject / rh-watch / cronjob), NetworkPolicy, RBAC, TLS from vault

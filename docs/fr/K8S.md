@@ -344,7 +344,7 @@ mTLS).
 | `401 Unauthorized` depuis `rh-fetch` | Token expiré / révoqué / mauvais scope | Réémettre avec scope correct ; vérifier `rhorizon audit list --filter=actor=<token-id>` |
 | Pod démarre mais l'app lit un fichier vide | `rh-fetch` a tourné avant que le volume soit monté | Init containers + volumes sont séquentiels - vérifier que les `volumeMounts` sont dans `initContainers` ET `containers` |
 | `chmod 0400` sur `/secrets/` échoue | tmpfs pas configuré avec `Memory` medium | `emptyDir: { medium: Memory }` |
-| Warning `mlock` dans les logs vault | Limite memlock du container trop basse | Mettre `ulimits.memlock` (Docker) ou unconstrained sur l'hôte (le défaut K8s suffit pour les quelques Ko qu'on lock) |
+| `memory_protection: zeroize-only` ou `process_memory_protection: swappable`, avec du swap exposé/inconnu | `IPC_LOCK` est absent, ou la limite memlock du runtime du nœud est trop basse | Vérifier d'abord chaque nœud éligible et poser `api.swapProtection` ; si le swap n'est pas chiffré, le chiffrer/désactiver, ou activer `api.requestIpcLockCapability` là où la politique d'admission le permet |
 
 ---
 

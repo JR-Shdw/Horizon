@@ -2336,6 +2336,13 @@ async def internal_ha_status():
         "holds_primary_lease": vs.holds_primary_lease,
         "db_authority_confirmed": not vs.frozen and not vs.sealed,
         "confirmation_age_seconds": None if age is None else round(age, 3),
+        # The referent for peer-aware classification. Stamped by the PG clock
+        # under the election lock, so it moves at every failover: a peer whose
+        # value is strictly newer than a frozen node's has proved an election
+        # completed without it -- isolation rather than a shared outage.
+        # Published, not yet acted upon. Cached like `role`, and stale by
+        # design for the same reason, which is why it ships next to the age.
+        "primary_since": vs.last_primary_since,
     }
 
 

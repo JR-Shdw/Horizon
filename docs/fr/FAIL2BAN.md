@@ -33,8 +33,23 @@ Une ligne par échec, append-only, atomique (POSIX, multi-worker safe).
 | `shamir_reconstruction_failed` | Unseal | Reconstruction Shamir échouée |
 | `shamir_invalid_data` | Unseal | Données Shamir invalides |
 | `shamir_master_check_failed` | Unseal | Shares valides mais master check échoue |
+| `shamir_master_check_missing` | Unseal | La reconstruction n'a produit aucun master check à comparer |
+| `shamir_stale_generation` | Unseal | Les shares appartiennent à une génération de clé périmée |
+| `oneshot_invalid_password` | Oneshot | Master password incorrect sur `POST /oneshot` |
+| `oneshot_2fa_failed` | Oneshot | Échec 2FA sur `POST /oneshot` |
 | `ldap_invalid_credentials` | LDAP login | Identifiants LDAP invalides |
+| `proxy_untrusted_ip` | SSO proxy | Tentative d'auth proxy depuis une IP hors `proxy_trusted_ips` |
+| `token_ip_not_allowed` | Token API | Token **valide** présenté depuis une IP hors de son `allowed_ips` |
+| `bootstrap_blocked` | Cluster JOIN | Tentative de bootstrap HA rejetée |
 | `rate_limited` | Tous | IP bloquée par le rate limiter (429) |
+
+Deux d'entre eux méritent une jail alors même que la requête a déjà été
+refusée : `token_ip_not_allowed` signifie qu'un token **valide** a été rejoué
+depuis le mauvais hôte — le token a fuité, et l'IP source vaut la peine d'être
+bannie pendant que vous le faites tourner. `proxy_untrusted_ip` signifie que
+quelque chose a essayé d'affirmer un en-tête d'identité depuis l'extérieur de
+l'ensemble des proxies de confiance, ce qui est une tentative de contournement
+d'authentification sur le chemin SSO.
 
 ## Installation fail2ban
 

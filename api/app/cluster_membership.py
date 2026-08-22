@@ -45,6 +45,11 @@ log = logging.getLogger("rhorizon.cluster_membership")
 _REVOKED_KEY = "revoked_node_uuids"
 _PRIMARY_UUID_KEY = "primary_uuid"
 _PRIMARY_LEASE_KEY = "primary_lease_expires_at"
+# Stamped with the PG clock under the election lock on every promote, so it
+# MOVES AT EVERY FAILOVER -- which is what makes it the referent a peer can use
+# to prove an election completed without it. key_epoch cannot: it tracks key
+# rotations, not elections, and does not move at failover.
+_PRIMARY_SINCE_KEY = "primary_since"
 
 # Advisory lock serialising the revoked-list read-modify-write. Its three
 # writers (evict route, auto-evict reaper, unrevoke) otherwise hold
@@ -187,8 +192,8 @@ async def read_primary_uuid(session: AsyncSession) -> str | None:
 
 async def read_canonical_primary(
     session: AsyncSession,
-) -> tuple[str | None, datetime | None, datetime]:
-    """Return (primary_uuid, primary_lease_expires_at, db_now) in one round-trip.
+) -> tuple[str | None, datetime | None, datetime, datetime | None]:
+    """Return (primary_uuid, lease_expires_at, db_now, primary_since), one trip.
 
     Centralises the two ``vault_cluster_config`` reads used by both the
     auto-promote eligibility cascade and the per-host self-demote check
@@ -202,6 +207,12 @@ async def read_canonical_primary(
     - ``lease_expires_at is None`` : either the lease row is absent
       (pre-auto-promote-v1 cluster) or its value is not parseable as
       ISO-8601 (logged at WARNING ; caller treats as no signal).
+    - ``primary_since is None`` : same two cases. It rides this round-trip
+      rather than a query of its own precisely because of the clock argument
+      below -- it is stamped by the PG clock under the election lock, so it is
+      only comparable against values read from that same clock. A caller that
+      fetched it separately could compare two readings taken at different
+      instants and conclude an election had happened when none had.
 
     ``db_now`` is PostgreSQL's ``clock_timestamp()`` and is the ONLY clock a
     caller may compare the lease against. The lease is a distributed deadline :
@@ -243,9 +254,15 @@ async def read_canonical_primary(
                 "  (SELECT value FROM vault_cluster_config WHERE key = :k_uuid) "
                 "    AS primary_uuid, "
                 "  (SELECT value FROM vault_cluster_config WHERE key = :k_lease) "
-                "    AS lease_raw"
+                "    AS lease_raw, "
+                "  (SELECT value FROM vault_cluster_config WHERE key = :k_since) "
+                "    AS since_raw"
             ),
-            {"k_uuid": _PRIMARY_UUID_KEY, "k_lease": _PRIMARY_LEASE_KEY},
+            {
+                "k_uuid": _PRIMARY_UUID_KEY,
+                "k_lease": _PRIMARY_LEASE_KEY,
+                "k_since": _PRIMARY_SINCE_KEY,
+            },
         )
     ).fetchone()
 
@@ -270,7 +287,22 @@ async def read_canonical_primary(
             if lease_dt.tzinfo is None:
                 lease_dt = lease_dt.replace(tzinfo=timezone.utc)
 
-    return primary_uuid, lease_dt, db_now
+    # Same parse/defence as the lease: an unparseable value is no signal, never
+    # a reason to act. A caller comparing this against a peer's copy must treat
+    # None as "I have nothing to compare", not as "older than anything".
+    since_raw = row.since_raw
+    since_dt: datetime | None = None
+    if since_raw is not None:
+        try:
+            since_dt = datetime.fromisoformat(since_raw)
+        except (TypeError, ValueError):
+            log.warning("primary_since has invalid ISO-8601 value : %r", since_raw)
+            since_dt = None
+        else:
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
+
+    return primary_uuid, lease_dt, db_now, since_dt
 
 
 async def set_primary_uuid(session: AsyncSession, node_uuid: str | None) -> None:
