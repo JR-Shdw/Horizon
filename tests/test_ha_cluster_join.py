@@ -234,10 +234,28 @@ async def test_challenge_cluster_not_initialised(client, _wipe_cluster_state):
 
 @pytest.mark.asyncio
 async def test_challenge_version_below_floor(admin_token, client, _wipe_cluster_state):
+    """A joiner older than the compat floor is refused.
+
+    The version here must stay BELOW settings.cluster_min_compatible_version.
+    It was "0.9.99", which was below the old 1.0.0-beta floor and is above the
+    current 0.9.0-beta one -- a hardcoded number that silently stopped testing
+    the gate when the floor moved. Derived from the setting instead.
+    """
+    from api.app.config import settings
+
+    major, minor, _ = settings.cluster_min_compatible_version.split("-")[0].split(".")
+    below = (
+        f"{int(major)}.{int(minor)}.0"
+        if int(minor) == 0
+        else f"{major}.{int(minor) - 1}.0"
+    )
+    if int(major) > 0 and int(minor) == 0:
+        below = f"{int(major) - 1}.0.0"
+
     await _init_cluster(admin_token, client)
     r = await client.post(
         "/api/v1/vault/cluster/challenge",
-        json={"node_uuid": "u", "rhorizon_version": "0.9.99"},
+        json={"node_uuid": "u", "rhorizon_version": below},
     )
     assert r.status_code == 409
     assert "below cluster floor" in r.json()["detail"]

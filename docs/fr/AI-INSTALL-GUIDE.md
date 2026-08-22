@@ -340,7 +340,7 @@ appel API depuis ses scripts et outils.
 
 ```bash
 curl http://localhost:8200/api/v1/vault/status
-# attendu : {"sealed": false, "version": "1.0.0-beta", ...}
+# attendu : {"sealed": false, "version": "0.9.0-beta", ...}
 ```
 
 Si `sealed` est `true`, quelque chose a foiré. Refaire l'étape 6.

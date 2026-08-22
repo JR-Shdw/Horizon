@@ -2,4 +2,4 @@
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 """rhorizon - CLI for rhorizon secrets manager."""
 
-__version__ = "1.0.0-beta"
+__version__ = "0.9.0-beta"

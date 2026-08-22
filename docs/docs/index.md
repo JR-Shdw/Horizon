@@ -77,6 +77,6 @@ and no Consul, etcd, or Raft dependency.
 |---|---|
 | Validation | Python and Rust tests, lint, dependency audit, image scan, and OS release lanes |
 | Platforms | Linux and BSD; see the [compatibility matrix](https://github.com/JR-Shdw/Horizon/blob/main/docs/COMPATIBILITY.md) for current evidence |
-| Latest stable | `v1.0.0-beta` |
+| Latest stable | `v0.9.0-beta` |
 | License | AGPL-3.0-or-later |
 | Maintainer | [shdw](mailto:horizon@resurgamus.com) |

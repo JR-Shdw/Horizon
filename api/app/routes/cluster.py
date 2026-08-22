@@ -985,7 +985,7 @@ def _version_tuple(v: str) -> tuple[int, int, int] | None:
     suffixes are dropped for the compat gate. A future version may adopt a
     proper PEP 440 / semver parser if the version scheme grows
     structure (RC tags, build metadata) ; the project is
-    on ``1.0.0-beta`` and exact-match-or-newer is enough.
+    on ``0.9.0-beta`` and exact-match-or-newer is enough.
     """
     m = _VERSION_RE.match(v.strip())
     if not m:

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Vault
     auto_seal_minutes: int = 0  # 0 = never auto-seal
-    version: str = "1.0.0-beta"
+    version: str = "0.9.0-beta"
     # Closed-catalog dynamic backend selection. This resolves to the repository
     # root in source and /app in the image, independent of process cwd.
     dynamic_modules_file: str = _default_dynamic_modules_file()
@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     # new configurations should use RH_DATABASE_HA_*.
     patroni_rest_urls: str = ""
     patroni_max_replica_lag_bytes: int = 16 * 1024 * 1024
-    cluster_min_compatible_version: str = "1.0.0-beta"
+    cluster_min_compatible_version: str = "0.9.0-beta"
     tls_enabled: bool = False
     # Stable address advertised by this node in HA membership and encoded in
     # its node-certificate IP SAN.  HA installers should always set this to

@@ -6,7 +6,72 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+## 0.9.0-beta - 2026-08-22
+
+First TAGGED release. See the note on the 2026-04-07 entry below for why the
+number goes down rather than up.
+
 ### Security
+
+- The hard fence now fires on every worker. Under a PostgreSQL blackout one
+  worker in five dropped its key material and the other four sat past a
+  terminal deadline with keys resident for the life of the process: the fence
+  was evaluated at the end of a heartbeat tick that began with an unbounded
+  database await, so a hung query meant it was never *reached*, and nothing
+  raised. It now runs in its own loop reading only a monotonic clock -- no
+  database, no peers -- so nothing can starve it. Measured 5 of 5 after, 1 of 5
+  before.
+- The heartbeat's database block is bounded by the authority TTL. A worker
+  parked in that await never re-renews either, and the kernel retransmits for
+  roughly fifteen minutes before erroring -- far past the fence -- so a blackout
+  that had already ended still walked workers to a permanent seal.
+- Agent request URLs percent-encode the secret name. A name arriving from the
+  environment containing `/`, `?`, `#` or `..` silently changed which URL was
+  requested. Bearer auth still enforced RBAC, so this was defence in depth
+  rather than an authentication bypass. Six call sites.
+
+### Fixes
+
+- A sealed vault no longer keeps an authority deadline it cannot renew. The
+  heartbeat returns early while sealed, so the deadline stayed frozen at its
+  lapsed value; any re-attach inherited it and the fence loop re-sealed the
+  worker before the heartbeat could refresh it. A node flapped between wholly
+  sealed and wholly active for minutes after a fence. FROZEN is a property of
+  the node, not of a worker -- all workers on a host now march together.
+- `primary_since` is readable. It was written on every promote and read
+  nowhere. Stamped with the PostgreSQL clock under the election lock, so it
+  moves at every failover, which makes it the referent a node needs to tell a
+  shared database outage from its own isolation. Published on
+  `/internal/ha/status`; nothing acts on it yet.
+
+### Documentation
+
+- `INSTALL.md` is a complete install reference -- every path in, verification,
+  upgrade, and the uninstall procedure, which was documented in no language. It
+  was also unreachable from anywhere in the docs.
+- Corrected claims a reader would have acted on: a quickstart that started the
+  operator/VPN stack (which cannot bind on a laptop) and continued over
+  plaintext HTTP; a PKI page documenting a superseded default algorithm while
+  omitting the verification recipe for the new one; compose resource limits
+  that disagreed with `docker-compose.yml`; a security tracker listing four
+  fixed issues as open, two of them high.
+- French documentation is at parity for the maintained set, plus new
+  translations of the compatibility matrix, disaster recovery, the two
+  supply-chain verification guides, and the BSD-native PostgreSQL HA design.
+
+### Known limitations
+
+- Peer-aware classification is not implemented. A node still cannot distinguish
+  a shared database outage from its own isolation, and the two want opposite
+  reactions. `primary_since` is the published input; the classifier is not
+  written.
+- `SECURITY-AUDIT`, `THREAT-MODEL` and `slsa-compliance` are English-only by
+  choice: a compliance document that drifts in translation is worse than one
+  that is not translated.
+- macOS Intel is unmeasured -- no free x86_64 darwin runner exists to replace
+  the retired image.
+
+### Security (earlier in this cycle)
 
 - TOTP counters are consumed atomically in PostgreSQL. A code accepted by one
   worker cannot be reused through another worker or HA node.
@@ -30,10 +95,19 @@ cadence; things ship when they're ready.
 - Cancelling an unseal request no longer releases its Argon2 memory slot while
   the derivation thread is still running.
 
-## 1.0.0-beta - 2026-04-07
+## 2026-04-07 - first usable version (never tagged)
 
-First usable version. Deployed on my own stack since then. API is
-considered stable under `/api/v1/vault/`.
+Recorded at the time as "1.0.0-beta". No git tag was ever cut and no artifact
+was ever published under that number, so nothing shipped as 1.0.0. The version
+string lived only in `settings.version` and in this file.
+
+Renumbered rather than left standing: the first real tagged release is
+0.9.0-beta above, and leaving a higher number here would have put the
+changelog in contradiction with every signed artifact and with semver ordering
+for anyone consuming them.
+
+Deployed on my own stack since this date. API considered stable under
+`/api/v1/vault/`.
 
 ### Vault core
 

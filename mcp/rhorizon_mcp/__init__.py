@@ -2,4 +2,4 @@
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 """rhorizon MCP server - exposes vault ops as MCP tools to LLM agents."""
 
-__version__ = "1.0.0b1"
+__version__ = "0.9.0b1"

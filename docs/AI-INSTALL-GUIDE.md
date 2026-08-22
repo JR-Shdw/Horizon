@@ -331,7 +331,7 @@ their scripts and tools.
 
 ```bash
 curl http://localhost:8200/api/v1/vault/status
-# expected: {"sealed": false, "version": "1.0.0-beta", ...}
+# expected: {"sealed": false, "version": "0.9.0-beta", ...}
 ```
 
 If `sealed` is `true`, something went wrong. Have them re-do Step 6.

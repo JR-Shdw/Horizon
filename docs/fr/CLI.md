@@ -34,7 +34,7 @@ Dépendances minimales : `typer` (commandes), `httpx` (client HTTP),
 
 ```bash
 rhorizon login http://10.0.0.20:8200
-# Connected to rhorizon 1.0.0-beta (sealed=False)
+# Connected to rhorizon 0.9.0-beta (sealed=False)
 # Token (rh_...): ********
 # Token saved.
 ```
@@ -68,7 +68,7 @@ Overrides via env (utile pour CI / scripts) :
 ```bash
 rhorizon status
 # Status:   UNSEALED
-# Version:  1.0.0-beta
+# Version:  0.9.0-beta
 # Uptime:   10h27m
 # 2FA:      none
 

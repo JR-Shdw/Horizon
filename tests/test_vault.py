@@ -20,7 +20,7 @@ async def test_status_sealed(client):
     assert r.status_code == 200
     data = r.json()
     assert data["sealed"] is True
-    assert data["version"] == "1.0.0-beta"
+    assert data["version"] == "0.9.0-beta"
     assert data["second_factor"] == "none"
     assert data["yubikeys_registered"] == 0
     assert data["totp_enabled"] is False

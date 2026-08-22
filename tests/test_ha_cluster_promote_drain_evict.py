@@ -303,9 +303,25 @@ async def test_promote_409_target_in_joining_state(admin_token, client):
 
 @pytest.mark.asyncio
 async def test_promote_409_version_below_floor(admin_token, client):
+    """A secondary older than the compat floor cannot be promoted.
+
+    The version must stay BELOW settings.cluster_min_compatible_version. It was
+    hardcoded "0.9.0", which was below the old 1.0.0-beta floor and EQUALS the
+    current 0.9.0-beta one -- so the test silently stopped exercising the gate
+    when the floor moved. Derived from the setting instead.
+    """
+    from api.app.config import settings
+
+    major, minor, _patch = settings.cluster_min_compatible_version.split("-")[0].split(
+        "."
+    )
+    below = (
+        f"{int(major) - 1}.0.0" if int(minor) == 0 else f"{major}.{int(minor) - 1}.0"
+    )
+
     await _init_cluster(client, admin_token)
     # Insert a secondary whose cluster_version sits below the configured floor.
-    await _insert_secondary("node-old", "10.0.0.1", version="0.9.0")
+    await _insert_secondary("node-old", "10.0.0.1", version=below)
     r = await client.post(
         "/api/v1/vault/cluster/promote/node-old",
         headers={"Authorization": f"Bearer {admin_token}"},
