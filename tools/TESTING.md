@@ -3,10 +3,10 @@
 Three tiers, because the full surface (8-OS VM matrix + arm64 + k8s + multi-node
 HA) cannot run on every save. Pick the tier that matches the feedback you need.
 
-> **Full coverage & where each tier runs (canonical):** the complete matrix —
+> **Full coverage & where each tier runs (canonical):** the complete matrix,
 > 8-OS VMs (FreeBSD / OpenBSD / NetBSD + Debian / Ubuntu / Rocky / openSUSE /
 > Arch), arm64/aarch64 (`.woodpecker/arch-matrix.yml`), clustering/HA, and which
-> node runs what (dev box / `node-1` CI runner / proxmox v9 cluster) — is
+> node runs what (dev box / `node-1` CI runner / proxmox v9 cluster), is
 > documented in sextant: `rhorizon/shared/test-matrix.md`.
 
 | Tier | Command | Runtime | Scope |
@@ -15,7 +15,7 @@ HA) cannot run on every save. Pick the tier that matches the feedback you need.
 | **T1 verify** | `make verify-local` | minutes | Full pytest + `rust-check-fast` + k8s smoke. Pre-push gate. |
 | **T2 matrix** | `make test-matrix` | 30+ min | OS VM matrix (`tools/test-vm.sh`, 8 OSes) + arm64 + k8s smoke. On-demand. |
 
-## T0 — watch (the "test on every modification" loop)
+## T0: watch (the "test on every modification" loop)
 
 ```
 make watch

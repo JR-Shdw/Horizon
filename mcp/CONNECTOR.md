@@ -77,14 +77,14 @@ Restart Codex after adding the server so its tools are loaded into the session.
 paths (opencode does **not** expand `~`).
 
 Both point at:
-- `RH_VAULT_URL` — your vault (`http://127.0.0.1:8200`, or `http://LAN-IP:8200`).
-- `RH_TOKEN_FILE` — the 0600 file holding the scoped token.
-- `RH_MCP_POLICY` — the policy file.
+- `RH_VAULT_URL`: your vault (`http://127.0.0.1:8200`, or `http://LAN-IP:8200`).
+- `RH_TOKEN_FILE`: the 0600 file holding the scoped token.
+- `RH_MCP_POLICY`: the policy file.
 
 ## Security notes
 
 - **Least privilege**: the connector token is `secrets:r` on named namespaces
-  only — no write, no token minting. Even if the MCP process leaks, blast
+  only. No write, no token minting. Even if the MCP process leaks, blast
   radius = reading those namespaces.
 - **Fail-closed**: no `policy.toml` → every request denied. Widen deliberately.
 - **Audit**: every read is recorded in the rhorizon audit chain with the token

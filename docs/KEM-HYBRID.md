@@ -26,7 +26,7 @@ that bar on its own.
 A hybrid KEM cert is an ordinary X.509 v3 certificate whose **subject public
 key** is the hybrid key and whose **signature** is produced by the namespace CA
 under its own algorithm (`ed25519`, `ml-dsa-65`, or `ed25519-mldsa65`). Subject
-algorithm != signature algorithm — the Workstream-2 split.
+algorithm != signature algorithm: the Workstream-2 split.
 
 ```
 subjectPublicKeyInfo
@@ -40,7 +40,7 @@ ExtendedKeyUsage absent  -- a KEM key does not do serverAuth/clientAuth
 ```
 
 - **Leg order is fixed** (X25519 first, ML-KEM second) and is part of the
-  combiner's domain separation — never reorder.
+  combiner's domain separation, so never reorder.
 - The OID is a **private-arc placeholder** (`62841.3.x` = hybrid-KEM branch),
   swappable to `draft-ietf-lamps-pq-composite-kem`'s assigned OID once it is an
   RFC. These certs are in-house interop only; general X.509 tooling will not
@@ -87,7 +87,7 @@ ss   = HKDF-Expand( HKDF-Extract(salt, IKM), info, 32 )     -- HKDF-SHA512
 
 The combiner is the only new cryptographic step and it runs in the Rust
 extension (`rhorizon_crypto.hybrid_kdf`), gated by a known-answer test whose
-expected value is computed independently by OpenSSL's HKDF-SHA512 — a genuine
+expected value is computed independently by OpenSSL's HKDF-SHA512, a genuine
 cross-implementation KAT, plus a Python-side parity test against the live wheel.
 The X25519 leg (keygen/DH/PKCS8) is OpenSSL via `cryptography`; ML-KEM is
 `fips203`. No home-made primitive.
@@ -114,7 +114,7 @@ ss = hybrid_kdf(ss_x25519, ss_mlkem, ct_x25519, ct_mlkem, pk_x25519, pk_mlkem, l
 
 Both sides compute the identical `ss`. ML-KEM's implicit rejection means a
 tampered `ct_mlkem` yields a deterministic pseudo-random `ss_mlkem` (never an
-error), so a manipulated ciphertext simply makes the two parties disagree — which
+error), so a manipulated ciphertext simply makes the two parties disagree, which
 surfaces the first time the derived key is used.
 
 ### Python helper
@@ -139,7 +139,7 @@ assert ss_send == ss_recv          # identical 32-byte shared secret
 
 ## Verifying the CA signature
 
-The hybrid subject key does not change how the CA signature is checked — verify
+The hybrid subject key does not change how the CA signature is checked. Verify
 it with the same in-house verifier as any other leaf of that CA algorithm
 (`ed25519` via `cryptography`, `ml-dsa-65` via `verify_ml_dsa`, composite via
 `pki_ca.verify_composite_cert`). See [PKI.md](PKI.md#verifying-a-leaf).

@@ -59,9 +59,9 @@ conserver un chemin de lecture pour les lignes et sauvegardes existantes.
 | Database HA | Clustering neutre vis-à-vis du fournisseur (basé Patroni), gating de santé des réplicas en streaming, rétention WAL bornée |
 | Coordination | Couche inter-conteneurs : identité cluster/nœud, JOIN bootstrap HMAC, machine à états de quarantaine, drain/evict/promote |
 | Partage de clé | Parts Shamir du master distribuées, workers master/follower par rôle, reconstruction automatique au failover |
-| Modèle d'autorité | Deux deadlines indépendantes, pas une : la **fraîcheur d'autorité DB** (tout nœud — un secondaire incapable de lire l'état canonique ne peut plus prouver qu'il est encore secondaire) et le **bail primary** (la revendication d'écriture singleton, primary uniquement). Les deux évaluées contre le `clock_timestamp()` de PostgreSQL, jamais contre une horloge hôte |
+| Modèle d'autorité | Deux deadlines indépendantes, pas une : la **fraîcheur d'autorité DB** (tout nœud : un secondaire incapable de lire l'état canonique ne peut plus prouver qu'il est encore secondaire) et le **bail primary** (la revendication d'écriture singleton, primary uniquement). Les deux évaluées contre le `clock_timestamp()` de PostgreSQL, jamais contre une horloge hôte |
 | État FROZEN | Perdre l'autorité DB suspend le service sans larguer les clés. Exprimé comme une deadline recalculée à la lecture, donc une boucle de rafraîchissement morte échoue fermé au lieu de laisser un nœud servir. Un hard fence scelle à `lease_ttl + frozen_max`, bornant le temps qu'un nœud possiblement périmé passe assis sur de la matière clé. Ce fence tourne dans sa propre boucle, ne lisant qu'une horloge monotone : évalué en fin de tick base de données, il n'était jamais *atteint* quand la requête pendait, et une boucle pendue n'est pas une boucle morte, donc la supervision ne l'attrapait pas. Les pairs peuvent acheter du temps à un nœud gelé, jamais le droit de servir |
-| Transport | CA de cluster avec mTLS par nœud ; `/internal/ha/status` répond avec PostgreSQL injoignable (aucune I/O, aucune auth — un endpoint qui a besoin de l'autorité ne peut pas rendre compte de sa perte) |
+| Transport | CA de cluster avec mTLS par nœud ; `/internal/ha/status` répond avec PostgreSQL injoignable (aucune I/O, aucune auth : un endpoint qui a besoin de l'autorité ne peut pas rendre compte de sa perte) |
 | Prévu | Classification peer-aware : aujourd'hui un nœud ne peut pas distinguer une panne DB **partagée** de son **propre** isolement, qui appellent des réactions opposées (tenir vs sceller). Les pairs contribuent des observations, jamais de l'autorité |
 
 ### Durcissement mémoire et audit
@@ -105,15 +105,15 @@ de clé qui l'enveloppe) de vivre dans du matériel, donc d'être déballée *pa
 périphérique* et de ne pas être dérivable d'un mot de passe fuité seul.
 
 **Limite honnête (annoncée d'emblée) :** ça protège la **racine**. Ça ne rend
-*pas* la mémoire du process immunisée — les clés de travail dérivées
+*pas* la mémoire du process immunisée : les clés de travail dérivées
 (`dek_key`, etc.) doivent toujours entrer en RAM pour chiffrer/déchiffrer à
 débit ; router chaque opération par secret à travers un HSM est trop lent pour
 un vault généraliste. C'est la même limite que le seal-wrap dans les vaults
 commerciaux. Le gain, c'est l'ancrage matériel et la suppression de l'exposition
-« la master key est en RAM comme unique racine » — pas « aucune matière clé
+« la master key est en RAM comme unique racine », pas « aucune matière clé
 jamais en RAM ».
 
-**Backends open-source auto-hébergés uniquement** (pas de KMS cloud — une
+**Backends open-source auto-hébergés uniquement** (pas de KMS cloud, une
 dépendance SaaS est hors doctrine). Implémenté comme un fournisseur de seal
 enfichable, comme les modes 2FA, et **composable avec Shamir** (présence
 matérielle *et* M-parmi-N) :
@@ -124,7 +124,7 @@ matérielle *et* M-parmi-N) :
 | HSM PKCS#11 | Nitrokey HSM 2 / YubiHSM 2 | `cryptoki` (Rust), OpenSC ; KEK tenue dans le périphérique, master déballée dans le HSM |
 | YubiKey PIV | réutilise les YubiKeys existantes | OpenSC/PIV ; une clé de slot enveloppe la master |
 
-**Interface de fournisseur de seal proposée** (esquisse — vit dans la frontière
+**Interface de fournisseur de seal proposée** (esquisse, vit dans la frontière
 crypto Rust pour que les octets de clé déballés ne remontent jamais en Python) :
 
 ```python
@@ -138,13 +138,13 @@ class SealProvider(Protocol):
 ```
 
 Le défaut reste `seal_mode = password` ; le matériel est opt-in et compatible
-octet à octet (seule change la façon dont la master/KEK est protégée — le
+octet à octet (seule change la façon dont la master/KEK est protégée ; le
 chiffré des secrets stockés est intact).
 
 **Les deux parties difficiles (travail de conception, pas de plomberie) :**
 - **Récupération.** Un périphérique mort ou perdu ne doit pas faire perdre le
   vault. Le matériel est *un* facteur, branché sur le chemin Shamir + recovery
-  handle existant — jamais un point de défaillance unique.
+  handle existant, jamais un point de défaillance unique.
 - **CI sans matériel.** `swtpm` (TPM logiciel) + `SoftHSM2` donnent une
   couverture TPM/PKCS#11 dans le pipeline ; valider contre une vraie
   Nitrokey/YubiKey avant de livrer.
@@ -155,7 +155,7 @@ PIV (réutiliser le matériel existant).
 
 ### Directions candidates (non engagées)
 
-Emplacement pour les priorités post-lancement — à remplir à partir des retours
+Emplacement pour les priorités post-lancement, à remplir à partir des retours
 des premiers utilisateurs.
 
 ---

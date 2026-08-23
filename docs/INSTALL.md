@@ -35,13 +35,13 @@ Laptop/personal setup with safe defaults (localhost bind, `home` tier, one
 prompt at most). Both flavors install the vault, mint a scoped MCP access key
 for your AI assistant, and print a copy-paste config block.
 
-**Container (Docker or Podman) — macOS, Windows, Linux:**
+**Container (Docker or Podman) on macOS, Windows, Linux:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JR-Shdw/Horizon/main/tools/quickstart-laptop.sh | bash
 ```
 
-**Native (no container) — Linux, WSL2:**
+**Native (no container) on Linux, WSL2:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JR-Shdw/Horizon/main/tools/quickstart-laptop-native.sh | bash
@@ -63,12 +63,12 @@ sh tools/install.sh [--mode auto|docker|user|system] [--tier home|smb|heavy|supe
 
 | Mode | Runs as | What you get |
 |---|---|---|
-| `auto` (default) | — | Docker/Podman if present, else native `system` (root) or `user` (non-root) |
+| `auto` (default) | n/a | Docker/Podman if present, else native `system` (root) or `user` (non-root) |
 | `docker` | container | Compose stack (Docker or Podman auto-detected) |
 | `user` | your user | Native, XDG dirs, `systemd --user` (nohup fallback), no root service |
 | `system` | root | Native, FHS dirs, systemd-system / rc.d, SELinux/AppArmor confinement |
 
-**Tiers** (how big) — one knob for both container and native:
+**Tiers** (how big): one knob for both container and native:
 
 | Tier | Workers | Total RAM |
 |---|---|---|

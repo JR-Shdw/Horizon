@@ -59,10 +59,10 @@ branch-freedom by disassembly. So the assurance here is different in kind:
   known-answer vectors and Project Wycheproof vectors
   (`api/rust/tests/vectors/`, consumed by `cargo test` -
   `ml_dsa_65_nist_acvp_sigver_kat` / `ml_dsa_65_wycheproof_external_verify`)
-  — a supply-chain swap or a non-conformant build trips the test.
+  A supply-chain swap or a non-conformant build trips the test.
   Separately, and not CI-automated: certs signed with `ml-dsa-65` are
   documented to interoperate with OpenSSL 3.5+/`cryptography` 49+ standard
-  tooling (`docs/PKI.md`) — an operator-runnable interop claim, verified by
+  tooling (`docs/PKI.md`), an operator-runnable interop claim, verified by
   running `openssl verify`/`cryptography` against a generated cert, not a
   build-time gate. (The automated OpenSSL cross-check that *does* run in CI,
   `hybrid_kdf_openssl_kat`, covers the unrelated X25519+ML-KEM hybrid KDF

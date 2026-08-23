@@ -29,7 +29,7 @@ hybride et ne satisfait pas cette barre à lui seul.
 Un cert KEM hybride est un certificat X.509 v3 ordinaire dont la **clé publique
 de sujet** est la clé hybride et dont la **signature** est produite par la CA du
 namespace sous son propre algorithme (`ed25519`, `ml-dsa-65`, ou
-`ed25519-mldsa65`). Algorithme de sujet != algorithme de signature — la
+`ed25519-mldsa65`). Algorithme de sujet != algorithme de signature : la
 séparation du Workstream 2.
 
 ```
@@ -44,7 +44,7 @@ ExtendedKeyUsage absent  -- une clé KEM ne fait pas serverAuth/clientAuth
 ```
 
 - **L'ordre des jambes est fixe** (X25519 d'abord, ML-KEM ensuite) et fait
-  partie de la séparation de domaine du combineur — ne jamais réordonner.
+  partie de la séparation de domaine du combineur, donc ne jamais réordonner.
 - L'OID est un **placeholder d'arc privé** (`62841.3.x` = branche KEM hybride),
   interchangeable avec l'OID assigné de `draft-ietf-lamps-pq-composite-kem` une
   fois qu'il sera un RFC. Ces certs sont en interop interne uniquement ;
@@ -95,7 +95,7 @@ ss   = HKDF-Expand( HKDF-Extract(salt, IKM), info, 32 )     -- HKDF-SHA512
 Le combineur est la seule nouvelle étape cryptographique et il tourne dans
 l'extension Rust (`rhorizon_crypto.hybrid_kdf`), verrouillé par un test à réponse
 connue (KAT) dont la valeur attendue est calculée indépendamment par le
-HKDF-SHA512 d'OpenSSL — un vrai KAT inter-implémentations, plus un test de parité
+HKDF-SHA512 d'OpenSSL, un vrai KAT inter-implémentations, plus un test de parité
 côté Python contre le wheel vivant. La jambe X25519 (keygen/DH/PKCS8) est OpenSSL
 via `cryptography` ; le ML-KEM est `fips203`. Aucune primitive maison.
 
@@ -122,7 +122,7 @@ ss = hybrid_kdf(ss_x25519, ss_mlkem, ct_x25519, ct_mlkem, pk_x25519, pk_mlkem, l
 Les deux côtés calculent le `ss` identique. Le rejet implicite de ML-KEM signifie
 qu'un `ct_mlkem` altéré produit un `ss_mlkem` pseudo-aléatoire déterministe
 (jamais une erreur), donc un ciphertext manipulé fait simplement diverger les
-deux parties — ce qui se révèle à la première utilisation de la clé dérivée.
+deux parties, ce qui se révèle à la première utilisation de la clé dérivée.
 
 ### Helper Python
 
@@ -147,7 +147,7 @@ assert ss_send == ss_recv          # secret partagé identique de 32 octets
 ## Vérifier la signature de la CA
 
 La clé de sujet hybride ne change pas la manière dont la signature de la CA est
-vérifiée — vérifiez-la avec le même vérifieur interne que n'importe quel autre
+vérifiée : vérifiez-la avec le même vérifieur interne que n'importe quel autre
 leaf de cet algorithme de CA (`ed25519` via `cryptography`, `ml-dsa-65` via
 `verify_ml_dsa`, composite via `pki_ca.verify_composite_cert`). Voir
 [PKI.md](PKI.md#vérifier-un-leaf).

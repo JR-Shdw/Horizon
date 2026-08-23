@@ -88,7 +88,7 @@ libération. Elle avertit quand le swap est non chiffré ou que sa protection ne
 peut pas être vérifiée. Un swap chiffré, zram, ou un hôte sans swap n'ont pas
 besoin de verrouillage mémoire pour cette menace. Mettez
 `RH_MEMORY_LOCK_MODE=required` pour faire échouer fermé le verrouillage des
-buffers — et le verrouillage du process entier quand le swap est exposé. Le
+buffers, et le verrouillage du process entier quand le swap est exposé. Le
 statut séparé `process_memory_protection` indique si `mlockall` a protégé les
 pages des secrets servis.
 

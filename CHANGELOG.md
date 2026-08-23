@@ -8,8 +8,7 @@ cadence; things ship when they're ready.
 
 ## 0.9.0-beta - 2026-08-22
 
-First TAGGED release. See the note on the 2026-04-07 entry below for why the
-number goes down rather than up.
+First tagged release.
 
 ### Security
 

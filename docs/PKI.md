@@ -47,7 +47,7 @@ downgrade hole and is rejected).
   (`1.3.6.1.4.1.62841.2.1`, placeholder).
 - **Interop caveat.** Because the OID is private and composite-cert standards are
   still moving, these certs are for **in-house verifiers only** (the vault CLI /
-  `pki_ca.verify_composite_cert`) — they do **not** interoperate with external
+  `pki_ca.verify_composite_cert`); they do **not** interoperate with external
   X.509/TLS tooling. The OID is swappable to the draft's assigned
   `id-MLDSA65-Ed25519` once it is an RFC.
 - **Custody.** The CA holds both private keys (Ed25519 PKCS8 + the 32-byte ML-DSA
@@ -60,7 +60,7 @@ downgrade hole and is rejected).
 The signature axis above protects *authenticity*. A separate axis protects
 *confidentiality*: a **KEM certificate** carries a Key-Encapsulation-Mechanism
 public key as its subject key, used to establish a shared secret. The two axes
-are independent — a KEM cert's subject key is an ML-KEM key, while its signature
+are independent: a KEM cert's subject key is an ML-KEM key, while its signature
 is produced by the namespace CA under *its* algorithm (`ed25519`, `ml-dsa-65`, or
 the composite hybrid). So **subject-key algorithm != signature algorithm**, unlike
 the signature certs above where they coincide.
@@ -71,7 +71,7 @@ the signature certs above where they coincide.
   serverAuth/clientAuth). ML-KEM-768 matches the `X25519MLKEM768` set already used
   in the agent's TLS handshake.
 - **Why a KEM and not just a PQ signature.** `X25519` is a KEM and `ML-DSA` a
-  signature — different functions, they cannot be hybridised together, and a PQ
+  signature. They are different functions, cannot be hybridised together, and a PQ
   *signature* does not make a *key exchange* quantum-safe. Confidentiality against
   a future quantum adversary ("harvest now, decrypt later") needs a PQ **KEM**;
   that is what this cert provides. Pure ML-KEM (`kem_mode=ml-kem`) is PQ but *not
@@ -96,11 +96,11 @@ the signature certs above where they coincide.
 `kem_mode=x25519-ml-kem` upgrades the KEM cert to a **hybrid** subject key: a
 classical `X25519` leg **and** the `ML-KEM-768` leg, combined so the shared
 secret stays secure as long as *either* leg is unbroken. This is the ANSSI/BSI
-requirement — both agencies mandate hybridation because PQC alone is "not mature
+requirement: both agencies mandate hybridation because PQC alone is "not mature
 enough to solely ensure security", and pure ML-KEM alone would fall to a future
 classical break of the standard (or an implementation flaw in the young PQ code).
 
-- **Subject key.** A `SEQUENCE SIZE (2) OF BIT STRING` — `(x25519_pub 32 B,
+- **Subject key.** A `SEQUENCE SIZE (2) OF BIT STRING`, `(x25519_pub 32 B,
   mlkem768_pub 1184 B)`, same DER shape as the composite signature public key.
   Leg order is fixed (X25519 first) and *is* the combiner's domain separator.
   Its own OID lives under the private arc `1.3.6.1.4.1.62841.3.1`
@@ -114,11 +114,11 @@ classical break of the standard (or an implementation flaw in the young PQ code)
   resistance. The combiner runs in the Rust extension (`hybrid_kdf`), gated by a
   known-answer test cross-checked against OpenSSL's HKDF; no home-made primitive.
 - **Crypto sourcing.** The X25519 leg (keygen, DH, PKCS8) uses `cryptography`
-  (OpenSSL) — the same audited library as the `ed25519` path, **no new Rust
+  (OpenSSL), the same audited library as the `ed25519` path, **no new Rust
   crate**. The ML-KEM leg reuses the Cut-1 `fips203` bindings.
 - **Custody.** Still no new server-side surface. The leaf carries **two** return-
-  once private key blocks — an X25519 PKCS8 block followed by the ML-KEM
-  `expandedKey` block — shown only on issue, never stored. The holder feeds a
+  once private key blocks: an X25519 PKCS8 block followed by the ML-KEM
+  `expandedKey` block, shown only on issue, never stored. The holder feeds a
   peer's `(ct_x25519, ct_mlkem)` back through the combiner to recover the secret.
 - **When to use which.** `ml-kem` is enough where you only need PQ confidentiality
   and control both ends; prefer `x25519-ml-kem` whenever an external policy

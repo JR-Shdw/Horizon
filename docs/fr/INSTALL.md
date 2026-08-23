@@ -4,7 +4,7 @@ La référence d'installation complète : tous les chemins d'entrée supportés,
 comment vérifier que ça a marché, comment mettre à jour, et comment désinstaller.
 
 L'« Installation en 5 minutes » du README est le chemin rapide uniquement. Il
-n'est délibérément **pas** complet — il fait tourner un laptop et s'arrête là.
+n'est délibérément **pas** complet : il fait tourner un laptop et s'arrête là.
 C'est cette page qui couvre le reste.
 
 | Vous voulez | Allez à |
@@ -35,13 +35,13 @@ Setup laptop/perso avec défauts sûrs (bind localhost, tier `home`, une questio
 au maximum). Les deux variantes installent le vault, mintent une clé d'accès MCP
 scopée pour votre assistant IA, et impriment un bloc de config à coller.
 
-**Conteneur (Docker ou Podman) — macOS, Windows, Linux :**
+**Conteneur (Docker ou Podman) sur macOS, Windows, Linux :**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JR-Shdw/Horizon/main/tools/quickstart-laptop.sh | bash
 ```
 
-**Natif (sans conteneur) — Linux, WSL2 :**
+**Natif (sans conteneur) sur Linux, WSL2 :**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JR-Shdw/Horizon/main/tools/quickstart-laptop-native.sh | bash
@@ -63,12 +63,12 @@ sh tools/install.sh [--mode auto|docker|user|system] [--tier home|smb|heavy|supe
 
 | Mode | Tourne en | Ce que vous obtenez |
 |---|---|---|
-| `auto` (défaut) | — | Docker/Podman si présent, sinon natif `system` (root) ou `user` (non-root) |
+| `auto` (défaut) | n/a | Docker/Podman si présent, sinon natif `system` (root) ou `user` (non-root) |
 | `docker` | conteneur | Stack Compose (Docker ou Podman auto-détecté) |
 | `user` | votre user | Natif, dirs XDG, `systemd --user` (fallback nohup), pas de service root |
 | `system` | root | Natif, dirs FHS, systemd-system / rc.d, confinement SELinux/AppArmor |
 
-**Tiers** (quelle taille) — un seul bouton pour conteneur et natif :
+**Tiers** (quelle taille) : un seul bouton pour conteneur et natif :
 
 | Tier | Workers | RAM totale |
 |---|---|---|
@@ -115,7 +115,7 @@ changé `--dir` ou `--api-port`.
 
 ## Après l'installation
 
-Le vault est **scellé** à chaque boot, par design — un reboot ne laisse aucun
+Le vault est **scellé** à chaque boot, par design : un reboot ne laisse aucun
 secret lisible tant qu'un humain n'a pas déverrouillé. Déverrouillez une fois,
 et il reste ouvert pour vos crons et agents jusqu'au prochain reboot ou un seal
 explicite.
@@ -129,8 +129,8 @@ et le modèle de protection mémoire.
 
 | Chemin | Procédure |
 |---|---|
-| Conteneur | [`DEPLOYMENT.md` section 10](DEPLOYMENT.md#10-mises-à-jour) — tirer les nouvelles images et recréer |
-| Natif | [`INSTALL-NATIVE.md` section 10](INSTALL-NATIVE.md#10-procédure-de-mise-à-jour) — relancer l'installeur par-dessus l'install existante |
+| Conteneur | [`DEPLOYMENT.md` section 10](DEPLOYMENT.md#10-mises-à-jour) : tirer les nouvelles images et recréer |
+| Natif | [`INSTALL-NATIVE.md` section 10](INSTALL-NATIVE.md#10-procédure-de-mise-à-jour) : relancer l'installeur par-dessus l'install existante |
 
 Les deux conservent vos données : la base, le journal d'audit et le mot de passe
 maître sont intacts. Le vault revient **scellé**, comme après n'importe quel
@@ -140,7 +140,7 @@ redémarrage.
 
 Les installs natives ont leur reverser dédié. Il reprend la même dérivation de
 chemins qu'`install-native.sh`, garde chaque étape sur une vérification de
-présence, et peut être relancé sans risque — y compris sur une install à moitié
+présence, et peut être relancé sans risque, y compris sur une install à moitié
 faite :
 
 ```bash
@@ -149,14 +149,14 @@ sh tools/uninstall-native.sh [--mode user|system] [--purge-db] [--yes] [--dry-ru
 
 | Option | Effet |
 |---|---|
-| `--mode user\|system` | Quelle install défaire. Défaut `system` — passez `user` pour une install `--mode user`, sinon il cherchera aux mauvais endroits |
+| `--mode user\|system` | Quelle install défaire. Défaut `system`. Passez `user` pour une install `--mode user`, sinon il cherchera aux mauvais endroits |
 | `--purge-db` | **Supprime aussi le rôle et la base PostgreSQL.** Sans cette option les données survivent à la désinstallation |
 | `--yes` / `-y` | Saute la confirmation |
 | `--dry-run` | Affiche ce qui serait supprimé et ne change rien |
 
 Lancez-le d'abord avec `--dry-run`. Sans `--purge-db` vos secrets restent dans
 PostgreSQL et une réinstallation les retrouve ; avec, ils sont perdus et seule
-une sauvegarde les ramène — voir
+une sauvegarde les ramène. Voir
 [`DISASTER-RECOVERY.md`](DISASTER-RECOVERY.md).
 
 Pour une install conteneur, supprimez la stack et ses volumes depuis le

@@ -34,25 +34,25 @@ flowchart TB
 ```
 
 nginx est choisi quand le driver de l'OS peut en superviser un, et seulement
-s'il sait faire HTTP/2 — c'est toute la justification du saut supplémentaire,
+s'il sait faire HTTP/2 : c'est toute la justification du saut supplémentaire,
 puisque uvicorn sert déjà du HTTPS. Sinon uvicorn termine directement : il n'a
 aucune implémentation HTTP/2 et n'annonce même pas d'ALPN, donc tous les
 clients retombent en HTTP/1.1.
 
 **Le post-quantique est par-voie et dépend de ce que chaque binaire lie, pas de
 la réputation de l'OS.** ML-KEM exige OpenSSL >= 3.5. uvicorn hérite sa liste
-de groupes de l'OpenSSL contre lequel son interpréteur a été construit —
+de groupes de l'OpenSSL contre lequel son interpréteur a été construit,
 hérité, pas configuré, donc impossible à affirmer comme on peut le faire avec
 le `ssl_ecdh_curve` de nginx.
 
 | Voie | Termine à | HTTP/2 | Post-quantique |
 |---|---|---|---|
-| OpenBSD, nginx packagé | uvicorn | non | **oui** — eopenssl 3.5 via CPython [^obsd] |
-| FreeBSD, nginx packagé | nginx | oui | **non** — OpenSSL de base 3.0.20 [^fbsd] |
-| N'importe quel BSD, `tools/build-nginx-bsd.sh` | nginx | oui | **oui** — les trois mesurés |
-| Debian 13 (trixie) | nginx | oui | **oui** — OpenSSL 3.5.6 [^deb] |
+| OpenBSD, nginx packagé | uvicorn | non | **oui**, eopenssl 3.5 via CPython [^obsd] |
+| FreeBSD, nginx packagé | nginx | oui | **non**, OpenSSL de base 3.0.20 [^fbsd] |
+| N'importe quel BSD, `tools/build-nginx-bsd.sh` | nginx | oui | **oui**, les trois mesurés |
+| Debian 13 (trixie) | nginx | oui | **oui**, OpenSSL 3.5.6 [^deb] |
 | Autre Linux | nginx | oui | si la libssl de la distro >= 3.5 (non mesuré) |
-| NetBSD 10.1, nginx packagé | nginx | oui | **non** — OpenSSL de base 3.0.12 [^nbsd] |
+| NetBSD 10.1, nginx packagé | nginx | oui | **non**, OpenSSL de base 3.0.12 [^nbsd] |
 | N'importe quelle voie, `--no-nginx` | uvicorn | non | ce que l'interpréteur lie |
 
 [^obsd]: Mesuré, pas supposé. Sur une install complète sur OpenBSD 7.8, le
@@ -66,7 +66,7 @@ notre côté plutôt qu'une limite de FreeBSD. La base est OpenSSL 3.0.20 et le
 nginx du pkg la lie (`ldd` -> `/usr/lib/libssl.so.30`) ; ML-KEM exige 3.5+.
 Mais `openssl35-3.5.7` est dans pkg et liste bien `X25519MLKEM768`. nginx est
 quand même retenu ici plutôt que décliné, parce que le `python312` packagé lie
-la même libssl de base — donc uvicorn n'a pas non plus de post-quantique, et
+la même libssl de base, donc uvicorn n'a pas non plus de post-quantique, et
 refuser nginx perdrait HTTP/2 sans rien gagner. Lancez
 `tools/build-nginx-bsd.sh` pour obtenir les deux. À comparer avec OpenBSD, où
 décliner nginx préserve réellement le PQ.
@@ -93,7 +93,7 @@ rejet retombe sur la liste classique, puis sur l'omission complète de
 parce que nginx peut lier une libssl sans rapport avec l'`openssl(1)` du `PATH`.
 
 La troisième étape n'est pas de la paranoïa : le nginx packagé d'OpenBSD lie
-LibreSSL et rejette même la liste classique, nommément —
+LibreSSL et rejette même la liste classique, nommément :
 `SSL_CTX_set1_curves_list("X25519:secp256r1") failed`. La *syntaxe* des groupes
 n'est pas portable, donc omettre la directive est la seule forme universellement
 valide. Si tous les rendus sont rejetés, l'installeur garde TLS au niveau
@@ -102,7 +102,7 @@ d'uvicorn plutôt que d'échouer.
 ### Obtenir le post-quantique sur les BSD
 
 Aucun des nginx packagés des BSD ne sait faire ML-KEM, pour des raisons
-différentes, et sur un vault ça compte dès maintenant — harvest-now-decrypt-later
+différentes, et sur un vault ça compte dès maintenant : harvest-now-decrypt-later
 est une menace présente.
 
 Le nginx packagé d'OpenBSD lie la LibreSSL de base, qui n'a pas ML-KEM du tout,
@@ -112,7 +112,7 @@ HTTP/2, donc le driver pose `RH_NGINX_REQUIRE_PQ=1` et l'installeur le décline.
 
 FreeBSD est le piège inverse : là-bas nginx a HTTP/2 mais lie l'OpenSSL 3.0 de
 base, et son python aussi, donc *rien* sur cette voie n'a de post-quantique par
-défaut. Il ne pose délibérément pas `RH_NGINX_REQUIRE_PQ` — décliner nginx
+défaut. Il ne pose délibérément pas `RH_NGINX_REQUIRE_PQ` : décliner nginx
 abandonnerait HTTP/2 pour un repli tout aussi non-PQ.
 
 Les deux se corrigent de la même façon, en liant nginx contre un OpenSSL qui a
@@ -145,7 +145,7 @@ donne qu'un. Décidez à partir de la menace et de la charge, pas de l'OS :
 `--pq-nginx` est opt-in plutôt que défaut parce que c'est un build source de
 quelques minutes, pas une install de paquet. C'est un no-op sur les voies qui
 ont déjà le post-quantique, et il avertit au lieu d'échouer si le build ne
-réussit pas — le nginx packagé sert quand même HTTP/2 dans ce cas.
+réussit pas, car le nginx packagé sert quand même HTTP/2 dans ce cas.
 
 Vérifié sur OpenBSD 7.8 avec eopenssl 3.5.4 et nginx 1.30.4 : `ldd` montre
 `eopenssl35/libssl.so.37.0`, ALPN négocie `h2`, et le groupe TLS 1.3 est

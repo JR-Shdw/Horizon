@@ -1,8 +1,8 @@
 # Cluster HA
 
-Pour la cible de production complète — un edge HTTP/2 logique, trois API,
+Pour la cible de production complète, à savoir un edge HTTP/2 logique, trois API,
 trois membres Database HA, convergence workers, retries sûrs, audit asynchrone
-et chemin d'upgrade — commencer par la
+et chemin d'upgrade, commencer par la
 [Référence HA de production](HA-PRODUCTION-REFERENCE.md).
 
 HA multi-hôte native : un ensemble de conteneurs rhorizon qui coordonnent leur

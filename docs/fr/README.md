@@ -92,7 +92,7 @@ l'historique du shell, ni dans le contrôle de version.
 
 L'installeur affiche aussi deux lignes à ajouter à votre profil shell. Le
 fichier de CA est ce qui rend le certificat généré digne de confiance pour le
-CLI et les agents `rh-*` — sans lui ils refusent de se connecter, à juste
+CLI et les agents `rh-*`. Sans lui ils refusent de se connecter, à juste
 titre, et il n'existe pas d'option skip-verify :
 
 ```bash
@@ -101,8 +101,8 @@ export RH_CA_FILE=~/rhorizon/certs/cert.pem
 ```
 
 Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md). La référence
-d'installation complète — tous les chemins, vérification, mise à jour,
-désinstallation — est dans [`docs/fr/INSTALL.md`](INSTALL.md).
+d'installation complète (tous les chemins, vérification, mise à jour,
+désinstallation) est dans [`docs/fr/INSTALL.md`](INSTALL.md).
 
 ---
 

@@ -22,7 +22,7 @@ L'algorithme de signature de la CA est choisi une fois par namespace, à l'init 
 
 Le défaut est délibérément l'hybride : c'est le seul des trois à satisfaire
 l'hybridation ANSSI/BSI. La contrepartie, c'est que les certs composites se
-vérifient **en interne uniquement** (OID privé) — si le consommateur est une
+vérifient **en interne uniquement** (OID privé). Si le consommateur est une
 stack TLS standard, initialisez ce namespace en `ed25519` à la place.
 
 Les certificats ML-DSA sont produits par le signeur Rust intégré (`fips204`) et
@@ -49,7 +49,7 @@ rejetée).
   (`1.3.6.1.4.1.62841.2.1`, placeholder).
 - **Réserve d'interop.** Parce que l'OID est privé et que les standards de certs
   composites bougent encore, ces certs sont pour **vérifieurs internes uniquement**
-  (le CLI du coffre / `pki_ca.verify_composite_cert`) — ils **n'interopèrent pas**
+  (le CLI du coffre / `pki_ca.verify_composite_cert`) ; ils **n'interopèrent pas**
   avec l'outillage X.509/TLS externe. L'OID est interchangeable avec l'
   `id-MLDSA65-Ed25519` assigné du draft une fois qu'il sera un RFC.
 - **Custody.** La CA détient les deux clés privées (PKCS8 Ed25519 + la seed
@@ -63,7 +63,7 @@ rejetée).
 L'axe signature ci-dessus protège l'*authenticité*. Un axe séparé protège la
 *confidentialité* : un **certificat KEM** porte une clé publique de mécanisme
 d'encapsulation de clé comme clé de sujet, utilisée pour établir un secret
-partagé. Les deux axes sont indépendants — la clé de sujet d'un cert KEM est une
+partagé. Les deux axes sont indépendants : la clé de sujet d'un cert KEM est une
 clé ML-KEM, tandis que sa signature est produite par la CA du namespace sous *son*
 algorithme (`ed25519`, `ml-dsa-65`, ou l'hybride composite). Donc **algorithme de
 clé de sujet != algorithme de signature**, contrairement aux certs de signature
@@ -75,7 +75,7 @@ ci-dessus où ils coïncident.
   ne fait pas serverAuth/clientAuth). ML-KEM-768 correspond au jeu
   `X25519MLKEM768` déjà utilisé dans le handshake TLS de l'agent.
 - **Pourquoi un KEM et pas juste une signature PQ.** `X25519` est un KEM et
-  `ML-DSA` une signature — fonctions différentes, ils ne peuvent pas être
+  `ML-DSA` une signature : fonctions différentes, ils ne peuvent pas être
   hybridés ensemble, et une *signature* PQ ne rend pas un *échange de clé*
   résistant au quantique. La confidentialité face à un futur adversaire quantique
   (« harvest now, decrypt later ») nécessite un **KEM** PQ ; c'est ce que ce cert
@@ -103,12 +103,12 @@ ci-dessus où ils coïncident.
 `kem_mode=x25519-ml-kem` fait passer le cert KEM à une clé de sujet **hybride** :
 une jambe `X25519` classique **et** la jambe `ML-KEM-768`, combinées pour que le
 secret partagé reste sûr tant qu'*une* des jambes n'est pas cassée. C'est
-l'exigence ANSSI/BSI — les deux agences imposent l'hybridation parce que la PQC
+l'exigence ANSSI/BSI : les deux agences imposent l'hybridation parce que la PQC
 seule « n'est pas assez mature pour assurer seule la sécurité », et le ML-KEM seul
 tomberait face à une future cassure classique du standard (ou une faille
 d'implémentation dans le jeune code PQ).
 
-- **Clé de sujet.** Un `SEQUENCE SIZE (2) OF BIT STRING` — `(x25519_pub 32 o,
+- **Clé de sujet.** Un `SEQUENCE SIZE (2) OF BIT STRING`, `(x25519_pub 32 o,
   mlkem768_pub 1184 o)`, même forme DER que la clé publique de signature
   composite. L'ordre des jambes est fixe (X25519 d'abord) et *est* le séparateur
   de domaine du combineur. Son propre OID vit sous l'arc privé
@@ -123,11 +123,11 @@ d'implémentation dans le jeune code PQ).
   (`hybrid_kdf`), verrouillé par un test à réponse connue recoupé contre le HKDF
   d'OpenSSL ; aucune primitive maison.
 - **Sourcing crypto.** La jambe X25519 (keygen, DH, PKCS8) utilise `cryptography`
-  (OpenSSL) — la même bibliothèque auditée que le chemin `ed25519`, **aucun
+  (OpenSSL), la même bibliothèque auditée que le chemin `ed25519`, **aucun
   nouveau crate Rust**. La jambe ML-KEM réutilise les bindings `fips203` du Cut 1.
 - **Custody.** Toujours aucune nouvelle surface côté serveur. Le leaf porte
-  **deux** blocs de clé privée rendus-une-fois — un bloc PKCS8 X25519 suivi du
-  bloc `expandedKey` ML-KEM — affichés seulement à l'émission, jamais stockés. Le
+  **deux** blocs de clé privée rendus-une-fois : un bloc PKCS8 X25519 suivi du
+  bloc `expandedKey` ML-KEM, affichés seulement à l'émission, jamais stockés. Le
   détenteur repasse le `(ct_x25519, ct_mlkem)` d'un pair dans le combineur pour
   récupérer le secret.
 - **Lequel utiliser.** `ml-kem` suffit là où vous n'avez besoin que de
@@ -224,7 +224,7 @@ sont révélés une seule fois avec des boutons de copie.
 ## Vérifier un leaf
 
 La recette dépend de l'algorithme de la CA. **Le défaut (`ed25519-mldsa65`)
-n'est pas vérifiable par `openssl`** — il utilise un OID privé, donc
+n'est pas vérifiable par `openssl`** : il utilise un OID privé, donc
 l'outillage standard ne sait pas analyser la signature composite. Pour
 celui-là, utilisez le vérifieur interne.
 

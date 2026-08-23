@@ -45,7 +45,7 @@ Une ligne par échec, append-only, atomique (POSIX, multi-worker safe).
 
 Deux d'entre eux méritent une jail alors même que la requête a déjà été
 refusée : `token_ip_not_allowed` signifie qu'un token **valide** a été rejoué
-depuis le mauvais hôte — le token a fuité, et l'IP source vaut la peine d'être
+depuis le mauvais hôte : le token a fuité, et l'IP source vaut la peine d'être
 bannie pendant que vous le faites tourner. `proxy_untrusted_ip` signifie que
 quelque chose a essayé d'affirmer un en-tête d'identité depuis l'extérieur de
 l'ensemble des proxies de confiance, ce qui est une tentative de contournement

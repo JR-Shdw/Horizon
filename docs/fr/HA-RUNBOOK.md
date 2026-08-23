@@ -238,7 +238,7 @@ le disque de chaque leader potentiel.
 
 | Contrôle | Comportement requis |
 |---|---|
-| `max_slot_wal_keep_size` | valeur finie sous la réserve d'urgence du filesystem ; `4GB` est la référence pour un volume de lab de 20–40 GB |
+| `max_slot_wal_keep_size` | valeur finie sous la réserve d'urgence du filesystem ; `4GB` est la référence pour un volume de lab de 20-40 GB |
 | `member_slots_ttl` | valeur finie (`10min` de référence) pour libérer les slots des membres réellement absents |
 | Archive WAL | `archive_mode=on` seulement avec un `archive_command` testé et supervisé ; une archive en panne empêche aussi le recyclage |
 | Santé replica | sain seulement si l'état est `streaming`, le lag connu sous le seuil et la timeline identique au leader |
@@ -491,8 +491,8 @@ follower), `admin:w`. Le reload nginx passe par
 `issue-server-cert` ne tourne que contre le primary applicatif. Les joiners
 récupèrent leur cert serveur signé par la CA cluster via la boucle de
 renouvellement par-nœud ; un joiner qui n'en a jamais terminé une garde donc le
-cert self-signed avec lequel nginx a démarré. Ce cert **fonctionne** — le TLS
-réussit, l'API répond — donc rien n'échoue visiblement ; simplement, les pairs
+cert self-signed avec lequel nginx a démarré. Ce cert **fonctionne** : le TLS
+réussit, l'API répond, donc rien n'échoue visiblement ; simplement, les pairs
 ne peuvent pas vérifier l'identité de ce nœud.
 
 Interrogez chaque nœud directement, pas à travers le load balancer :

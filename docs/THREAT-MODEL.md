@@ -130,7 +130,7 @@ Classification:
 |-----|-------------|--------|---------------|
 | 2.1.1 | Password min 12 characters | **N/A** | Master password has no minimum length enforced (user responsibility - Argon2id makes short passwords expensive to crack but not impossible). Consider adding. |
 | 2.1.7 | Check against compromised password lists | **N/A** | Resurgamus Horizon has a single master password (no user accounts, no email). HIBP integration has no value here. Argon2id (256MB) makes brute-force of even weak passwords expensive. |
-| 2.2.1 | Anti-automation: max failed attempts | **MET** | Escalating fail2ban-style lockout on `/unseal`. `RATE_LIMITS = [(20, 30), (50, 300), (200, 3600)]` is `(failure_count, lockout_seconds)`: 20 failures locks the IP out for 30s, 50 for 300s, 200 for 3600s. The counting window is separate (`rate_limit_findtime`, 3600s default). Whitelist via `RH_RATE_LIMIT_WHITELIST`. Deliberately permissive — a 256-bit token is infeasible to brute-force and Argon2id already costs ~500ms per master-password attempt, so this is the second line, not the first. |
+| 2.2.1 | Anti-automation: max failed attempts | **MET** | Escalating fail2ban-style lockout on `/unseal`. `RATE_LIMITS = [(20, 30), (50, 300), (200, 3600)]` is `(failure_count, lockout_seconds)`: 20 failures locks the IP out for 30s, 50 for 300s, 200 for 3600s. The counting window is separate (`rate_limit_findtime`, 3600s default). Whitelist via `RH_RATE_LIMIT_WHITELIST`. Deliberately permissive: a 256-bit token is infeasible to brute-force and Argon2id already costs ~500ms per master-password attempt, so this is the second line, not the first. |
 | 2.4.1 | Approved KDF for password storage | **MET** | Argon2id (m=256MB, t=3, p=1 - libsodium's `crypto_pwhash` fixes parallelism at 1, not configurable). |
 | 2.4.2 | Random salt min 32 bits | **MET** | 16-byte (128-bit) random salt per vault instance, stored in vault_config. |
 | 2.6.1 | Single-use lookup secrets | **MET** | Challenges are single-use (DELETE+RETURNING). TOTP codes validated once per period. |
@@ -198,7 +198,7 @@ Classification:
 |-----|-------------|--------|---------------|
 | 9.1.1 | TLS for all client connections | **MET** | Frontend Nginx supports TLS natively (`TLS_ENABLED=true`, cert/key mounted). API listens on HTTP behind Nginx (same compose stack). External traffic is encrypted by the operator's VPN (IPsec / OpenVPN). |
 | 9.1.3 | TLS 1.2+ only | **MET** | Nginx TLS configuration enforces TLS 1.2+ (`ssl_protocols TLSv1.2 TLSv1.3`). VPN tunnels use cryptography equivalent to or stronger than TLS 1.2+. |
-| 9.2.2 | TLS on all connections including internal | **MET** | API-to-PostgreSQL is always encrypted. `RH_DATABASE_SSL` defaults to `require` (no certificate verification — fine on a same-host Docker bridge, not against an active MITM); `verify-full` pins `RH_DATABASE_CA_CERT` and is the correct setting once the database is off-host. |
+| 9.2.2 | TLS on all connections including internal | **MET** | API-to-PostgreSQL is always encrypted. `RH_DATABASE_SSL` defaults to `require` (no certificate verification, fine on a same-host Docker bridge, not against an active MITM); `verify-full` pins `RH_DATABASE_CA_CERT` and is the correct setting once the database is off-host. |
 
 ### V13 - API & Web Services
 
@@ -258,7 +258,7 @@ What Resurgamus Horizon does NOT protect against:
 | **No certificate pinning** | No mutual TLS between API clients and vault. TLS via Nginx + operator's VPN, but no client cert pinning. |
 | **No anomaly detection** | Audit logs detect tampering but don't alert on suspicious patterns (e.g., bulk secret reads at 3 AM). Requires external SIEM integration. |
 | **Backup decryption** | age-encrypted backups require the age key. If the age key is lost, the backup is unrecoverable. No key escrow. |
-| **PostgreSQL TLS unverified by default** | `database_ssl` defaults to `require`: encrypted, but the server certificate is not verified, so this stops passive sniffing and not an active MITM on the DB path. `verify-full` **is** supported and pins `database_ca_cert` — it is opt-in, not absent. The default suits single-host; set `verify-full` for any deployment where the database is reached across a network you do not own. |
+| **PostgreSQL TLS unverified by default** | `database_ssl` defaults to `require`: encrypted, but the server certificate is not verified, so this stops passive sniffing and not an active MITM on the DB path. `verify-full` **is** supported and pins `database_ca_cert`, so it is opt-in, not absent. The default suits single-host; set `verify-full` for any deployment where the database is reached across a network you do not own. |
 
 ### 3.4 - Agent (rh-inject) Limitations
 

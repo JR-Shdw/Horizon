@@ -7,7 +7,7 @@ Ce sur quoi rhorizon tourne et ce avec quoi il s'intègre. Légende des statuts 
 - **Expérimental** : utilisable, aspérités, aucune garantie.
 - **Prévu** : pas encore, suivi.
 
-Ce qui n'est pas listé n'est ni bloqué ni promis — ouvrez une issue.
+Ce qui n'est pas listé n'est ni bloqué ni promis : ouvrez une issue.
 
 Comment chaque affirmation **Testé** est prouvée avant une release :
 [SHIP-VALIDATION.md](../SHIP-VALIDATION.md) (EN). La checklist de composants
@@ -29,7 +29,7 @@ par-OS utilisée pour réévaluer le support vit dans
 | macOS (Apple Silicon) | Testé | `tools/install-macos.sh --mode user` tourne vert de bout en bout sur le `macos-latest` hébergé par GitHub (`.github/workflows/macos-native.yml`) : dépendances Homebrew, PostgreSQL, venv, wheel de l'extension Rust (construite, importée, AEAD round-trippé), LaunchAgent, premier descellement. Mode utilisateur uniquement |
 | macOS (Intel) | Non testé | Pas connu comme cassé, mais non mesuré : GitHub a retiré l'image `macos-13` et il n'existe pas de runner darwin x86_64 gratuit pour la remplacer |
 | Stack Linux aarch64 | Validé | matériel Raspberry Pi 4 ; stack complète : PostgreSQL 18 + API + crypto Rust + frontend |
-| Agent arm64 (rh-fetch/inject/watch) | Vérifié (émulé) | Se construit pour arm64 (y compris sous QEMU) via les bindings pré-générées d'aws-lc-sys (`aws-lc-rs` sans `bindgen` — pas de panique libclang). TLS post-quantique (X25519MLKEM768) préservé, vérifié sur le fil par `tools/pq-verify.sh` (OpenSSL 3.5 et aws-lc-rs le négocient tous les deux). Construit en multi-arch dans la CI (`build.yml`). |
+| Agent arm64 (rh-fetch/inject/watch) | Vérifié (émulé) | Se construit pour arm64 (y compris sous QEMU) via les bindings pré-générées d'aws-lc-sys (`aws-lc-rs` sans `bindgen`, donc pas de panique libclang). TLS post-quantique (X25519MLKEM768) préservé, vérifié sur le fil par `tools/pq-verify.sh` (OpenSSL 3.5 et aws-lc-rs le négocient tous les deux). Construit en multi-arch dans la CI (`build.yml`). |
 
 ## Gestion des services / init
 
@@ -52,7 +52,7 @@ par-OS utilisée pour réévaluer le support vit dans
 
 | Backend | Statut | Notes |
 |---|---|---|
-| PostgreSQL 18 | Testé | le seul store supporté, et le seul majeur capable de négocier le KEM hybride post-quantique (X25519MLKEM768) sur le lien API-vers-base — `ssl_groups` est un GUC PG18+. Sur un majeur plus ancien le compose démarre quand même, mais ce lien retombe sur un échange de clés classique. |
+| PostgreSQL 18 | Testé | le seul store supporté, et le seul majeur capable de négocier le KEM hybride post-quantique (X25519MLKEM768) sur le lien API-vers-base : `ssl_groups` est un GUC PG18+. Sur un majeur plus ancien le compose démarre quand même, mais ce lien retombe sur un échange de clés classique. |
 | Database HA : Patroni | Testé | topologie de référence Linux/Kubernetes : PostgreSQL 18 + Patroni + etcd + HAProxy + VIP keepalived, multi-nœuds |
 | Database HA : `rhorizon-pgha` | Supporté | fournisseur BSD-natif à quorum de pairs pour FreeBSD/OpenBSD/NetBSD ; son `/status` s'intègre à la santé `database_ha` neutre de rhorizon. Le fournisseur a des preuves de lab, mais ce dépôt ne le fait pas encore tourner dans la voie de release automatisée ; un membre fencé/périmé exige aujourd'hui un rejoin opérateur. Voir [la conception et les preuves `pgha`](PGHA.md). |
 
@@ -78,7 +78,7 @@ par-OS utilisée pour réévaluer le support vit dans
 | MCP (agents LLM) | Testé | surface d'outils en lecture seule ; **policy fail-closed validée** (9 tests, `mcp/tests/test_policy.py`), refuse tout ce qui n'est pas whitelisté, gating par-appel dans `call_tool` ; les tools sont des wrappers policy-gated au-dessus de l'API vault testée |
 
 > **Caveat sur le statut des `rh-*`.** « Testé » ci-dessus désigne la **logique
-> du binaire** — `tests/test_agent.py` plus les scripts live dans
+> du binaire** : `tests/test_agent.py` plus les scripts live dans
 > `eso-provider/test-live/` (`b2_rhfetch_real.sh`, `b3_rhwatch_rotation.sh`).
 > Le déploiement de bout en bout sur **Docker / Podman / k3s** n'est **pas
 > encore dans la boucle automatisée** (voie 2 de SHIP-VALIDATION, en attente).

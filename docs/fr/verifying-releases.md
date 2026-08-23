@@ -16,8 +16,7 @@ Pour le tag `vX.Y.Z` (https://github.com/JR-Shdw/Horizon/releases/tag/vX.Y.Z) :
 | `rhorizon-client-X.Y.Z.tgz` | Pack SDK npm (`@rhorizon/client`, version issue de package.json) |
 | `rhorizon-X.Y.Z-source.tar.gz` | Archive git déterministe du commit taggé (inclut les sources vendorées d'`eso-provider`) |
 | `<module>.sbom.cdx.json` | SBOM CycloneDX par module (`rhorizon_crypto`, `rhorizon-agent`, `terraform-provider-rhorizon`, `rhorizon-client`) - signé comme tout autre asset et hashé dans les sujets de provenance |
-| `*.sig` | Signature cosign détachée (flux historique / clé explicite) |
-| `*.bundle` | Bundle cosign autonome (signature + cert + payload) |
+| `*.bundle` | Bundle cosign autonome (signature + cert + payload) - c'est la signature |
 | `*.sha256` | Hash SHA-256 pour un recoupement supplémentaire |
 
 Tous les assets sont signés avec la même clé que celle qui signe les images
@@ -50,16 +49,13 @@ cosign verify-blob --key cosign.pub --bundle "$ASSET.bundle" "$ASSET"
 de fichier manquant, de mauvaise clé, ou de toute altération. Le chemin du
 bundle et celui du binaire sont tous deux requis.
 
-## Flux `.sig` détaché (fichier de signature explicite)
+## Il n'y a pas de `.sig` détaché
 
-Si vous préférez le `.sig` brut au bundle :
-
-```bash
-curl -fsSL "$BASE/$ASSET.sig" -O
-cosign verify-blob --key cosign.pub --signature "$ASSET.sig" "$ASSET"
-```
-
-Même résultat ; le bundle n'est qu'une enveloppe autonome.
+Cette page proposait `--signature "$ASSET.sig"` comme variante. Aucune release
+ne contient ce fichier. Cosign v3 signe dans le bundle et sort avant d'écrire
+une signature détachée : le flag passé par la pipeline n'avait aucun effet et
+n'émettait aucun avertissement : la variante documentait un flux qui n'a jamais
+tourné. Le bundle *est* la signature ; utilisez-le.
 
 ## Racines de confiance
 

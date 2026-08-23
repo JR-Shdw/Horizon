@@ -168,7 +168,7 @@ attentes du pool et `pg_stat_activity`.
 
 ### WAL et stockage
 
-- Définir `max_slot_wal_keep_size` (4 GB sur le volume lab 20–40 GB).
+- Définir `max_slot_wal_keep_size` (4 GB sur le volume lab 20-40 GB).
 - `wal_keep_size` est un minimum ; `max_wal_size` une cible souple.
 - Fence les replicas vivants mais stale et libérer les slots des absents.
 - Superviser réplication, lag, timeline, archive et disque.

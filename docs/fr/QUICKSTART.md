@@ -28,7 +28,7 @@ VPN / VLAN privé, ajustez `VAULT_API_BIND`, `VAULT_API_BIND_M2M`,
 
 ## 2. Démarrer
 
-**Choisissez le bon fichier compose — le dépôt en livre deux.**
+**Choisissez le bon fichier compose : le dépôt en livre deux.**
 
 ```bash
 # Recommandé : génère le certificat TLS, l'active, et affiche les URLs
@@ -46,8 +46,8 @@ docker compose -f tools/docker-compose.quickstart.yml up -d
 
 | Fichier | Publie sur | À utiliser pour |
 |---|---|---|
-| `tools/docker-compose.quickstart.yml` | `127.0.0.1` — API `:8200`, UI `:8080` (HTTP) et `:8443` (TLS) | Laptops, hôtes uniques, évaluation |
-| `docker-compose.yml` (racine) | `${WG_IP:-10.0.0.1}` et `10.0.1.1` — API `:8200`, UI `:8201` | La stack opérateur/VPN |
+| `tools/docker-compose.quickstart.yml` | `127.0.0.1`, API `:8200`, UI `:8080` (HTTP) et `:8443` (TLS) | Laptops, hôtes uniques, évaluation |
+| `docker-compose.yml` (racine) | `${WG_IP:-10.0.0.1}` et `10.0.1.1`, API `:8200`, UI `:8201` | La stack opérateur/VPN |
 
 Le fichier racine code en dur des adresses VPN, donc sur un hôte qui ne les a
 pas, Docker refuse de démarrer le stack (*« Couldn't listen on requested
@@ -125,12 +125,12 @@ passe.
 > ```
 >
 > `RH_CA_FILE` est ce qui rend le certificat auto-signé digne de confiance pour
-> le CLI et les agents `rh-*` — sans lui, ils refusent de se connecter, à juste
+> le CLI et les agents `rh-*`. Sans lui, ils refusent de se connecter, à juste
 > titre. Il n'existe pas d'option skip-verify.
 >
 > Le HTTP en clair écoute toujours sur `:8080` et `:8200` pour le débogage,
 > mais le vault journalise un avertissement `PLAINTEXT TRANSPORT` pour
-> **chaque** appel qui l'emprunte, loopback compris — le trafic same-host reste
+> **chaque** appel qui l'emprunte, loopback compris : le trafic same-host reste
 > lisible par tout process ayant `CAP_NET_RAW`, et dans un pod « same host »
 > signifie un conteneur voisin.
 
@@ -253,7 +253,7 @@ runtimes.
 ### Podman
 
 Passez `-f tools/docker-compose.quickstart.podman.yml`. Sans `-f`, compose
-récupère le `docker-compose.yml` du répertoire courant — le fichier cluster qui
+récupère le `docker-compose.yml` du répertoire courant, le fichier cluster qui
 bind des adresses VPN, celui que ce guide vous a dit de ne pas utiliser sur un
 laptop. La variante Podman cible localhost et utilise les formes portables de
 `tmpfs` et le `depends_on` simple dont Podman rootless a besoin.
@@ -311,12 +311,12 @@ best-effort.
 
 ### Contraintes rootless
 
-- Bind sur des ports < 1024 — bindez `127.0.0.1:8200` et mettez un reverse
+- Bind sur des ports < 1024 : bindez `127.0.0.1:8200` et mettez un reverse
   proxy rootful devant si vous avez besoin du :443.
-- Les noms de profils AppArmor / SELinux diffèrent — les profils fournis
+- Les noms de profils AppArmor / SELinux diffèrent : les profils fournis
   supposent un Docker rootful. Utilisez les défauts du runtime tant que vous
   n'avez pas écrit les équivalents rootless.
-- `docker exec` depuis un autre utilisateur — seul l'utilisateur qui fait
+- `docker exec` depuis un autre utilisateur : seul l'utilisateur qui fait
   tourner le stack peut s'attacher.
 
 Pour un déploiement souverain / mono-tenant on-prem, rootless + Podman est le

@@ -169,7 +169,7 @@ and `pg_stat_activity`.
 
 ### WAL and storage
 
-- Set a finite `max_slot_wal_keep_size` (4 GB on the 20–40 GB lab volume).
+- Set a finite `max_slot_wal_keep_size` (4 GB on the 20-40 GB lab volume).
 - Treat `wal_keep_size` as a minimum and `max_wal_size` as a soft target.
 - Fence live-but-stale replicas and release slots for absent members.
 - Monitor replication state, lag, timeline, archive command and disk usage.

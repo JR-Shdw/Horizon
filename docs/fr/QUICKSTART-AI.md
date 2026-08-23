@@ -232,7 +232,7 @@ Deux propriétés restent garanties :
    vault enregistre qui a demandé, quel secret, et quand, dans un journal
    construit pour que modifier ou supprimer une entrée après coup soit
    détectable. Si tu as un jour besoin de ce journal comme preuve, vérifie-le
-   d'abord — le vault te dira s'il est intact.
+   d'abord : le vault te dira s'il est intact.
 
 ---
 

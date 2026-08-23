@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 //
-// DEMO MODE — runs the real frontend with a mocked backend so the whole
+// DEMO MODE: runs the real frontend with a mocked backend so the whole
 // application can be shown live (no server, no real secrets). Activated by
 // `?demo` in the URL (or window.__RH_DEMO__ = true before this script).
 //

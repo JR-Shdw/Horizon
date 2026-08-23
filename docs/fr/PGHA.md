@@ -20,7 +20,7 @@ Mise en route pas à pas, pièges par OS compris :
 
 Trois nœuds PostgreSQL 18, un par OS. Le leadership exige une **majorité (>= 2
 sur 3)** de membres joignables. Une seule partition réseau peut détenir 2 nœuds
-sur 3, donc au plus un côté peut élire ou conserver un primary — **le
+sur 3, donc au plus un côté peut élire ou conserver un primary : **le
 primary-unique est garanti sans arbitre externe**. C'est la même garantie qu'un
 cluster etcd/raft à 3 nœuds, obtenue depuis la simple joignabilité des pairs.
 
@@ -89,7 +89,7 @@ raisons mesurées, et c'est pourquoi l'actuelle n'a aucun arbitre :
 - **CARP** (v0) : son multicast VRRP n'est pas délivré entre hôtes hyperviseurs
   (`netstat -sp carp` montrait 0 reçu) -> split-brain à double MASTER. Abandonné.
 - **Bail témoin** (v1) : un bail à détenteur unique remplaçait l'élection de
-  CARP. Ça marchait, mais le témoin était un **point de défaillance unique** —
+  CARP. Ça marchait, mais le témoin était un **point de défaillance unique** :
   un hoquet passager empêchait l'unique primary de renouveler, donc il
   s'auto-fençait et *la base tombait*. Retiré.
 - **Quorum de pairs** (v2, actuel) : dès qu'OpenBSD a livré PostgreSQL 18,
@@ -113,7 +113,7 @@ conception ne dépend d'un sous-réseau particulier.
 Tous en PostgreSQL 18, `initdb --data-checksums --encoding=UTF8 --locale=C`,
 `listen_addresses='*'`, streaming depuis le VIP avec un slot par standby. Le mot
 de passe de réplication vient de votre magasin de secrets vers un `.pgpass`
-détenu par l'utilisateur PostgreSQL, avec un hôte joker — l'adresse du pair est
+détenu par l'utilisateur PostgreSQL, avec un hôte joker : l'adresse du pair est
 le VIP flottant, pas un nœud fixe. L'agent lit les pairs via un rôle à qui
 `pg_monitor` a été GRANTé.
 
@@ -125,7 +125,7 @@ font la différence entre un cluster qui marche et un après-midi de débogage :
 - **OpenBSD** : la LibreSSL de base ne sait toujours pas charger des certificats
   TLS Ed25519, donc le TLS de l'application a besoin d'un python construit
   contre le port OpenSSL ; la réplication utilise SCRAM et n'est pas affectée.
-  PostgreSQL ne démarrera pas tant que les sémaphores SysV ne sont pas relevés —
+  PostgreSQL ne démarrera pas tant que les sémaphores SysV ne sont pas relevés :
   `kern.seminfo.semmni=100`, `kern.seminfo.semmns=2048` dans
   `/etc/sysctl.conf`. Le rôle superutilisateur PG est `postgres`, l'utilisateur
   système est `_postgresql`, le script rc.d est `postgresql`.

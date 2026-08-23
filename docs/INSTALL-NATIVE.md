@@ -379,8 +379,8 @@ SQL
 PostgreSQL 18 needs far more SysV semaphores and shared memory than the BSD
 kernel defaults (OpenBSD ships `kern.seminfo.semmni=10`, `semmns=60`). Too low
 and `initdb`'s bootstrap dies with `FATAL: could not create semaphores: No space
-left on device`. These are **kernel-global** — there is *no* per-process
-equivalent — so they must be raised for the whole host and persisted to
+left on device`. These are **kernel-global**, and there is *no* per-process
+equivalent, so they must be raised for the whole host and persisted to
 `/etc/sysctl.conf` (else PG fails to start after a reboot). They only **raise
 ceilings**; nothing is restricted. Intended for a dedicated rhorizon host.
 
@@ -410,7 +410,7 @@ is why we size for generous headroom rather than a tight per-deployment fit.
 
 > Contrast with **memlock**: the app's `mlockall()` budget is set *per service*
 > (`ulimit -l` in the rc.d wrapper / systemd `LimitMEMLOCK`), sized to
-> `workers*160 + 256 + 192` MB — **not** system-wide. Only the PG SysV limits are
+> `workers*160 + 256 + 192` MB, **not** system-wide. Only the PG SysV limits are
 > global (kernel design). Linux uses cgroups, so no global sysctl is needed.
 
 ### 3.2 Automated (`tools/install.sh`)
@@ -726,7 +726,7 @@ filtering). To approach parity :
   unseal spike + headroom = **608 MB for 1 worker**) + `AmbientCapabilities=CAP_IPC_LOCK`,
   matching the app self-check `mem_hardening.required_memory_mb`.
   Measured on Rocky 10.2 (1 worker): peak locked during unseal
-  **≈465 MB** (`VmLck`), steady ≈209 MB — comfortably under the 608 MB
+  **≈465 MB** (`VmLck`), steady ≈209 MB, comfortably under the 608 MB
   ceiling. PostgreSQL never `mlock`s (default 8 MB memlock, unused), so
   it does not compete for the budget.
 - **noexec /tmp** : `PrivateTmp=true` already gives the process a private
@@ -750,21 +750,21 @@ filtering). To approach parity :
 The project ships a **confined SELinux policy module**,
 `tools/selinux/rhorizon.te`, that runs the vault as its own domain
 `rhorizon_t`. On a **system-mode** install the driver installs it
-automatically — but **only when the host is actively enforcing**
+automatically, but **only when the host is actively enforcing**
 (`getenforce` = `Enforcing`). A permissive or disabled host is left
 completely untouched. The step is idempotent and safe to re-run.
 
 Validated on **Rocky Linux 10.2** (kernel 6.12, Python 3.12): the
 service unseals under `enforcing` with **zero AVC denials** and no
 executable-memory grants (`execmem` / `execstack` / `execheap` /
-`mmap_zero` are deliberately *not* in the policy — the Rust secure
+`mmap_zero` are deliberately *not* in the policy: the Rust secure
 allocator uses `PROT_NONE` guard pages, never W+X).
 
 What the driver does under enforcing (`_rh_selinux_setup` in
 `tools/drivers/linux.sh`):
 
 1. Installs build tooling (`selinux-policy-devel checkpolicy
-   policycoreutils-python-utils`) — pulled *only* on enforcing hosts.
+   policycoreutils-python-utils`), pulled *only* on enforcing hosts.
 2. Builds + loads the module: `make -f
    /usr/share/selinux/devel/Makefile rhorizon.pp` then
    `semodule -i rhorizon.pp`.
@@ -772,7 +772,7 @@ What the driver does under enforcing (`_rh_selinux_setup` in
    <port>` (default 8200; the stock port map has 8200 as
    `trivnet1_port_t`, so a dedicated type is used).
 4. Applies file contexts, then `restorecon`. The specs are kept
-   **disjoint** — a broad `WORKDIR(/.*)?` catch-all out-orders the
+   **disjoint**: a broad `WORKDIR(/.*)?` catch-all out-orders the
    `audit/` and `run/` rules under `restorecon`, so each path gets its
    own rule:
 
@@ -813,7 +813,7 @@ sudo semanage port -m -t rhorizon_port_t -p tcp 8200
 sudo restorecon -RF "$WORKDIR"
 ```
 
-If you extend the app and hit a new denial, harvest it — do **not**
+If you extend the app and hit a new denial, harvest it. Do **not**
 fall back to `setenforce 0`:
 
 ```bash
