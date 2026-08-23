@@ -54,8 +54,8 @@ binary path are required.
 This page used to offer `--signature "$ASSET.sig"` as an alternative. No
 release carries such a file. Cosign v3 signs into the bundle and returns
 before it would write a detached signature, so the flag the pipeline passed
-had no effect and produced no warning -- the alternative was documented for
-years of a flow that never ran. The bundle is the signature; use it.
+had no effect and produced no warning. The alternative documented a flow that
+never ran. The bundle is the signature; use it.
 
 ## Trust roots
 
