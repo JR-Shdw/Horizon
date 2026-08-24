@@ -7,7 +7,7 @@ les vérifier de bout en bout avant de les tirer.
 
 ## Ce qui est signé
 
-Pour chaque image (`rhorizon-api`, `rhorizon-frontend`, `rhorizon-agent`) :
+Pour chaque image **publiée** (`rhorizon-api`, `rhorizon-agent`) :
 - L'image elle-même - `cosign sign` produit un artefact OCI de signature
   (`sha256-XXXX.sig`) stocké à côté de l'image dans le registre Gitea.
 - Une attestation de provenance SLSA v1.0 décrivant le build (commit, URL du
@@ -15,6 +15,11 @@ Pour chaque image (`rhorizon-api`, `rhorizon-frontend`, `rhorizon-agent`) :
 - Une attestation SBOM CycloneDX (Software Bill of Materials).
 
 Les trois sont liées au digest de contenu de l'image, pas à son tag.
+
+> L'image de l'UI web (`rhorizon-frontend`) n'est **pas distribuée**. C'est une
+> image Nginx servant une petite SPA statique, dont le projet ne prend pas en
+> charge le support ; construisez-la depuis `frontend/Dockerfile` avec la stack
+> compose. Rien de ce qui suit ne s'y applique.
 
 ## Prérequis
 

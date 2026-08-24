@@ -1,0 +1,40 @@
+# Resurgamus Horizon
+
+> Open-source, self-hosted secrets vault for people, automation and MCP agents.
+> Horizon encrypts secrets at rest, issues scoped and auditable credentials,
+> and supports single-host and high-availability deployments.
+
+Canonical public source: https://github.com/JR-Shdw/Horizon
+License: AGPL-3.0-or-later
+
+## Start here
+
+- [Project overview](README.md)
+- [Installation reference](docs/INSTALL.md)
+- [Five-minute quickstart](docs/QUICKSTART.md)
+- [Compatibility matrix](docs/COMPATIBILITY.md)
+
+## Interfaces
+
+- [REST API reference](docs/docs/reference/api.md)
+- [CLI reference](docs/CLI.md)
+- [MCP integration](docs/MCP.md)
+- [Secrets and tokens](docs/SECRETS-AND-TOKENS.md)
+- [Dynamic secrets](docs/DYNAMIC-SECRETS.md)
+
+## Architecture and operations
+
+- [Architecture](docs/docs/concepts/architecture.md)
+- [Key custody and worker pools](docs/docs/concepts/key-custody.md)
+- [Production HA reference](docs/HA-PRODUCTION-REFERENCE.md)
+- [HA operations runbook](docs/HA-RUNBOOK.md)
+- [Backup and disaster recovery](docs/DISASTER-RECOVERY.md)
+
+## Security and verification
+
+- [Security policy](SECURITY.md)
+- [Threat model](docs/THREAT-MODEL.md)
+- [Cryptography](docs/docs/concepts/crypto.md)
+- [Audit integrity](docs/docs/concepts/audit.md)
+- [Image verification](docs/verifying-images.md)
+- [Release verification](docs/verifying-releases.md)

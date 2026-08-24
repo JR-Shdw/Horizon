@@ -33,7 +33,7 @@ fronting several backends behind one endpoint, use the stdio federation hub
 > agents, multi-backend federation, and per-agent identity are the **hub**'s
 > job (`mcp-hub`, section 7) -- not the server's. The prior SDK build folded an
 > HTTP transport into the server; that concern now belongs to the hub and its
-> per-host-daemon roadmap (`mcp/ROADMAP.md`).
+> per-host daemon described in section 7.
 
 ```mermaid
 flowchart LR

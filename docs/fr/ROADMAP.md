@@ -81,10 +81,8 @@ fait foi, pas cette page.
 
 ## Durcissement avant release
 
-Suivi en détail dans
-[`SECURITY-HARDENING-ROADMAP.md`](../SECURITY-HARDENING-ROADMAP.md) (EN). Le
-durcissement mémoire et audit est terminé. Le travail restant se limite à la
-validation plateforme et release :
+Le durcissement mémoire et audit est terminé. Le travail restant se limite à
+la validation plateforme et release :
 
 | Point | Portée | Priorité |
 |---|---|---|

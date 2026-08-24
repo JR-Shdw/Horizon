@@ -125,7 +125,7 @@ désinstallation) est dans [`docs/fr/INSTALL.md`](INSTALL.md).
 - [`docs/fr/DOCKER.md`](DOCKER.md) - anatomie du stack compose, Dockerfile multi-stage, volumes/réseaux, patterns d'override, rootless/Podman
 - [`docs/fr/K8S.md`](K8S.md) - patterns agent (rh-fetch / rh-inject / rh-watch / cronjob), NetworkPolicy, RBAC, TLS depuis le vault
 - [`docs/fr/HA-CLUSTER.md`](HA-CLUSTER.md) - haute disponibilité - membership applicatif, masters crypto locaux, Database HA, identité, JOIN, auto-promote et mTLS par nœud
-- [`docs/fr/HA-PRODUCTION-REFERENCE.md`](HA-PRODUCTION-REFERENCE.md) - cible HA de production - edge HTTP/2 logique, trois API, trois membres DB, convergence workers, sécurité des retries, audit/WAL et chemin maintenance/upgrade
+- [`docs/fr/HA-PRODUCTION-REFERENCE.md`](HA-PRODUCTION-REFERENCE.md) - cible HA de production - un endpoint HTTPS stable, deux edges redondants, trois API, trois membres DB, convergence workers, sécurité des retries, audit/WAL et chemin maintenance/upgrade
 - [`docs/fr/HA-RUNBOOK.md`](HA-RUNBOOK.md) - opérations HA - Database HA neutre (référence Patroni / `pgha` BSD), réplication et garde-fous WAL, bootstrap, rolling restart et recovery
 
 ### Opérer
@@ -139,6 +139,7 @@ désinstallation) est dans [`docs/fr/INSTALL.md`](INSTALL.md).
 
 ### Intégrer
 
+- [`docs/docs/reference/api.md`](../docs/reference/api.md) - référence REST : endpoints, authentification, probes, audit, PKI et opérations HA _(EN)_
 - [`docs/fr/SECRETS-AND-TOKENS.md`](SECRETS-AND-TOKENS.md) - cycle de vie des secrets, scopes des tokens, patterns éphémère / oneshot, modes de rotation master-password
 - [`docs/fr/MCP.md`](MCP.md) - serveur Model Context Protocol (Cursor / Cline / Claude Desktop / Continue / opencode)
 - [`docs/fr/N8N.md`](N8N.md) - sécuriser tes workflows n8n : protéger `N8N_ENCRYPTION_KEY` + injection par-secret en env, avec journal d'audit par credential
@@ -209,7 +210,7 @@ développement via la licence.
 
 ## Licence
 
-> **Licence & politique IA**
+> **Licence et marque**
 >
 > - Sous licence **AGPL-3.0-or-later** ([LICENSE](../../LICENSE)). Source-available ; les modifications doivent rester AGPL.
 > - **Relicensing closed-source interdit.** Une licence commerciale est disponible - voir [LICENSE-COMMERCIAL.md](../../LICENSE-COMMERCIAL.md).

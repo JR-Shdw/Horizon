@@ -7,12 +7,15 @@ maps every requirement to the artifact that proves it.
 
 ## Posture at a glance
 
-| Track | Level | Status |
+| Track | Demonstrated level | Status |
 |---|---|---|
-| Build | L1-L3 | met |
-| Build | L4 | partial - reproducible + hermetic; two-person review N/A (single maintainer) |
-| Source | L1-L2 | met |
-| Source | L3 | partial - version-controlled + retained; signed commits not yet |
+| Build | L1 | Container provenance is published and signed |
+
+Horizon does not claim Build L2 or L3. The Woodpecker pipeline step that
+creates the provenance also receives the Cosign signing key, so the statement
+is not non-falsifiable build-platform provenance. Reproducibility, locked
+dependencies, signed images and SBOMs are additional controls, not a higher
+SLSA level.
 
 ## What the build guarantees
 
@@ -22,9 +25,9 @@ maps every requirement to the artifact that proves it.
 - **Signed images** - `cosign` signs the manifest-list digest, which
   covers both `amd64` and `arm64` at once.
 - **Pinned, hashed dependencies** - Python deps are `--require-hashes`
-  installed from a hash-locked `requirements.txt`; the build is
-  hermetic. Base images are pinned by `@sha256:` digest, not a
-  re-taggable tag.
+  installed from a hash-locked `requirements.txt`. Base images are pinned by
+  `@sha256:` digest, not a re-taggable tag. The build still uses networked
+  package repositories, so this is not a hermetic-build claim.
 - **SBOM** - generated and attached at publish time.
 - **Reproducible** - `SOURCE_DATE_EPOCH` is honored so rebuilds match.
 

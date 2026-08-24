@@ -1,8 +1,8 @@
 # HA cluster
 
-For the complete production target, meaning one logical HTTP/2 edge, three API nodes,
-three Database HA members, worker convergence, retry safety, audit jobs, and
-release gates, start with
+For the complete production target, meaning one stable HTTPS endpoint, two
+redundant edges, three API nodes, three Database HA members, worker convergence,
+retry safety, audit jobs, and release gates, start with
 [Production HA reference](HA-PRODUCTION-REFERENCE.md).
 
 Native multi-host HA: a set of rhorizon containers that coordinate identity,

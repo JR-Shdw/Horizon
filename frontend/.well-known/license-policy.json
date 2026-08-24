@@ -44,6 +44,6 @@
     ],
     "rights": "AGPL grants no trademark rights"
   },
-  "canonical_source": "github.com/JR-Shdw/Horizon",
-  "public_mirror_note": "No public mirror; canonical source-of-truth is the Gitea repository."
+  "canonical_source": "https://github.com/JR-Shdw/Horizon",
+  "public_mirror_note": "The public GitHub repository is the canonical source for users. Development infrastructure may use a separate upstream repository."
 }

@@ -1,6 +1,6 @@
 site_name: rhorizon
 site_url: https://resurgamus.com/horizon/
-site_description: Self-hosted, AGPL secrets vault with scoped access and audit
+site_description: Self-hosted AGPL secrets vault with scoped access, audit, MCP and high availability
 site_author: shdw
 repo_url: https://github.com/JR-Shdw/Horizon
 repo_name: JR-Shdw/Horizon
@@ -40,7 +40,7 @@ theme:
     - content.code.annotate
     - content.tabs.link
   icon:
-    repo: simple/gitea
+    repo: fontawesome/brands/github
 
 markdown_extensions:
   - admonition
@@ -69,7 +69,7 @@ markdown_extensions:
 
 extra:
   social:
-    - icon: simple/gitea
+    - icon: fontawesome/brands/github
       link: https://github.com/JR-Shdw/Horizon
     - icon: fontawesome/solid/envelope
       link: mailto:horizon@resurgamus.com

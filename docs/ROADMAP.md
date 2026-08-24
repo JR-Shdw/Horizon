@@ -80,7 +80,6 @@ canonical number, not this page.
 
 ## Near-release hardening
 
-Tracked in detail in [`SECURITY-HARDENING-ROADMAP.md`](SECURITY-HARDENING-ROADMAP.md).
 Memory and audit hardening is complete. Near-release work is limited to
 platform and release validation:
 

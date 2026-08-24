@@ -1,9 +1,8 @@
 # REST API reference
 
-All endpoints sit under `/api/v1/vault/`. Authentication is via
-`Authorization: Bearer rh_...` for token-protected routes, except
-where noted (`/health`, `/status`, `/challenge`, `/unseal`, login
-flows).
+Paths in the tables are relative to `/api/v1/vault`, except the service probes
+explicitly marked as root paths. Authentication is via
+`Authorization: Bearer rh_...` for token-protected routes, except where noted.
 
 The interactive Swagger / ReDoc UIs and the OpenAPI schema are
 **disabled by default**: `docs_url`, `redoc_url`, and `openapi_url`
@@ -12,11 +11,20 @@ default `false`). When enabled, the schema is served unauthenticated
 at `/openapi.json` (root path) - put it behind SSO or a reverse proxy
 in production, and leave it off otherwise.
 
+## Service probes
+
+These paths are served at the API root, without the `/api/v1/vault` prefix.
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/health` | none | Liveness; returns `200` while the process is running, including while sealed |
+| GET | `/readiness` | none | Load-balancer readiness; returns `200` only when this worker may serve vault traffic |
+| GET | `/internal/ha/status` | none | Process-local HA state that remains available during a PostgreSQL outage |
+
 ## Vault lifecycle
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| GET | `/health` | none | Liveness probe (returns `{"status":"ok"}` always) |
 | GET | `/status` | none | Sealed state + 2FA mode + version |
 | POST | `/challenge?purpose=...` | none | YubiKey/WebAuthn challenge (purposes: `unseal`, `namespace_mutation`, `delete_protected_secret`) |
 | POST | `/unseal` | password + 2FA, or Shamir quorum | Unseal; use atomic `{"shares":[...]}` behind multi-worker listeners (`share` is the five-minute compatibility accumulator) |
@@ -25,7 +33,37 @@ in production, and leave it off otherwise.
 | POST | `/admin/rotate-dek-key` | admin:w | Operator-initiated, scriptable DEK-key rotation; master-password re-authentication required |
 | POST | `/shamir/init` | admin:w | Initialise Shamir M-of-N |
 | DELETE | `/shamir` | admin:w | Tear down Shamir, revert to password-only |
-| GET | `/cluster` | admin:r | topology |
+| POST | `/post-restore-review/dismiss` | admin:w | Clear the restore-review flag and revoke recovery root tokens |
+| GET | `/rate-limits` | admin:r | List locked or rate-limited source IPs |
+| DELETE | `/rate-limits/{ip}` | admin:w | Clear one source-IP lockout |
+
+## High availability
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/cluster` | cluster:r | Worker topology and held cluster locks |
+| GET | `/cluster/health` | cluster:r | Aggregated application, worker and database health |
+| POST | `/cluster/init` | cluster:w | Initialise cluster identity, HA password, CA and primary node |
+| POST | `/cluster/repair` | cluster:w | Complete a partially initialised cluster without replacing valid state |
+| POST | `/cluster/rotate-ha-password/stage` | admin:w | Stage an HA-password rotation |
+| POST | `/cluster/rotate-ha-password/confirm` | admin:w | Apply the staged rotation and return the new password once |
+| POST | `/cluster/rotate-ha-password/cancel` | admin:w | Cancel a staged rotation |
+| GET | `/cluster/rotate-ha-password` | cluster:r | Read pending rotation state |
+| POST | `/cluster/challenge` | none | Issue the single-use challenge used by JOIN |
+| POST | `/cluster/join` | HA proof | Verify the JOIN proof, register the node and issue its certificates |
+| GET | `/cluster/ha` | cluster:r | Membership, primary identity, state and certificate status |
+| GET | `/cluster/ha/self` | token | Return the caller node's local membership state |
+| GET | `/cluster/ha/membership/{node_uuid}` | none | Minimal public membership lookup used during JOIN convergence |
+| POST | `/cluster/promote/{node_uuid}` | cluster:w | Promote a secondary to application primary |
+| POST | `/cluster/demote/{node_uuid}` | cluster:w | Demote the application primary |
+| POST | `/cluster/drain/{node_uuid}` | cluster:w | Begin graceful node removal |
+| POST | `/cluster/evict/{node_uuid}` | cluster:w | Immediately evict and revoke a node identity |
+| POST | `/cluster/unrevoke/{node_uuid}` | cluster:w | Remove a node UUID from the revoked set before re-joining |
+| POST | `/cluster/refresh-cert` | cluster mTLS | Renew the calling node and server certificates |
+| POST | `/cluster/issue-server-cert` | admin:w | Issue an nginx server certificate from the cluster CA |
+| POST | `/cluster/rotate-cert/{target}` | admin:w | Request certificate renewal for one node or all nodes |
+| GET | `/cluster/ca-bundle` | cluster:r | Download the public cluster CA bundle and fingerprint |
+| POST | `/cluster/rotate-ca` | admin:w | Rotate the cluster CA with a grace period |
 
 ## Secrets
 
@@ -42,6 +80,8 @@ in production, and leave it off otherwise.
 | POST | `/secrets/{name}/rollback/{n}` | secrets:w | Restore an old version |
 | POST | `/secrets/{name}/rotate` | secrets:w | Operator-initiated, scriptable per-secret DEK rotation |
 | GET | `/secrets/namespaces` | secrets:r | List distinct namespaces with counts |
+| DELETE | `/secrets/namespaces/{namespace}` | admin:w + 2FA | Delete all secrets in one unprotected namespace |
+| POST | `/secrets/rotate-all` | admin:w | Re-encrypt every secret under fresh DEKs |
 
 ## Tokens
 
@@ -55,6 +95,10 @@ in production, and leave it off otherwise.
 | POST | `/tokens/{id}/renew` | tokens:w | Extend expiry |
 | DELETE | `/tokens/{id}` | tokens:w | Delete |
 | POST | `/tokens/ephemeral` | tokens:w | Mint short-TTL token (with optional `inherit_group_membership`) |
+| POST | `/tokens/{id}/allowed-ips` | tokens:w | Replace a live token's source-IP allowlist |
+| GET | `/tokens/pending/` | tokens:r | List restored token stubs awaiting rotation or revocation |
+| POST | `/tokens/pending/{id}/rotate` | tokens:w | Mint a new token secret for a pending stub, shown once |
+| DELETE | `/tokens/pending/{id}` | tokens:w | Revoke a pending stub without minting it |
 
 ## Namespaces (RBAC)
 
@@ -73,17 +117,19 @@ in production, and leave it off otherwise.
 | GET | `/audit/` | audit:r | List entries from the chained log (mutations) |
 | GET | `/audit/lite` | audit:r | List entries from the checkpointed read log (`vault_audit_lite`) - bulk read traffic |
 | GET | `/audit/stream` | audit:r | SSE live tail of the chained log |
-| GET | `/audit/verify` | audit:r | Verify the full chain synchronously (compatibility path) |
-| GET | `/audit/verify/incremental` | audit:r | Verify evidence added after the newest signed full-verification anchor |
-| POST | `/audit/verify/preflight` | audit:r | Check the incremental state; queue a full job when its anchor is missing or stale |
-| POST | `/audit/verify/jobs` | audit:r | Queue or join the cluster-wide full-verification job |
-| GET | `/audit/verify/jobs/{job_id}` | audit:r | Poll durable job status and result |
+| GET | `/audit/verify` | audit:r or sealed CIDR | Verify the full chain synchronously (compatibility path) |
+| GET | `/audit/verify/incremental` | audit:r or sealed CIDR | Verify evidence added after the newest signed full-verification anchor |
+| POST | `/audit/verify/preflight` | audit:r or sealed CIDR | Check the incremental state; queue a full job when its anchor is missing or stale |
+| POST | `/audit/verify/jobs` | audit:r or sealed CIDR | Queue or join the cluster-wide full-verification job |
+| GET | `/audit/verify/jobs/{job_id}` | audit:r or sealed CIDR | Poll durable job status and result |
 | POST | `/audit/verify/legacy-adopt` | admin:w | Explicitly adopt the exact unsigned legacy checkpoint rows committed by a signed full-job candidate |
 | POST | `/audit/export` | audit:r | Download one signed `.tar.gz` evidence bundle for an optional `since`/`until` range |
 | GET | `/audit/files` | audit:r | List daily JSONL files |
 | GET | `/audit/files/{date}` | audit:r | Read one day |
 | DELETE | `/audit/files/{date}` | admin:w | Delete (only beyond retention) |
-| POST | `/audit/rotate-all` | admin:w | Bulk gzip files older than threshold |
+| POST | `/audit/mcp` | token | Append an MCP tool-call event to the dedicated signed chain |
+| GET | `/audit/mcp` | audit:r | List MCP tool-call audit entries |
+| GET | `/audit/mcp/verify` | audit:r | Verify the MCP audit chain |
 
 The chained log (`/audit/`) is Ed25519-signed by default, with an HMAC fallback,
 and every row signs the previous row. It records mutations (write, delete,
@@ -156,6 +202,9 @@ that job succeeds. Only one export runs cluster-wide at a time.
 | GET | `/auth/ldap/mappings` | admin | Read mappings |
 | POST | `/auth/proxy` | trusted IP | SSO proxy login |
 | GET | `/auth/proxy/config` | admin | Read config |
+| POST | `/auth/proxy/config` | admin:w | Store the trusted proxy authentication configuration |
+| GET | `/auth/proxy/mappings` | admin:r | Read proxy-group permission mappings |
+| PUT | `/auth/proxy/mappings` | admin:w | Replace proxy-group permission mappings |
 
 ## Groups RBAC
 
@@ -173,11 +222,11 @@ that job succeeds. Only one export runs cluster-wide at a time.
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| POST | `/channels/` | admin:w | Create (Matrix, webhook, email) |
-| GET | `/channels/` | admin:r | List |
-| PUT | `/channels/{id}` | admin:w | Update |
-| DELETE | `/channels/{id}` | admin:w | Remove |
-| POST | `/channels/{id}/test` | admin:w | Emit a test message |
+| POST | `/notifications/` | admin:w | Create (Matrix, webhook, email) |
+| GET | `/notifications/` | admin:r | List |
+| PUT | `/notifications/{id}` | admin:w | Update |
+| DELETE | `/notifications/{id}` | admin:w | Remove |
+| POST | `/notifications/{id}/test` | admin:w | Emit a test message |
 
 ## Backup / restore
 
@@ -207,6 +256,20 @@ that job succeeds. Only one export runs cluster-wide at a time.
 | POST | `/dynamic/engines/{id}/creds/{role_name}` | secrets:w | Issue credentials |
 | GET | `/dynamic/leases` | admin:r | Active leases |
 | POST | `/dynamic/leases/{id}/revoke` | admin:w | Manual revoke |
+| POST | `/dynamic/leases/{id}/renew` | admin:w | Extend a lease, capped by its role TTL |
+
+## PKI
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| POST | `/pki/init` | admin:w | Initialise a namespace CA |
+| GET | `/pki/cas` | secrets:r | List visible namespaces with an initialised CA |
+| GET | `/pki/ca` | secrets:r | Read a namespace CA certificate and metadata |
+| POST | `/pki/issue` | secrets:w | Issue a certificate from a namespace CA |
+| POST | `/pki/kem/issue` | secrets:w | Issue an ML-KEM subject certificate |
+| POST | `/pki/revoke` | admin:w | Revoke a certificate |
+| POST | `/pki/rotate` | admin:w | Rotate a namespace CA |
+| GET | `/pki/certs` | secrets:r | List issued certificates |
 
 ## Observability - Prometheus metrics
 
@@ -218,7 +281,11 @@ Disabled entirely if `metrics_enabled = false`. Routinely
 disabled in schema (`include_in_schema=False`) so it does not appear
 in the OpenAPI export.
 
-### Live snapshot for the UI - `GET /api/v1/vault/observability`
+### Live snapshot for the UI
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/observability` | audit:r | Return the live counters and gauges used by the Nova dashboard |
 
 Token-authed (scope `audit:r`) JSON view over the same registry, for the in-app
 **Nova** dashboard (the browser cannot use the IP-allow-listed `/metrics`).

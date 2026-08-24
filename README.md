@@ -275,7 +275,7 @@ Full matrix with per-row notes: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 - [`docs/DOCKER.md`](docs/DOCKER.md) - compose stack anatomy, multi-stage Dockerfile, volumes/networks, override patterns, rootless/Podman
 - [`docs/K8S.md`](docs/K8S.md) - agent patterns (rh-fetch / rh-inject / rh-watch / cronjob), NetworkPolicy, RBAC, TLS from vault
 - [`docs/HA-CLUSTER.md`](docs/HA-CLUSTER.md) - high availability - application membership, local crypto masters, Database HA, identity, JOIN, auto-promote, and per-node mTLS
-- [`docs/HA-PRODUCTION-REFERENCE.md`](docs/HA-PRODUCTION-REFERENCE.md) - the production HA target - one logical HTTP/2 edge, three API nodes, three database members, retry/idempotency rules, worker convergence, WAL/audit guardrails, and release gates
+- [`docs/HA-PRODUCTION-REFERENCE.md`](docs/HA-PRODUCTION-REFERENCE.md) - the production HA target - one stable HTTPS endpoint, two redundant edges, three API nodes, three database members, retry/idempotency rules, worker convergence, WAL/audit guardrails, and release gates
 - [`docs/HA-RUNBOOK.md`](docs/HA-RUNBOOK.md) - HA operations - provider-neutral Database HA (Patroni reference / BSD `pgha`), PostgreSQL replication and WAL guardrails, bootstrap, rolling restart, and recovery
 
 ### Operate
@@ -288,6 +288,7 @@ Full matrix with per-row notes: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 
 ### Integrate
 
+- [`docs/docs/reference/api.md`](docs/docs/reference/api.md) - REST API endpoints, authentication requirements, probes, audit jobs, PKI, and HA operations
 - [`docs/SECRETS-AND-TOKENS.md`](docs/SECRETS-AND-TOKENS.md) - secret lifecycle, token scopes, ephemeral / oneshot patterns, master-password rotation modes, rotation grace window
 - [`docs/DYNAMIC-SECRETS.md`](docs/DYNAMIC-SECRETS.md) - modular leased credentials (PostgreSQL, MySQL/MariaDB, LDAP, Redis, Cassandra), Ansible, renew / revoke
 - [`docs/MCP.md`](docs/MCP.md) - Model Context Protocol server (Cursor / Cline / Claude Desktop / Continue / opencode)
@@ -355,7 +356,7 @@ most users encounter them:
 
 ## License
 
-> **License & AI policy**
+> **License and trademark**
 >
 > - Licensed under **AGPL-3.0-or-later** ([LICENSE](LICENSE)). Source-available; modifications must remain AGPL.
 > - **Closed-source relicensing prohibited.** A commercial license is available - see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).

@@ -7,7 +7,7 @@ can verify them end-to-end before pulling.
 
 ## What is signed
 
-For each image (`rhorizon-api`, `rhorizon-frontend`, `rhorizon-agent`):
+For each **published** image (`rhorizon-api`, `rhorizon-agent`):
 - The image itself - `cosign sign` produces a signature OCI artifact
   (`sha256-XXXX.sig`) stored next to the image in the Gitea registry.
 - A SLSA v1.0 provenance attestation describing the build (commit,
@@ -15,6 +15,11 @@ For each image (`rhorizon-api`, `rhorizon-frontend`, `rhorizon-agent`):
 - A CycloneDX SBOM attestation (Software Bill of Materials).
 
 All three are bound to the image's content digest, not its tag.
+
+> The web UI image (`rhorizon-frontend`) is **not distributed**. It is an
+> Nginx image serving a small static SPA, which the project does not carry
+> the support burden for; build it from `frontend/Dockerfile` with the
+> compose stack. Nothing below applies to it.
 
 ## Prerequisites
 
