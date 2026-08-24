@@ -31,13 +31,24 @@ sh tools/install.sh
 That picks the container path, brings up a localhost-only stack, and prints the
 URL and next step. **TLS is mandatory and set up for you**: the installer
 generates a self-signed certificate, so the UI is on `https://127.0.0.1:8443`.
-Open it, choose the master password, and perform the first unseal. Store the
-one-time root token in a password manager; do not place it in chat, shell
-history, or source control.
+The browser therefore shows a warning on the first visit. **This is not an
+encryption failure:** HTTPS is active, but the certificate is self-signed and
+the browser does not know it yet. Compare
+the warning's SHA-256 fingerprint with the one printed by the installer before
+accepting it. See [TLS trust by platform](docs/TLS.md#first-browser-visit-home-install).
+Then choose the master password and perform the first unseal. Store the one-time
+root token in a password manager; do not place it in chat, shell history, or
+source control.
 
-The installer also prints two lines for your shell profile. The CA file is what
-makes the generated certificate trusted by the CLI and the `rh-*` agents --
-without it they correctly refuse to connect, and there is no skip-verify switch:
+To remove the warning, either import this verified certificate into the browser
+or operating-system trust store, or use a domain you control and a certificate
+from a public CA such as Let's Encrypt. Public certificates are free, but they
+cannot be issued for `localhost` or a private IP.
+
+The installer also prints two lines for your shell profile. This certificate
+path is what makes the generated certificate trusted by the CLI and the `rh-*`
+agents -- without it they correctly refuse to connect, and there is no
+skip-verify switch:
 
 ```bash
 export RH_ADDR=https://127.0.0.1:8443

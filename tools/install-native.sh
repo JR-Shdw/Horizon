@@ -180,6 +180,7 @@ export DRY_RUN RH_MODE
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT_DIR/tools/lib/common.sh"
+. "$ROOT_DIR/tools/lib/tls-cert-info.sh"
 
 detect_host
 
@@ -736,8 +737,18 @@ else
         log "      rm $SECRET_FILE"
     fi
 fi
+if [ "$DRY_RUN" != 1 ]; then
+    TLS_FINGERPRINT=$(tls_cert_fingerprint_sha256 "$TLS_CERT") \
+        || die "cannot read the TLS certificate fingerprint: $TLS_CERT"
+    if tls_cert_is_self_signed "$TLS_CERT"; then
+        tls_print_browser_notice "$TLS_CERT" "https://$LOCAL_HOST:$API_PORT" \
+            "docs/TLS.md#first-browser-visit-home-install" \
+            || die "cannot print the TLS certificate fingerprint"
+    fi
+    log "TLS certificate SHA-256: $TLS_FINGERPRINT"
+fi
 log "vault: https://$LOCAL_HOST:$API_PORT"
-log "clients need the CA file -- add to your shell profile:"
+log "clients need the certificate file -- add to your shell profile:"
 log "    export RH_ADDR=https://$LOCAL_HOST:$API_PORT"
 log "    export RH_CA_FILE=$TLS_CERT"
 # System mode keeps CONFIG_DIR at 0700 root-only, so a non-root client cannot

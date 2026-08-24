@@ -6,6 +6,28 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+## 0.9.1-beta - 2026-08-24
+
+### Fixed
+
+- Home installers now explain the expected first-browser certificate warning
+  before printing the URL and show the exact SHA-256 fingerprint to verify.
+- Release publication uses the correct vault token for each namespace and
+  checks the Cosign bundle that the pipeline actually publishes.
+
+### Added
+
+- TLS trust instructions for macOS, Linux, BSD, WSL, Docker and Podman, with a
+  separate path for replacing the local certificate with a public ACME
+  certificate.
+- Maintainer release targets gate public tags on an existing signed private
+  release with provenance.
+
+### Documentation
+
+- Public repository links, API references and image-verification claims now
+  match the artifacts that are actually published.
+
 ## 0.9.0-beta - 2026-08-22
 
 First tagged release.

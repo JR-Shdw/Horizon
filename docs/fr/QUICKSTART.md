@@ -70,7 +70,7 @@ curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/health
 
 # Status (scellé par défaut)
 curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/api/v1/vault/status
-# {"sealed": true, "version": "0.9.0-beta", ...}
+# {"sealed": true, "version": "0.9.1-beta", ...}
 ```
 
 ## 4. Premier descellement
@@ -128,6 +128,21 @@ passe.
 > le CLI et les agents `rh-*`. Sans lui, ils refusent de se connecter, à juste
 > titre. Il n'existe pas d'option skip-verify.
 >
+> Un navigateur ne lit pas `RH_CA_FILE` et affiche donc une alerte à la première
+> visite. **Ce n'est pas un échec de chiffrement :** HTTPS est déjà actif, mais
+> le certificat est auto-signé et le navigateur ne le connaît pas encore.
+> Ouvrez ses détails et comparez son empreinte SHA-256 à celle affichée par
+> l'installeur avant de l'accepter.
+>
+> Pour supprimer l'alerte, importez ce certificat vérifié dans le magasin de
+> confiance du navigateur ou du système. Pour une instance partagée, l'autre
+> possibilité est d'utiliser un domaine contrôlé et un certificat public
+> gratuit tel que Let's Encrypt. Une CA publique ne peut pas certifier
+> `localhost` ou une IP privée ; un Horizon sur réseau privé peut employer
+> DNS-01 et un DNS partagé (*split DNS*). Les procédures pour les navigateurs,
+> macOS, Linux, BSD, WSL, Docker, Podman et le certificat public sont dans
+> [TLS](TLS.md#premiere-visite-dans-le-navigateur-installation-home).
+>
 > Le HTTP en clair écoute toujours sur `:8080` et `:8200` pour le débogage,
 > mais le vault journalise un avertissement `PLAINTEXT TRANSPORT` pour
 > **chaque** appel qui l'emprunte, loopback compris : le trafic same-host reste
@@ -147,7 +162,7 @@ rhorizon login 127.0.0.1:8443      # un hôte nu vaut https par défaut
 
 rhorizon status
 # Status:   UNSEALED
-# Version:  0.9.0-beta
+# Version:  0.9.1-beta
 ```
 
 ## 6. Stocker votre premier secret

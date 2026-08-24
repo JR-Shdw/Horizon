@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Vault
     auto_seal_minutes: int = 0  # 0 = never auto-seal
-    version: str = "0.9.0-beta"
+    version: str = "0.9.1-beta"
     # Closed-catalog dynamic backend selection. This resolves to the repository
     # root in source and /app in the image, independent of process cwd.
     dynamic_modules_file: str = _default_dynamic_modules_file()

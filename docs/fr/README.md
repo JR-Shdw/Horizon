@@ -85,15 +85,27 @@ sh tools/install.sh
 Ça prend le chemin conteneur, monte un stack limité à localhost, et affiche
 l'URL et l'étape suivante. **Le TLS est obligatoire et mis en place pour
 vous** : l'installeur génère un certificat auto-signé, donc l'UI est sur
-`https://127.0.0.1:8443`. Ouvrez-la, choisissez le mot de passe maître, et
-effectuez le premier descellement. Stockez le root token à usage unique dans un
-gestionnaire de mots de passe ; ne le mettez ni dans un chat, ni dans
-l'historique du shell, ni dans le contrôle de version.
+`https://127.0.0.1:8443`. Le navigateur affiche donc une alerte à la première
+visite. **Ce n'est pas un échec de chiffrement :** HTTPS est actif, mais le
+certificat est auto-signé et le navigateur ne le connaît pas encore. Comparez
+son empreinte SHA-256 à celle affichée
+par l'installeur avant de l'accepter. Voir [la confiance TLS selon la
+plateforme](TLS.md#premiere-visite-dans-le-navigateur-installation-home).
+Choisissez ensuite le mot de passe maître et effectuez le premier descellement.
+Stockez le root token à usage unique dans un gestionnaire de mots de passe ; ne
+le mettez ni dans un chat, ni dans l'historique du shell, ni dans le contrôle de
+version.
+
+Pour supprimer l'alerte, importez ce certificat vérifié dans le magasin de
+confiance du navigateur ou du système. L'autre possibilité, adaptée à une
+instance partagée, est d'utiliser un domaine contrôlé et un certificat d'une CA
+publique telle que Let's Encrypt. Le certificat peut être gratuit, mais une CA
+publique ne peut pas certifier `localhost` ni une adresse IP privée.
 
 L'installeur affiche aussi deux lignes à ajouter à votre profil shell. Le
-fichier de CA est ce qui rend le certificat généré digne de confiance pour le
-CLI et les agents `rh-*`. Sans lui ils refusent de se connecter, à juste
-titre, et il n'existe pas d'option skip-verify :
+chemin du certificat est ce qui rend le certificat généré digne de confiance
+pour le CLI et les agents `rh-*`. Sans lui ils refusent de se connecter, à
+juste titre, et il n'existe pas d'option skip-verify :
 
 ```bash
 export RH_ADDR=https://127.0.0.1:8443

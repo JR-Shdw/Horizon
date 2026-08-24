@@ -63,7 +63,7 @@ curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/health
 
 # Status (sealed by default)
 curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/api/v1/vault/status
-# {"sealed": true, "version": "0.9.0-beta", ...}
+# {"sealed": true, "version": "0.9.1-beta", ...}
 ```
 
 ## 4. First unseal
@@ -119,6 +119,20 @@ Store the one-time root token it returns in your password manager.
 > the `rh-*` agents - without it they correctly refuse to connect. There is no
 > skip-verify switch.
 >
+> A browser does not read `RH_CA_FILE`, so it warns on the first visit. **This
+> is not an encryption failure:** HTTPS is already active, but the certificate
+> is self-signed and the browser does not know it yet. Open the certificate
+> details and compare its SHA-256 fingerprint with the value printed by the
+> installer before accepting it.
+>
+> To remove the warning, import this verified certificate into the browser or
+> operating-system trust store. Alternatively, for a shared instance, use a
+> domain you control and a free public certificate such as Let's Encrypt.
+> Public CAs cannot certify `localhost` or a private IP; a private-network
+> Horizon can use DNS-01 and split DNS. Platform-specific browser, OS, WSL,
+> Docker, Podman and public certificate instructions are in
+> [TLS](TLS.md#first-browser-visit-home-install).
+>
 > Plain HTTP is still listening on `:8080` and `:8200` for debugging, but the
 > vault logs a `PLAINTEXT TRANSPORT` warning for **every** call that uses it,
 > loopback included - same-host traffic is still readable by any process with
@@ -137,7 +151,7 @@ rhorizon login 127.0.0.1:8443      # bare host defaults to https
 
 rhorizon status
 # Status:   UNSEALED
-# Version:  0.9.0-beta
+# Version:  0.9.1-beta
 ```
 
 ## 6. Store your first secret

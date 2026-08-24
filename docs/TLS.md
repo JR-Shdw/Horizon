@@ -179,6 +179,148 @@ nginx logs at startup:
 [tls-setup] TLS enabled on :8443 (cert: /certs/cert.pem)
 ```
 
+## First browser visit (home install)
+
+The home installer creates a self-signed **server certificate** so HTTPS works
+without a domain name or external CA. The connection is encrypted immediately.
+The warning is not an encryption failure: it only means that the certificate is
+self-signed and therefore not yet known to the browser's trust store. Switching
+to HTTP is not a fix.
+
+The installer prints the certificate's SHA-256 fingerprint before the URL. In
+the browser, open the warning's certificate details and compare the complete
+fingerprint. Continue only when every byte matches. You can also calculate it
+from the installed file:
+
+```sh
+openssl x509 -in "$HOME/rhorizon/certs/cert.pem" \
+  -noout -fingerprint -sha256
+```
+
+The container home path is normally `~/rhorizon/certs/cert.pem`. Native user
+installs use `${XDG_CONFIG_HOME:-$HOME/.config}/rhorizon/certs/cert.pem`; macOS
+uses `~/Library/Application Support/rhorizon/config/certs/cert.pem`. Use the
+exact path printed by the installer when a custom location was selected.
+
+There are two trust levels:
+
+- **Horizon clients only (recommended):** set `RH_CA_FILE` to the certificate
+  path. The CLI and `rh-*` agents trust this one certificate without changing
+  the machine-wide trust store.
+- **Browser or system trust:** first verify the fingerprint, then accept a
+  site-specific browser exception or import this exact certificate. Remove the
+  old trust entry if Horizon's certificate is regenerated.
+
+### macOS
+
+Import `cert.pem` into the **login** keychain with Keychain Access, open the
+certificate, expand **Trust**, and set **Secure Sockets Layer (SSL)** to
+**Always Trust**. This changes trust for the current user and exact certificate;
+it may ask for the account password. Restart the browser. The hostname used in
+the URL must still be present in the certificate SAN (the default includes
+`localhost` and `127.0.0.1`).
+
+For the CLI, prefer the narrower setting:
+
+```sh
+export RH_CA_FILE="$HOME/Library/Application Support/rhorizon/config/certs/cert.pem"
+```
+
+### Linux
+
+For the CLI and agents, export `RH_CA_FILE`; no root access is required. To make
+system clients trust the certificate, copy it with a `.crt` extension and
+refresh the distribution's trust store:
+
+```sh
+# Debian, Ubuntu, Alpine
+sudo install -m 0644 "$HOME/rhorizon/certs/cert.pem" \
+  /usr/local/share/ca-certificates/rhorizon-local.crt
+sudo update-ca-certificates
+
+# Fedora, RHEL, Arch (p11-kit)
+sudo trust anchor "$HOME/rhorizon/certs/cert.pem"
+sudo update-ca-trust
+```
+
+Some Firefox installations use their own certificate store. If the warning
+remains, accept the verified site exception in Firefox or enable its operating
+system trust-store support. Do not disable certificate verification.
+
+### BSD
+
+`RH_CA_FILE` is the portable, unprivileged choice on FreeBSD, OpenBSD and
+NetBSD. Firefox can also keep a site-specific exception after you verify the
+fingerprint.
+
+For system OpenSSL clients, FreeBSD can copy the certificate to
+`/usr/local/share/certs/` and run `sudo certctl rehash`. NetBSD can place it in
+a directory listed by `/etc/openssl/certs.conf` (for example
+`/etc/openssl/certs.local`) and run `sudo certctl rehash`. OpenBSD has no single
+portable system-wide import command for every TLS consumer; configure the
+client with `RH_CA_FILE` or use that application's certificate store.
+
+### WSL
+
+WSL and Windows have separate trust stores:
+
+- Commands running **inside WSL** follow the Linux instructions for that WSL
+  distribution, or simply use `RH_CA_FILE`.
+- A browser running on **Windows** uses the Windows certificate store. After
+  checking the fingerprint, open `certmgr.msc` as the current user and import
+  `cert.pem` into **Trusted People**. Do not place this server certificate in
+  **Trusted Root Certification Authorities**; it is not a CA certificate.
+
+The file is reachable from Windows through `\\wsl$\<distribution>\...`, or it
+can be copied to `/mnt/c/...` from WSL before import.
+
+### Docker and Podman
+
+Docker and Podman do not change browser trust. A browser on the host follows the
+host's macOS, Linux, BSD or Windows procedure above. A client running **inside a
+container** has its own filesystem and usually its own trust store. Mount the
+certificate read-only and point the client at it:
+
+```yaml
+services:
+  client:
+    volumes:
+      - ./certs/cert.pem:/run/rhorizon/cert.pem:ro
+    environment:
+      RH_CA_FILE: /run/rhorizon/cert.pem
+```
+
+The same Compose mount works with Docker Compose and Podman Compose. For a
+generic image whose application only reads the system store, add the certificate
+to the image and run that distribution's trust refresh command at build time;
+do not modify a running container, because the change disappears when the
+container is recreated.
+
+### Replace it with a public certificate
+
+A public certificate removes the warning without changing every client trust
+store. It does not require a paid certificate: Let's Encrypt and other ACME CAs
+issue them for free. For the usual private-network setup, you need a domain you
+control, DNS resolving it to the Horizon endpoint, and a certificate whose SAN
+contains the exact hostname used in the URL. Some public CAs now also issue
+short-lived certificates for eligible **public** IP addresses, but not for
+`localhost` or RFC1918 private addresses.
+
+DNS-01 validation also works when Horizon stays on a private network: only the
+DNS proof must be public. Configure split DNS so clients resolve the public name
+to Horizon's private address, obtain `fullchain.pem` and `privkey.pem`, then:
+
+- container home install: replace `~/rhorizon/certs/cert.pem` and `key.pem`,
+  preserve the permissions, and restart `frontend`;
+- native Linux/BSD: rerun `tools/install-native.sh` with `--tls-cert
+  /path/fullchain.pem --tls-key /path/privkey.pem`;
+- native macOS: replace the generated pair under the printed config directory
+  and restart the LaunchAgent.
+
+Automate ACME renewal and restart or reload the TLS endpoint after renewal. The
+hostname must keep matching the certificate; using the old private-IP URL will
+still cause a name-mismatch warning.
+
 ## Certificate format
 
 ### cert.pem - fullchain (required)
@@ -207,7 +349,7 @@ in their trust store. Including it is harmless but increases handshake size.
 | Let's Encrypt (acme.sh) | `fullchain.cer` or `ca.cer` + `cert.cer` concatenated |
 | cert-manager (K8s) | `tls.crt` (already contains the fullchain) |
 | Commercial CA (DigiCert, Sectigo...) | Concatenate: `server.crt` + `intermediate.crt` |
-| Self-signed | `cert.pem` (no chain, client must add the CA) |
+| Self-signed | `cert.pem` (no chain; client must explicitly trust this server certificate) |
 
 #### Verify the chain
 

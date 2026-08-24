@@ -186,6 +186,155 @@ nginx affiche au démarrage :
 [tls-setup] TLS enabled on :8443 (cert: /certs/cert.pem)
 ```
 
+## Première visite dans le navigateur (installation home)
+
+L'installeur home crée un **certificat serveur** auto-signé afin que HTTPS
+fonctionne sans nom de domaine ni autorité externe. La connexion est chiffrée
+immédiatement. L'alerte n'est pas un échec de chiffrement : elle signifie
+seulement que le certificat est auto-signé et donc encore inconnu du magasin de
+confiance du navigateur. Passer en HTTP n'est pas une correction.
+
+L'installeur affiche l'empreinte SHA-256 du certificat avant l'URL. Dans le
+navigateur, ouvrez les détails du certificat présenté et comparez l'empreinte
+complète. Ne continuez que si chaque octet correspond. Vous pouvez aussi la
+calculer depuis le fichier installé :
+
+```sh
+openssl x509 -in "$HOME/rhorizon/certs/cert.pem" \
+  -noout -fingerprint -sha256
+```
+
+Le chemin home conteneur est normalement `~/rhorizon/certs/cert.pem`. Une
+installation native utilisateur emploie
+`${XDG_CONFIG_HOME:-$HOME/.config}/rhorizon/certs/cert.pem` ; macOS emploie
+`~/Library/Application Support/rhorizon/config/certs/cert.pem`. Si vous avez
+choisi un autre emplacement, prenez le chemin exact affiché par l'installeur.
+
+Il existe deux niveaux de confiance :
+
+- **Clients Horizon seulement (recommandé) :** pointez `RH_CA_FILE` vers le
+  certificat. Le CLI et les agents `rh-*` font confiance à ce seul certificat,
+  sans modifier le magasin global de la machine.
+- **Navigateur ou système :** vérifiez d'abord l'empreinte, puis acceptez une
+  exception limitée à ce site ou importez ce certificat précis. Supprimez
+  l'ancienne entrée de confiance si le certificat Horizon est régénéré.
+
+### macOS
+
+Importez `cert.pem` dans le trousseau **session** avec Trousseaux d'accès,
+ouvrez le certificat, dépliez **Se fier** et réglez **Secure Sockets Layer
+(SSL)** sur **Toujours approuver**. La confiance ne porte que sur l'utilisateur
+courant et ce certificat ; macOS peut demander le mot de passe du compte.
+Redémarrez le navigateur. Le nom utilisé dans l'URL doit toujours être présent
+dans le SAN du certificat (`localhost` et `127.0.0.1` le sont par défaut).
+
+Pour le CLI, préférez le réglage plus limité :
+
+```sh
+export RH_CA_FILE="$HOME/Library/Application Support/rhorizon/config/certs/cert.pem"
+```
+
+### Linux
+
+Pour le CLI et les agents, exportez `RH_CA_FILE` ; aucun droit root n'est
+nécessaire. Pour les clients qui lisent le magasin système, copiez le certificat
+avec une extension `.crt`, puis reconstruisez le magasin de la distribution :
+
+```sh
+# Debian, Ubuntu, Alpine
+sudo install -m 0644 "$HOME/rhorizon/certs/cert.pem" \
+  /usr/local/share/ca-certificates/rhorizon-local.crt
+sudo update-ca-certificates
+
+# Fedora, RHEL, Arch (p11-kit)
+sudo trust anchor "$HOME/rhorizon/certs/cert.pem"
+sudo update-ca-trust
+```
+
+Certaines versions de Firefox conservent leur propre magasin. Si l'alerte reste
+présente, acceptez l'exception du site après vérification de l'empreinte, ou
+activez l'utilisation du magasin du système. Ne désactivez pas la vérification
+des certificats.
+
+### BSD
+
+`RH_CA_FILE` est le choix portable et sans privilèges sur FreeBSD, OpenBSD et
+NetBSD. Firefox peut également mémoriser une exception limitée au site après
+vérification de l'empreinte.
+
+Pour les clients OpenSSL du système, FreeBSD peut copier le certificat dans
+`/usr/local/share/certs/`, puis lancer `sudo certctl rehash`. NetBSD peut le
+placer dans un répertoire déclaré dans `/etc/openssl/certs.conf` (par exemple
+`/etc/openssl/certs.local`), puis lancer `sudo certctl rehash`. OpenBSD n'a pas
+une commande d'import système unique et portable pour tous les consommateurs
+TLS : utilisez `RH_CA_FILE` ou le magasin propre à l'application.
+
+### WSL
+
+WSL et Windows ont des magasins de confiance séparés :
+
+- les commandes lancées **dans WSL** suivent la procédure Linux de la
+  distribution WSL, ou utilisent simplement `RH_CA_FILE` ;
+- un navigateur lancé sous **Windows** utilise le magasin Windows. Après avoir
+  vérifié l'empreinte, ouvrez `certmgr.msc` pour l'utilisateur courant et
+  importez `cert.pem` dans **Personnes de confiance**. Ne le placez pas dans
+  **Autorités de certification racines de confiance** : c'est un certificat
+  serveur, pas une CA.
+
+Windows peut accéder au fichier par `\\wsl$\<distribution>\...`, ou WSL peut le
+copier vers `/mnt/c/...` avant l'import.
+
+### Docker et Podman
+
+Docker et Podman ne changent pas la confiance du navigateur. Un navigateur sur
+l'hôte suit la procédure macOS, Linux, BSD ou Windows ci-dessus. Un client
+lancé **dans un conteneur** possède son propre système de fichiers et souvent
+son propre magasin. Montez le certificat en lecture seule et indiquez son chemin
+au client :
+
+```yaml
+services:
+  client:
+    volumes:
+      - ./certs/cert.pem:/run/rhorizon/cert.pem:ro
+    environment:
+      RH_CA_FILE: /run/rhorizon/cert.pem
+```
+
+Le même montage Compose fonctionne avec Docker Compose et Podman Compose. Si
+une image générique ne consulte que le magasin système, ajoutez le certificat à
+l'image et lancez la commande de reconstruction propre à sa distribution au
+moment du build. Ne modifiez pas un conteneur déjà lancé : la modification
+disparaît quand il est recréé.
+
+### Remplacer par un certificat public
+
+Un certificat public supprime l'alerte sans modifier le magasin de chaque
+client. Il n'est pas nécessaire de payer : Let's Encrypt et d'autres CA ACME en
+fournissent gratuitement. Dans le cas habituel d'un réseau privé, il faut
+contrôler un nom de domaine, faire résoudre son DNS vers Horizon et obtenir un
+certificat dont le SAN contient exactement le nom utilisé dans l'URL. Certaines
+CA publiques délivrent désormais des certificats courts pour des adresses IP
+**publiques** éligibles, mais pas pour `localhost` ou une adresse privée RFC1918.
+
+La validation DNS-01 fonctionne même si Horizon reste sur un réseau privé :
+seule la preuve DNS doit être publique. Configurez un DNS partagé (*split DNS*)
+qui résout le nom public vers l'adresse privée d'Horizon, obtenez
+`fullchain.pem` et `privkey.pem`, puis :
+
+- installation home conteneur : remplacez
+  `~/rhorizon/certs/cert.pem` et `key.pem`, conservez leurs permissions, puis
+  redémarrez `frontend` ;
+- Linux/BSD natif : relancez `tools/install-native.sh` avec `--tls-cert
+  /chemin/fullchain.pem --tls-key /chemin/privkey.pem` ;
+- macOS natif : remplacez la paire générée dans le dossier de configuration
+  affiché par l'installeur, puis redémarrez le LaunchAgent.
+
+Automatisez le renouvellement ACME et rechargez ou redémarrez le point de
+terminaison TLS après chaque renouvellement. Le nom doit toujours correspondre
+au certificat : continuer à utiliser l'ancienne URL avec l'IP privée produira
+une alerte de non-correspondance.
+
 ## Format des certificats
 
 ### cert.pem - fullchain (obligatoire)
@@ -214,7 +363,7 @@ dans leur trust store. L'inclure ne casse rien mais alourdit le handshake.
 | Let's Encrypt (acme.sh) | `fullchain.cer` ou `ca.cer` + `cert.cer` concatenés |
 | cert-manager (K8s) | `tls.crt` (contient déjà la fullchain) |
 | Achat CA (DigiCert, Sectigo...) | Concatener : `server.crt` + `intermediate.crt` |
-| Auto-signé | `cert.pem` (pas de chain, le client doit ajouter la CA) |
+| Auto-signé | `cert.pem` (pas de chaîne ; le client doit faire explicitement confiance à ce certificat serveur) |
 
 #### Vérifier la chaîne
 

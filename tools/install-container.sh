@@ -391,6 +391,7 @@ else
     fi
     SOURCE_DIR="$WORK_DIR/source"
 fi
+. "$SOURCE_DIR/tools/lib/tls-cert-info.sh"
 cp "$SOURCE_DIR/schema.sql" "$WORK_DIR/schema.sql"
 cp "$SOURCE_DIR/dynamic-engines.ini" "$WORK_DIR/dynamic-engines.ini"
 cp "$SOURCE_DIR/tools/docker-compose.memory-lock.yml" \
@@ -721,6 +722,17 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
+TLS_FINGERPRINT=$(tls_cert_fingerprint_sha256 "$CERT_DIR/cert.pem") \
+    || die "cannot read the TLS certificate fingerprint: $CERT_DIR/cert.pem"
+TLS_CERT_KIND="certificate supplied by the operator"
+if tls_cert_is_self_signed "$CERT_DIR/cert.pem"; then
+    TLS_CERT_KIND="self-signed local certificate"
+    tls_print_browser_notice "$CERT_DIR/cert.pem" \
+        "https://$BIND_ADDR:$FRONTEND_PORT/" \
+        "docs/TLS.md#first-browser-visit-home-install" \
+        || die "cannot print the TLS certificate fingerprint"
+fi
+
 cat <<EOF
 
 ================================================================================
@@ -733,7 +745,8 @@ cat <<EOF
                           PLAINTEXT TRANSPORT warning for every call that
                           uses them)
 
-  TLS certificate      : $CERT_DIR/cert.pem  (self-signed, 825 days)
+  TLS certificate      : $CERT_DIR/cert.pem  ($TLS_CERT_KIND)
+  SHA-256 fingerprint  : $TLS_FINGERPRINT
 
 $(if [ "$UNSEALED_BY_INSTALLER" = true ]; then cat <<CREDS
   Master password      : $MASTER_PW_FILE
