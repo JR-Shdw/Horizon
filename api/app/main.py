@@ -2281,6 +2281,39 @@ async def health():
     return {"status": "ok"}
 
 
+def _internal_ha_status_body() -> dict:
+    """Build the process-local HA payload without performing any I/O."""
+
+    from .node_uuid import NodeUUIDError, get_node_uuid
+
+    try:
+        node_id = get_node_uuid()
+    except NodeUUIDError:
+        node_id = None
+
+    if vs.sealed:
+        state = "sealed"
+    elif vs.must_seal:
+        state = "sealing"
+    elif vs.frozen:
+        state = "frozen"
+    else:
+        state = "active"
+
+    age = vs.db_confirmation_age()
+    return {
+        "node_id": node_id,
+        "role": vs.last_known_role,
+        "state": state,
+        "serving": state == "active",
+        "holds_primary_lease": vs.holds_primary_lease,
+        "db_authority_confirmed": not vs.frozen and not vs.sealed,
+        "confirmation_age_seconds": None if age is None else round(age, 3),
+        "primary_since": vs.last_primary_since,
+        "key_epoch": vs.key_epoch,
+    }
+
+
 @app.get("/internal/ha/status")
 async def internal_ha_status():
     """Local HA state, answerable with PostgreSQL completely unreachable.
@@ -2311,39 +2344,17 @@ async def internal_ha_status():
     what state it is in. A peer needs to tell "frozen" from "unreachable", and
     folding the state into the status code destroys that distinction.
     """
-    from .node_uuid import NodeUUIDError, get_node_uuid
+    return _internal_ha_status_body()
 
-    try:
-        node_id = get_node_uuid()
-    except NodeUUIDError:
-        node_id = None
 
-    if vs.sealed:
-        state = "sealed"
-    elif vs.must_seal:
-        state = "sealing"
-    elif vs.frozen:
-        state = "frozen"
-    else:
-        state = "active"
+@app.get("/internal/ha/peer-status")
+async def internal_ha_peer_status(request: Request):
+    """The same DB-free facts, restricted to cached cluster mTLS members."""
 
-    age = vs.db_confirmation_age()
-    return {
-        "node_id": node_id,
-        "role": vs.last_known_role,
-        "state": state,
-        "serving": state == "active",
-        "holds_primary_lease": vs.holds_primary_lease,
-        "db_authority_confirmed": not vs.frozen and not vs.sealed,
-        "confirmation_age_seconds": None if age is None else round(age, 3),
-        # The referent for peer-aware classification. Stamped by the PG clock
-        # under the election lock, so it moves at every failover: a peer whose
-        # value is strictly newer than a frozen node's has proved an election
-        # completed without it -- isolation rather than a shared outage.
-        # Published, not yet acted upon. Cached like `role`, and stale by
-        # design for the same reason, which is why it ships next to the age.
-        "primary_since": vs.last_primary_since,
-    }
+    from .cluster_peer_frozen import authenticate_cached_peer
+
+    authenticate_cached_peer(request)
+    return _internal_ha_status_body()
 
 
 @app.get("/readiness")

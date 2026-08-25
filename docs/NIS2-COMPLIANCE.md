@@ -102,7 +102,7 @@ dependencies), package-signature verification.
 
 | Requirement | Status | Resurgamus Horizon implementation |
 |----------|--------|----------------------|
-| Secure development | **COMPLIANT** | Mandatory CI pipeline: lint (ruff) + SAST (bandit) + dep audit (pip-audit) + secret scan (detect-secrets) + tests (1815 Python + 136 Rust) + CVE scan (Trivy). |
+| Secure development | **COMPLIANT** | Mandatory CI pipeline: lint (ruff) + SAST (bandit) + dep audit (pip-audit) + secret scan (detect-secrets) + more than 3,000 Python tests and 272 Rust release tests + CVE scan (Trivy). |
 | Vulnerability management | **COMPLIANT** | Daily Trivy scan (cron 4h UTC). pip-audit on every push. Dependency versions pinned and documented with a bump procedure. |
 | Security testing | **COMPLIANT** | Dedicated security test suite (test_security.py): auth bypass (6 vectors), privilege escalation, sealed state, input validation, challenge replay, token revocation. |
 | Vulnerability remediation | **CONTRIBUTES** | CI pipeline blocks the merge if SAST or audit fails. Notification on failure. But: no formal remediation SLA. |

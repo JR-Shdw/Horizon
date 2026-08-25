@@ -178,6 +178,116 @@ async def test_two_nodes_each_elect_their_own_leader(setup_db, monkeypatch):
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+@pytest.mark.asyncio
+async def test_a_maintenance_leader_attaches_when_global_orchestration_is_busy(
+    monkeypatch,
+):
+    """A local leader must not remain sealed behind another node's operation.
+
+    The maintenance lock is per node, but generation orchestration is global.
+    Therefore this worker can legitimately win local leadership while a peer
+    node holds the global lock. Repair is forbidden in that moment; attaching
+    read-only to this node's already-open coordinator is still safe and is the
+    only way for this API worker to converge after a fence/unseal cycle.
+    """
+    from api.app import rust_custody_backend
+
+    monkeypatch.setattr(cg, "_node_scope", lambda: "node-a")
+    attached = asyncio.Event()
+
+    async def busy(*_args, **_kwargs):
+        raise cg.CustodyOrchestrationBusy("peer node is reconciling")
+
+    async def attach(*_args, **_kwargs):
+        attached.set()
+        return True
+
+    monkeypatch.setattr(rust_custody_backend, "refresh_rust_custody", busy)
+    monkeypatch.setattr(rust_custody_backend, "attach_live_rust_coordinator", attach)
+
+    class LeaderResult:
+        def scalar_one(self):
+            return True
+
+    class LeaderSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        def begin(self):
+            return self
+
+        async def execute(self, *_args, **_kwargs):
+            return LeaderResult()
+
+    def leader_session_factory():
+        return LeaderSession()
+
+    task = asyncio.create_task(
+        custody_routing.run_custody_routing(
+            "pool",
+            FakeVault(),
+            session_factory=leader_session_factory,
+            interval_seconds=0.02,
+        )
+    )
+    try:
+        await asyncio.wait_for(attached.wait(), timeout=0.25)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_attachment_progresses_while_maintenance_lock_query_is_hung(monkeypatch):
+    """A blackholed election query must not strand this worker sealed.
+
+    PostgreSQL can keep an in-flight TCP query parked after the route is
+    restored. If attachment shares the election coroutine, that worker never
+    reaches either the leader or follower branch and remains sealed while its
+    peers recover. The attachment loop therefore has to be independently
+    scheduled and bounded.
+    """
+    from api.app import rust_custody_backend
+
+    attached = asyncio.Event()
+
+    class HungSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        def begin(self):
+            return self
+
+        async def execute(self, *_args, **_kwargs):
+            await asyncio.Event().wait()
+
+    async def attach(*_args, **_kwargs):
+        attached.set()
+        return True
+
+    monkeypatch.setattr(rust_custody_backend, "attach_live_rust_coordinator", attach)
+
+    task = asyncio.create_task(
+        custody_routing.run_custody_routing(
+            "pool",
+            FakeVault(),
+            session_factory=HungSession,
+            interval_seconds=0.02,
+        )
+    )
+    try:
+        await asyncio.wait_for(attached.wait(), timeout=0.25)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 # --- rust route: which custody routes the backend may serve ----------------
 
 

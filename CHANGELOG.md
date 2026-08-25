@@ -6,6 +6,29 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+## 0.9.2-beta - 2026-08-25
+
+### Security
+
+- GF(256) multiplication now has native, architecture-specific assembly gates
+  on x86_64 and AArch64. The AArch64 lane also runs the complete Rust test
+  suite and all four libFuzzer targets on GitHub's native ARM runner.
+- Shamir validation covers all 65,536 GF(256) products, Rust/Python parity,
+  fuzzing, and compiler-output inspection. A Raspberry Pi 4 can reproduce the
+  same native ARM checks with `make arm64-native-check`.
+
+### Changed
+
+- The GF(256) and Shamir implementation provenance now explicitly credits the
+  adapted `geky/gf256` work and carries its BSD-3-Clause attribution.
+- All distributed package metadata is aligned with this release: Python and
+  Rust wheels, CLI, MCP server and hub, Rust agents, npm SDK, and Helm chart.
+
+### Documentation
+
+- The HA peer-status endpoint and the cross-architecture side-channel evidence
+  are documented in the public reference and security material.
+
 ## 0.9.1-beta - 2026-08-24
 
 ### Fixed

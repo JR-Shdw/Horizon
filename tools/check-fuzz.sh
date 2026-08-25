@@ -95,9 +95,9 @@ cat <<EOF
   ================================================================
   Local fuzz smoke passed (budget: ${TIME_BUDGET}s per target).
 
-  Le vrai run tourne la nuit dans .woodpecker/fuzz.yml (cron
-  nightly-fuzz). Si ce script est vert, le pipeline part avec
-  une corpus saine.
+  Campagnes CI longues : .woodpecker/fuzz.yml sur x86_64
+  (30 min/cible chaque nuit) et crypto-arm64.yml sur aarch64
+  (5 min/cible chaque semaine).
 
   Artefacts de crash eventuels : api/rust/fuzz/artifacts/<target>/
   Corpus persistant local      : api/rust/fuzz/corpus/<target>/

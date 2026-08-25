@@ -141,7 +141,7 @@ auditées.
 - **bcrypt** - Coût mémoire fixé à ~4 Ko quel que soit `cost`. Bruteforce GPU faisable à grande échelle. Argon2id explicitement conçu pour défaire ça.
 - **scrypt** - Précède Argon2 et partage son objectif memory-hard, mais le réglage des paramètres est plus dur à bien faire et la standardisation (RFC 7914) n'a jamais été mise à jour pour matcher les recommandations modernes. Argon2 est le [vainqueur PHC](https://password-hashing.net/).
 - **PBKDF2** - KDF iteration-only. Pas de dureté mémoire. OK pour un flow de reset password AAL1, pas pour la creds racine d'un vault.
-- **Crypto custom** - Resurgamus Horizon implémente **zéro** primitive custom. Chaque algorithme de la chaîne est standardisé (RFC / NIST / IETF) et fourni par une lib auditée.
+- **Nouvelle primitive cryptographique** - Horizon n'invente aucun algorithme. Les opérations standard reposent sur des bibliothèques établies. L'exception d'implémentation est le cœur GF(256)/Shamir maintenu en Rust, adapté de `geky/gf256` et de l'article original de Shamir. Il est contrôlé par vérification exhaustive du corps fini, tests de parité Rust/Python, propriétés, fuzzing et inspection du code compilé. Ces contrôles ne constituent pas une certification.
 - **Token de session maison** - Les tokens sont 32 octets random hashés HMAC-SHA512. Pas de JWT, pas de cookie signé, pas de danse refresh-token. La DB est l'unique source de vérité ; la révocation est un `UPDATE ... SET active=false`.
 - **mTLS comme seul auth** - mTLS est *complémentaire* (l'opérateur peut ajouter un reverse proxy qui fait la vérif client-cert), pas un remplacement de l'auth applicative.
 
@@ -173,7 +173,7 @@ Les signatures d'audit Ed25519, WebAuthn et ECDSA restent classiques. Voir
 ## Voir aussi
 
 - [docs/THREAT-MODEL.md](../THREAT-MODEL.md) - mapping MITRE ATT&CK + OWASP ASVS Level 2 complet, limitations explicites
-- [docs/SIDE-CHANNELS.md](../SIDE-CHANNELS.md) - conception constant-time, tests fonctionnels amd64/aarch64, gate assembleur x86_64, protection mémoire et risques résiduels
+- [docs/SIDE-CHANNELS.md](../SIDE-CHANNELS.md) - conception constant-time, tests fonctionnels amd64/aarch64, gates assembleur natifs sur les deux architectures, protection mémoire et risques résiduels
 - [docs/POST-QUANTUM.md](../POST-QUANTUM.md) - posture post-quantique : transport hybride ML-KEM + coeur de stockage PQ par construction
 - [docs/NIS2-COMPLIANCE.md](../NIS2-COMPLIANCE.md) - matrice des contrôles NIS2 Art. 21
 - [docs/SECURITY-AUDIT.md](../SECURITY-AUDIT.md) - résultats de l'audit sécurité interne + journal de remédiation

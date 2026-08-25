@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Vault
     auto_seal_minutes: int = 0  # 0 = never auto-seal
-    version: str = "0.9.1-beta"
+    version: str = "0.9.2-beta"
     # Closed-catalog dynamic backend selection. This resolves to the repository
     # root in source and /app in the image, independent of process cwd.
     dynamic_modules_file: str = _default_dynamic_modules_file()
@@ -181,6 +181,10 @@ class Settings(BaseSettings):
     # the inventory/LAN address.  Empty keeps the TEST-NET compatibility
     # placeholder for local tests and manual single-host initialisation.
     cluster_advertise_ip: str = ""
+    # Direct per-node HTTPS listener used for DB-free peer observations. The
+    # standard HA frontend exposes 8443; custom native/NAT layouts may override
+    # this without changing the advertised membership address.
+    cluster_peer_https_port: int = 8443
     # Inter-host HA state-machine knobs.
     # cluster_heartbeat_interval_secs : how often a node writes its own
     #   vault_cluster_nodes.last_heartbeat. Dedicated asyncio task
@@ -638,6 +642,13 @@ class Settings(BaseSettings):
         # Store a canonical literal (including compressed IPv6), never a DNS
         # name whose resolution could change independently of membership.
         return str(ipaddress.ip_address(value))
+
+    @field_validator("cluster_peer_https_port")
+    @classmethod
+    def validate_cluster_peer_https_port(cls, v: int) -> int:
+        if not 1 <= v <= 65535:
+            raise ValueError("cluster_peer_https_port must be between 1 and 65535")
+        return v
 
     @field_validator("cluster_join_quarantine_secs")
     @classmethod

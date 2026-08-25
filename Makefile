@@ -1,4 +1,4 @@
-.PHONY: help up down build restart logs ps lint lint-fix test test-cov db-shell db-dump db-restore secrets laptop laptop-native rust-check rust-check-fast rust-test rust-wheel-install fuzz-smoke fuzz-list gf-ct-check deps deps-lock deps-audit watch verify-local test-matrix k8s-test native-smoke custody-smoke k8s-e2e retest lab-cleanup chaos-k7-init chaos-k7-check chaos-k7-preflight chaos-k7-24h chaos-k7-24h-detached chaos-k7-24h-high chaos-k7-24h-high-detached chaos-k7-status
+.PHONY: help up down build restart logs ps lint lint-fix test test-cov db-shell db-dump db-restore secrets laptop laptop-native rust-check rust-check-fast rust-test rust-wheel-install fuzz-smoke fuzz-list gf-ct-check arm64-native-check deps deps-lock deps-audit watch verify-local test-matrix k8s-test native-smoke custody-smoke k8s-e2e retest lab-cleanup chaos-k7-init chaos-k7-check chaos-k7-preflight chaos-k7-24h chaos-k7-24h-detached chaos-k7-24h-high chaos-k7-24h-high-detached chaos-k7-status
 
 # Test-PG host port. 5434 collides with forgejo's PG on some dev hosts, so the
 # local test DB defaults to 55434. docker-compose.test.yml reads the same var.
@@ -112,8 +112,11 @@ fuzz-smoke: ## Smoke run des 4 cibles cargo-fuzz (60s chacune, nightly requis)
 fuzz-list: ## Liste les cibles cargo-fuzz definies
 	cd api/rust && cargo +nightly fuzz list
 
-gf-ct-check: ## Asm gate constant-time GF(256) (verifie zero conditional jump dans gf256_ct)
+gf-ct-check: ## Gate assembleur GF(256) natif (x86_64 ou aarch64)
 	bash tools/check-gf-ct.sh
+
+arm64-native-check: ## Tests + gate assembleur + fuzzing sur ARM64 natif / Raspberry Pi 4
+	bash tools/check-arm64-native.sh
 
 test: ## Lance les tests pytest (PG de test temporaire)
 	@rc=0; \

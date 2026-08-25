@@ -20,6 +20,7 @@ These paths are served at the API root, without the `/api/v1/vault` prefix.
 | GET | `/health` | none | Liveness; returns `200` while the process is running, including while sealed |
 | GET | `/readiness` | none | Load-balancer readiness; returns `200` only when this worker may serve vault traffic |
 | GET | `/internal/ha/status` | none | Process-local HA state that remains available during a PostgreSQL outage |
+| GET | `/internal/ha/peer-status` | cached cluster mTLS member | The same DB-free HA state, restricted to known cluster peers |
 
 ## Vault lifecycle
 

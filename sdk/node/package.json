@@ -1,6 +1,6 @@
 {
   "name": "@rhorizon/client",
-  "version": "0.1.0",
+  "version": "0.9.2-beta.1",
   "description": "TypeScript SDK for Resurgamus Horizon \u2014 self-hosted secrets vault",
   "license": "AGPL-3.0-or-later",
   "author": "shdw <horizon@resurgamus.com>",

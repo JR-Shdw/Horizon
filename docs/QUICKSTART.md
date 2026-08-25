@@ -63,7 +63,7 @@ curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/health
 
 # Status (sealed by default)
 curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/api/v1/vault/status
-# {"sealed": true, "version": "0.9.1-beta", ...}
+# {"sealed": true, "version": "0.9.2-beta", ...}
 ```
 
 ## 4. First unseal
@@ -151,7 +151,7 @@ rhorizon login 127.0.0.1:8443      # bare host defaults to https
 
 rhorizon status
 # Status:   UNSEALED
-# Version:  0.9.1-beta
+# Version:  0.9.2-beta
 ```
 
 ## 6. Store your first secret

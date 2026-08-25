@@ -108,7 +108,29 @@ those require a native hardware lane. CI equivalent:
 `.woodpecker/arch-matrix.yml` (weekly cron + manual).
 
 This is functional and conformance coverage. The separate
-`tools/check-gf-ct.sh` release-assembly branch gate is x86_64-specific; see
+`.github/workflows/crypto-arm64.yml` workflow complements it on a native
+`ubuntu-24.04-arm` runner. On relevant pushes and pull requests it runs the
+release suite, checks the generated GF(256) assembly for aarch64 conditional
+branches, and fuzzes all four targets for 30 seconds each. Its weekly run uses
+five minutes per target; a manual dispatch accepts a custom budget.
+
+The same native path is available on a Raspberry Pi 4 running a 64-bit Linux:
+
+```bash
+# one-time fuzzing prerequisites
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz
+
+# release tests + aarch64 assembly gate + 60 s per fuzz target
+tools/check-arm64-native.sh
+
+# longer campaign, five minutes per target
+tools/check-arm64-native.sh --fuzz-time 300
+```
+
+`tools/check-gf-ct.sh` auto-detects x86_64 versus aarch64. Its static assembly
+inspection is architecture-specific but remains short of a formal proof or a
+target-silicon timing measurement; see
 [`docs/SIDE-CHANNELS.md`](../docs/SIDE-CHANNELS.md).
 
 **Full stack on arm64.** `tools/test-arm64-stack.sh` goes further: it builds the

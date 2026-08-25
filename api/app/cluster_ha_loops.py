@@ -58,6 +58,13 @@ from . import cluster_ca, cluster_membership
 from . import metrics as _metrics
 from .audit import log_action
 from .cluster import with_cluster_lock
+from .cluster_peer_frozen import (
+    PeerVerdict,
+    classify_frozen_peers,
+    poll_peer_observations,
+    refresh_peer_snapshot,
+    snapshot_needs_refresh,
+)
 from .cluster_rekey import consume_envelope, delete_consumed_row, publish_envelope
 from .config import settings
 from .database import async_session
@@ -1108,11 +1115,50 @@ def _fence_should_seal(
     """
     if vault_state.sealed:
         return False, None
-    if _lease_fence_should_seal(last_lease_confirm, now_monotonic):
+    if _lease_fence_should_seal(last_lease_confirm, now_monotonic) and not getattr(
+        vault_state, "peer_seal_deferred", False
+    ):
         return True, "lease_loss_fence"
     if vault_state.must_seal:
         return True, "authority_fence"
     return False, None
+
+
+async def _peer_frozen_body(vault_state=vs) -> PeerVerdict:
+    """Classify reachable peers after a failed local authority round-trip.
+
+    This is deliberately called from the existing heartbeat error path, never
+    from the independent fence loop.  Network work is bounded, while the fence
+    remains a one-second monotonic check that cannot be starved.
+    """
+
+    if vault_state.sealed or not vault_state.frozen:
+        return PeerVerdict.LOCAL_FENCE
+
+    observations = await poll_peer_observations()
+    decision = classify_frozen_peers(
+        local_primary_since=vault_state.last_primary_since,
+        local_key_epoch=vault_state.key_epoch,
+        observations=observations,
+    )
+    if decision.verdict is PeerVerdict.SEAL_EARLY:
+        log.error(
+            "cluster peer classifier: newer canonical referent observed "
+            "(%s) -- sealing stale node",
+            decision.reason,
+        )
+        _metrics.seal_events.labels(trigger=f"peer_{decision.reason}").inc()
+        await _lease_fence_seal(vault_state)
+    elif decision.verdict is PeerVerdict.SHARED_OUTAGE:
+        first_extension = not getattr(vault_state, "peer_seal_deferred", False)
+        moved = vault_state.prolong_frozen(settings.cluster_frozen_max_secs)
+        if moved and first_extension:
+            log.warning(
+                "cluster peer classifier: %d peer(s) also frozen; retaining "
+                "keys while non-serving within the bounded authority cap",
+                decision.peer_count,
+            )
+    return decision.verdict
 
 
 async def _lease_fence_seal(vault_state) -> None:
@@ -1161,7 +1207,26 @@ async def _lease_fence_seal(vault_state) -> None:
                 exc_info=True,
             )
         finally:
-            vault_state.seal()
+            # A follower may still point at the coordinator we just sealed.
+            # Keeping that client across the fence is not harmless: password
+            # unseal first derives a local, verified bundle and writes its
+            # audit entry before Rust custody adopts it. With a stale client
+            # attached, that audit operation is delegated to the sealed
+            # coordinator and the authenticated unseal fails with a 500
+            # ("vault sealed") before the pool can be reopened.
+            #
+            # Detach while sealing, not during the later unseal. The fence is
+            # the transition that invalidated the client, and every future
+            # recovery path should start from the same honest local state.
+            try:
+                vault_state.detach_rpc_client()
+            except Exception:
+                log.warning(
+                    "lease-fence: failed to detach stale RPC client",
+                    exc_info=True,
+                )
+            finally:
+                vault_state.seal()
 
 
 async def cluster_ha_fence_loop():  # pragma: no cover  (daemon loop)
@@ -1352,6 +1417,19 @@ async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
                     vs.note_primary_since(
                         None if primary_since is None else primary_since.isoformat()
                     )
+                    # Cache the addresses and public trust anchors needed to
+                    # poll peers after this local DB route disappears.  A
+                    # refresh failure does not invalidate the canonical
+                    # confirmation above; it only removes the optional peer
+                    # accelerator and falls back to the local fence.
+                    if snapshot_needs_refresh():
+                        try:
+                            await refresh_peer_snapshot(db, node_uuid)
+                        except Exception:
+                            log.warning(
+                                "cluster peer snapshot refresh failed",
+                                exc_info=True,
+                            )
                     if was_frozen:
                         log.warning(
                             "cluster_ha_heartbeat: FROZEN -> ACTIVE, canonical "
@@ -1370,6 +1448,13 @@ async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
                     )
         except Exception:
             log.warning("cluster_ha_heartbeat_loop error", exc_info=True)
+            # Existing heartbeat path, after a failed authority attempt.  Peer
+            # I/O is kept out of the independent fence loop so a slow network
+            # can never delay the terminal monotonic check.
+            try:
+                await _peer_frozen_body(vs)
+            except Exception:
+                log.warning("cluster peer classification failed", exc_info=True)
         # Hard fence : the node is ALREADY frozen by now (its VaultState
         # authority deadline lapsed at the TTL, with no code required), so this
         # is not what stops it serving. It only decides when a node that has
@@ -1405,9 +1490,11 @@ async def cluster_ha_heartbeat_loop():  # pragma: no cover  (daemon loop)
         # _seal_deadline), and OR-ing can only ever seal MORE, never less, so
         # the primary path cannot regress behind this change.
         #
-        # It also inherits the peer invariant for free: prolong_frozen moves
-        # _seal_deadline but is bounded by _seal_deadline_cap, so a peer can buy
-        # a frozen node time and still never buy it immunity.
+        # Peer prolongation moves _seal_deadline but is bounded by its fixed
+        # cap.  The authority trigger follows that deadline.  The legacy
+        # primary-only lease trigger is suppressed for that authority cycle
+        # once a peer extension has moved the deadline; otherwise its original
+        # ttl+grace clock would bypass the extension on the former primary.
         try:
             fire, trigger = _fence_should_seal(last_lease_confirm, time.monotonic(), vs)
             if fire:

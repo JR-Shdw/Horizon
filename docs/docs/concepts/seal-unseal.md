@@ -90,7 +90,7 @@ curl http://127.0.0.1:8200/api/v1/vault/status
 
 # {
 #   "sealed": false,
-#   "version": "0.9.1-beta",
+#   "version": "0.9.2-beta",
 #   "second_factor": "any",
 #   "yubikeys_registered": 1,
 #   "totp_enabled": true,

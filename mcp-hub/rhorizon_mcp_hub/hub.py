@@ -57,7 +57,7 @@ def _import_gateway():
 log = logging.getLogger("rhorizon-mcp-hub")
 
 PROTOCOL_VERSION = "2024-11-05"
-__version__ = "0.1.0"
+__version__ = "0.9.2b1"
 _STARTUP_TIMEOUT = 30.0
 _CALL_TIMEOUT = 120.0
 

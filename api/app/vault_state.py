@@ -144,6 +144,11 @@ class VaultState:
         # deadline out (see prolong_frozen) but never past this, so peer input
         # cannot turn "eventually sealed" into "never sealed".
         self._seal_deadline_cap: float | None = None
+        # True only after authenticated peer evidence moved the deadline.  The
+        # primary-only legacy lease fence must then defer to ``must_seal``;
+        # otherwise its original ttl+grace clock would silently bypass the
+        # bounded peer extension on the former primary alone.
+        self._peer_seal_deferred = False
         # Previous hmac_key for lazy token migration after password rotation
         self._prev_hmac_enc = None
         # Monotonic, process-local cache generation. Cleanup snapshots it before
@@ -1450,6 +1455,7 @@ class VaultState:
         self._seal_deadline_cap = (
             now + ttl_secs + seal_grace_secs * _PEER_PROLONG_FACTOR
         )
+        self._peer_seal_deferred = False
 
     def note_role(self, role: str | None) -> None:
         """Cache the role PostgreSQL last reported, for DB-free status."""
@@ -1534,6 +1540,7 @@ class VaultState:
         self._primary_lease_deadline = None
         self._seal_deadline = None
         self._seal_deadline_cap = None
+        self._peer_seal_deferred = False
 
     def prolong_frozen(self, secs: float) -> bool:
         """Peer evidence may extend how long this node stays frozen.
@@ -1566,7 +1573,14 @@ class VaultState:
         if target <= current:
             return False
         self._seal_deadline = target
+        self._peer_seal_deferred = True
         return True
+
+    @property
+    def peer_seal_deferred(self) -> bool:
+        """Whether peer evidence moved this authority cycle's seal deadline."""
+
+        return self._peer_seal_deferred
 
     @property
     def must_seal(self) -> bool:

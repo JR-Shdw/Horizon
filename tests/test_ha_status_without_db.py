@@ -40,6 +40,8 @@ async def test_ha_status_answers_and_reports_active(client, admin_token):
         "holds_primary_lease",
         "db_authority_confirmed",
         "confirmation_age_seconds",
+        "primary_since",
+        "key_epoch",
     ):
         assert field in body, f"missing {field}"
 

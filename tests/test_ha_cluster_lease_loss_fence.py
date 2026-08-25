@@ -82,6 +82,26 @@ def test_beyond_frozen_max_seals(monkeypatch):
     assert loops._lease_fence_should_seal(confirmed_at, confirmed_at + 320.1) is True
 
 
+def test_peer_extension_defers_primary_lease_trigger_to_authority_deadline(
+    monkeypatch,
+):
+    """The former primary must receive the same bounded hold as secondaries."""
+    monkeypatch.setattr(settings, "cluster_primary_lease_ttl_secs", 20)
+    monkeypatch.setattr(settings, "cluster_frozen_max_secs", 300)
+
+    class _Vault:
+        sealed = False
+        peer_seal_deferred = True
+        must_seal = False
+
+    fire, trigger = loops._fence_should_seal(1_000.0, 1_321.0, _Vault())
+    assert (fire, trigger) == (False, None)
+
+    _Vault.must_seal = True
+    fire, trigger = loops._fence_should_seal(1_000.0, 1_321.0, _Vault())
+    assert (fire, trigger) == (True, "authority_fence")
+
+
 def test_threshold_follows_settings(monkeypatch):
     # The fence tracks the configured TTL + frozen window, not a constant.
     monkeypatch.setattr(settings, "cluster_primary_lease_ttl_secs", 5)
@@ -105,11 +125,14 @@ async def test_lease_fence_seal_stops_master_services_before_seal(monkeypatch):
     monkeypatch.setattr(cluster_setup, "stop_master_services", _fake_stop)
 
     class _FakeVault:
+        def detach_rpc_client(self):
+            calls.append("detach")
+
         def seal(self):
             calls.append("seal")
 
     await loops._lease_fence_seal(_FakeVault())
-    assert calls == ["stop", "seal"]
+    assert calls == ["stop", "detach", "seal"]
 
 
 async def test_lease_fence_seal_still_seals_when_stop_raises(monkeypatch):
@@ -124,8 +147,11 @@ async def test_lease_fence_seal_still_seals_when_stop_raises(monkeypatch):
     monkeypatch.setattr(cluster_setup, "stop_master_services", _boom)
 
     class _FakeVault:
+        def detach_rpc_client(self):
+            calls.append("detach")
+
         def seal(self):
             calls.append("seal")
 
     await loops._lease_fence_seal(_FakeVault())
-    assert calls == ["seal"]
+    assert calls == ["detach", "seal"]

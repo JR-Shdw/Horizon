@@ -17,6 +17,12 @@ def test_cluster_advertise_ip_rejects_hostnames():
         Settings(cluster_advertise_ip="vault-node.example.test")
 
 
+@pytest.mark.parametrize("port", [0, 65536])
+def test_cluster_peer_https_port_rejects_invalid_values(port):
+    with pytest.raises(ValidationError, match="cluster_peer_https_port"):
+        Settings(cluster_peer_https_port=port)
+
+
 @pytest.mark.parametrize(
     "raw,expected",
     [

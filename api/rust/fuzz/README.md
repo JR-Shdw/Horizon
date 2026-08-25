@@ -71,14 +71,15 @@ scheduled cron job, not on every push.
 
 ## Integration with the regular pipeline
 
-The `validate.yml` Woodpecker pipeline does NOT run fuzz targets
-on every push - that would either be too short (60 s smoke run
-finds shallow bugs only) or too long (hours per run, blocks the
-queue). Recommended approach :
+The `validate.yml` Woodpecker pipeline does not run fuzz targets on every push.
+Two dedicated pipelines provide complementary architecture coverage:
 
-- Run fuzz targets locally before any significant edit to the
-  Rust crypto layer (one-shot, 60-300 s per target).
-- Schedule a nightly Woodpecker pipeline that runs each target
-  for ~30 min, keeps the corpus on a persistent volume, and
-  alerts Matrix on any crash artefact. Not yet implemented -
-  see `docs/PUBLISH-CHECKLIST.md` open items.
+- `.woodpecker/fuzz.yml` runs each target for 30 minutes nightly on x86_64,
+  keeps a persistent corpus, and alerts on crash artifacts.
+- `.github/workflows/crypto-arm64.yml` runs natively on aarch64: 30 seconds per
+  target on relevant pushes and pull requests, five minutes per target weekly,
+  or a caller-selected budget through manual dispatch. Its corpus is restored
+  through the GitHub Actions cache.
+
+On a 64-bit Raspberry Pi 4, `tools/check-arm64-native.sh` runs the release test
+suite, the aarch64 assembly gate, and this fuzzing smoke in one command.

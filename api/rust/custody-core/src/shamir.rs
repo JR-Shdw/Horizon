@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 //! Shamir splitting and reconstruction over the constant-time GF(256) core.
+//!
+//! The scheme is from Adi Shamir, *How to Share a Secret*, Communications of
+//! the ACM 22(11), 1979, <https://doi.org/10.1145/359168.359176>. The
+//! split/reconstruction structure was adapted from `geky/gf256` v0.3.1 by
+//! Christopher Haster (BSD-3-Clause). Horizon keeps the required operations
+//! in-tree and adds fail-closed validation, caller-supplied randomness,
+//! zeroization and a locked-memory split path. See NOTICE for the complete
+//! attribution and license text, and source.md for the implementation record.
 
 use zeroize::{Zeroize, Zeroizing};
 

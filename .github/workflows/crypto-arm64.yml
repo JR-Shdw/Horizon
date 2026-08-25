@@ -1,0 +1,141 @@
+# Native Linux aarch64 validation for the Rust cryptographic core.
+#
+# Public repositories receive the standard ubuntu-24.04-arm runner without
+# metered minutes. The same checks can be reproduced on a 64-bit Raspberry Pi 4
+# with tools/check-arm64-native.sh.
+
+name: crypto-arm64
+
+on:
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: Seconds of fuzzing per target
+        required: false
+        default: '60'
+  pull_request:
+    paths:
+      - 'api/rust/**'
+      - 'tools/check-arm64-native.sh'
+      - 'tools/check-fuzz.sh'
+      - 'tools/check-gf-ct.sh'
+      - '.github/workflows/crypto-arm64.yml'
+  push:
+    paths:
+      - 'api/rust/**'
+      - 'tools/check-arm64-native.sh'
+      - 'tools/check-fuzz.sh'
+      - 'tools/check-gf-ct.sh'
+      - '.github/workflows/crypto-arm64.yml'
+  schedule:
+    # Weekly native ARM compiler-drift and five-minute-per-target fuzz gate.
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crypto-arm64-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-and-assembly:
+    name: tests + GF(256) asm gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-dev pkg-config
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustc +stable -vV
+          cargo +stable --version
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            api/rust/target
+          key: cargo-linux-arm64-stable-${{ hashFiles('api/rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-arm64-stable-
+
+      - name: Run native ARM tests and assembly gate
+        run: bash tools/check-arm64-native.sh --no-fuzz
+
+  fuzz:
+    name: libFuzzer (native aarch64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install native fuzzing dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang python3-dev pkg-config
+
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal --no-self-update
+          rustc +nightly -vV
+
+      - name: Cache Cargo and the ARM fuzz corpus
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-fuzz
+            api/rust/fuzz/target
+            api/rust/fuzz/corpus
+          key: cargo-linux-arm64-fuzz-${{ github.run_id }}
+          restore-keys: |
+            cargo-linux-arm64-fuzz-
+
+      - name: Install cargo-fuzz
+        run: |
+          if ! cargo +nightly fuzz --version >/dev/null 2>&1; then
+            cargo +nightly install cargo-fuzz
+          fi
+          cargo +nightly fuzz --version
+
+      - name: Select fuzzing budget
+        id: budget
+        env:
+          MANUAL_SECONDS: ${{ inputs.fuzz_seconds }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            schedule) seconds=300 ;;
+            workflow_dispatch) seconds=${MANUAL_SECONDS:-60} ;;
+            *) seconds=30 ;;
+          esac
+          case "$seconds" in
+            ''|*[!0-9]*|0) echo "invalid fuzz budget: $seconds" >&2; exit 1 ;;
+          esac
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "Fuzzing each target for $seconds seconds"
+
+      - name: Run all four fuzz targets on native ARM
+        run: bash tools/check-fuzz.sh --time "${{ steps.budget.outputs.seconds }}"
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: crypto-arm64-fuzz-crashes-${{ github.run_id }}
+          path: api/rust/fuzz/artifacts/
+          if-no-files-found: ignore

@@ -20,18 +20,23 @@ The classic GF(2^8) cache-timing attack (Bernstein, 2005) needs secret-indexed
 - **Functional equivalence, exhaustively tested over the byte domain.**
   `cargo test` checks the implementation against a golden table reference over
   all 65 536 `(a,b)` pairs on amd64 and aarch64.
-- **x86_64 assembly gate.** `tools/check-gf-ct.sh` (in `validate.yml`)
+- **Native x86_64 and aarch64 assembly gates.** `tools/check-gf-ct.sh`
   inspects the release assembly of the GF functions and fails on conditional
-  jumps. `cmov` is allowed as the x86_64 selection instruction.
+  branches. `validate.yml` runs it on x86_64; `crypto-arm64.yml` runs the same
+  gate on a native GitHub-hosted aarch64 runner. Branchless selection
+  instructions (`cmov` on x86_64, `csel`/`cset` and aliases on aarch64) are
+  allowed and reported.
 - **Undefined-behavior checks.** `cargo miri` covers the unsafe paths exercised
   by its test run.
-- **Nightly fuzzing.** `fuzz.yml` runs four cargo-fuzz targets
-  (`shamir_split`/`combine`, `aes_gcm_roundtrip`/`decrypt`), 30 min each.
+- **Cross-architecture fuzzing.** `fuzz.yml` runs four cargo-fuzz targets
+  (`shamir_split`/`combine`, `aes_gcm_roundtrip`/`decrypt`) for 30 min each on
+  x86_64. `crypto-arm64.yml` runs the same targets natively on aarch64 for 30 s
+  on relevant pushes/pull requests and 5 min in its weekly job.
 
 Precise wording: **constant-time by design, functionally tested exhaustively
-over the byte domain on amd64 and aarch64, with x86_64 release assembly checked
-for conditional branches on every validation build.** The assembly check is a
-machine check, not a formal proof or a `dudect` timing measurement.
+over the byte domain on amd64 and aarch64, with native release assembly checked
+for conditional branches on both architectures.** The assembly checks are
+machine checks, not a formal proof or a `dudect` timing measurement.
 
 Production Shamir uses the Rust `shamir_split_bytes` / `shamir_combine_bytes`;
 Python `crypto.shamir_*` is a test-only parity reference.
@@ -91,13 +96,11 @@ rootless with a low `RLIMIT_MEMLOCK` makes mlock best-effort (fails to
 
 ## Architecture coverage
 
-aarch64 is a supported crypto target. The Rust crypto suite passes 136/136
-tests under aarch64, the full stack has been validated on arm64, and the Linux
-stack has been validated on Raspberry Pi 4 hardware. These checks establish
-functional and integration coverage.
-
-`check-gf-ct.sh` is a separate, x86_64-specific assembly inspection. It does
-not inspect aarch64 code generation, so the assembly-level constant-time claim
-is limited to x86_64. Extending that inspection to aarch64 remains a hardening
-task, not a support prerequisite. See [`tools/TESTING.md`](../tools/TESTING.md)
-for the cross-architecture test matrix.
+aarch64 is a supported crypto target. The Rust crypto suite passes under
+aarch64, the full stack has been validated on arm64, and the Linux stack has
+been validated on Raspberry Pi 4 hardware. In addition to the
+emulated functional matrix, `.github/workflows/crypto-arm64.yml` runs the
+release suite, the GF(256) assembly gate, and all four fuzz targets on native
+aarch64. `tools/check-arm64-native.sh` reproduces the same checks on a 64-bit
+Raspberry Pi 4. See [`tools/TESTING.md`](../tools/TESTING.md) for the
+cross-architecture test matrix.

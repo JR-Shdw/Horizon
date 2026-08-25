@@ -249,7 +249,10 @@ async def run_custody_routing(
     """
     import asyncio
 
-    from .custody_generation import custody_maintenance_lock
+    from .custody_generation import (
+        CustodyOrchestrationBusy,
+        custody_maintenance_lock,
+    )
     from .database import async_session
     from .rust_custody_backend import (
         attach_live_rust_coordinator,
@@ -261,44 +264,93 @@ async def run_custody_routing(
     if interval_seconds <= 0:
         raise ValueError("Rust custody maintenance interval must be positive")
     lock_name = custody_maintenance_lock()
-    while True:
-        leader = False
-        async with session_factory() as lock_db:
-            async with lock_db.begin():
-                leader = (
-                    await lock_db.execute(
-                        text("SELECT pg_try_advisory_xact_lock(hashtext(:lock_name))"),
-                        {"lock_name": lock_name},
-                    )
-                ).scalar_one()
-                if leader:
-                    # Name the scope: reading two nodes' logs must make it
-                    # obvious they each elected their OWN leader, and a node
-                    # whose identity file is unreadable (scope falls back to
-                    # "standalone") has to be visible rather than silently
-                    # sharing a lock with its neighbours.
-                    log.info("custody routing: leadership acquired for %s", lock_name)
-                    while True:
-                        try:
-                            await refresh_rust_custody(
-                                pool, vault, session_factory=session_factory
-                            )
-                        except Exception:
-                            log.warning(
-                                "custody routing: maintenance failed; retrying",
-                                exc_info=True,
-                            )
-                        await asyncio.sleep(interval_seconds)
-        if not leader:
-            # Followers are not idle: without this they stay sealed until they
-            # happen to win leadership, so an unseal reaches only the worker
-            # that served it and the rest 503 indefinitely.
+
+    # Attachment MUST make progress independently of maintenance election.
+    # The K8 blackhole leaves an in-flight asyncpg query parked in TCP even
+    # after the route is restored. Two of five workers were observed stuck in
+    # the advisory-lock query: they reached neither the leader nor follower
+    # branch and stayed sealed indefinitely while their peers recovered.
+    # A separately scheduled, bounded attach loop removes that coupling. It is
+    # read-only and cannot repair, reshare, or open a sealed pool, so running it
+    # on every worker (including the maintenance leader) is safe.
+    async def keep_attached() -> None:
+        from .config import settings
+
+        timeout_seconds = max(
+            1.0,
+            min(
+                interval_seconds * 2,
+                float(settings.cluster_primary_lease_ttl_secs),
+            ),
+        )
+        while True:
             try:
-                await attach_live_rust_coordinator(
-                    pool, vault, session_factory=session_factory
+                async with asyncio.timeout(timeout_seconds):
+                    await attach_live_rust_coordinator(
+                        pool, vault, session_factory=session_factory
+                    )
+            except TimeoutError:
+                log.warning(
+                    "custody routing: read-only attach timed out after %.1fs; retrying",
+                    timeout_seconds,
                 )
             except Exception:
                 log.warning(
-                    "custody routing: follower attach failed; retrying", exc_info=True
+                    "custody routing: read-only attach failed; retrying",
+                    exc_info=True,
                 )
             await asyncio.sleep(interval_seconds)
+
+    attachment_task = asyncio.create_task(
+        keep_attached(), name="rust-custody-attachment"
+    )
+    try:
+        while True:
+            leader = False
+            async with session_factory() as lock_db:
+                async with lock_db.begin():
+                    leader = (
+                        await lock_db.execute(
+                            text(
+                                "SELECT pg_try_advisory_xact_lock(hashtext(:lock_name))"
+                            ),
+                            {"lock_name": lock_name},
+                        )
+                    ).scalar_one()
+                    if leader:
+                        # Name the scope: reading two nodes' logs must make it
+                        # obvious they each elected their OWN leader, and a node
+                        # whose identity file is unreadable (scope falls back to
+                        # "standalone") has to be visible rather than silently
+                        # sharing a lock with its neighbours.
+                        log.info(
+                            "custody routing: leadership acquired for %s", lock_name
+                        )
+                        while True:
+                            try:
+                                await refresh_rust_custody(
+                                    pool, vault, session_factory=session_factory
+                                )
+                            except Exception as exc:
+                                # The maintenance election is local to this node,
+                                # while generation orchestration is global. A peer
+                                # node may therefore hold the orchestration lock
+                                # even though this worker correctly won local
+                                # leadership. Repair waits; keep_attached still
+                                # converges this worker if the local pool is open.
+                                if isinstance(exc, CustodyOrchestrationBusy):
+                                    log.debug(
+                                        "custody routing: orchestration busy; "
+                                        "maintenance deferred"
+                                    )
+                                else:
+                                    log.warning(
+                                        "custody routing: maintenance failed; retrying",
+                                        exc_info=True,
+                                    )
+                            await asyncio.sleep(interval_seconds)
+            if not leader:
+                await asyncio.sleep(interval_seconds)
+    finally:
+        attachment_task.cancel()
+        await asyncio.gather(attachment_task, return_exceptions=True)

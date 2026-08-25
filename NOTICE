@@ -34,23 +34,49 @@ copyright holder.
 THIRD-PARTY ATTRIBUTION
 ================================================================================
 
-geky/gf256 - https://github.com/geky/gf256
-Copyright C. Haster and contributors. BSD-3-Clause.
+geky/gf256 v0.3.1 - https://github.com/geky/gf256
+Copyright (c) 2021, Christopher Haster. All rights reserved.
+BSD-3-Clause.
 
-The GF(2^8) arithmetic in api/rust/custody-core/src/gf256.rs, which underpins
-Shamir secret sharing for custody, takes its design and algorithms from
-geky/gf256. Horizon's implementation was independently rewritten and adapted
-for constant-time operation: no branches on field elements, no secret-indexed
-memory access, and no early return on a field-element value. It is validated
-against reference arithmetic by exhaustive testing of all 65 536 operand
-pairs, property tests, fuzzing, and inspection of the compiled output.
+The GF(2^8) arithmetic and Shamir split/reconstruction structure in
+api/rust/custody-core were adapted from the upstream implementation. Horizon
+does not link or ship the upstream crate as a runtime dependency: the required
+operations are maintained in-tree and have been adapted for fail-closed input
+validation, caller-supplied OS randomness, constant-time field arithmetic,
+zeroization and locked memory. The field implementation is checked against
+reference arithmetic over all 65 536 operand pairs and all 255 non-zero
+inverses, in addition to Rust/Python parity tests, property tests, fuzzing and
+compiled-output inspection. These controls do not constitute certification of
+the implementation.
 
-Re-implementing a published algorithm does not necessarily make the result a
-derivative work in the copyright sense, and no code was copied. The credit is
-recorded anyway because it states where the technical choice came from: an
-auditor who notices the conceptual resemblance should find the provenance
-declared rather than have to wonder about it. BSD-3-Clause is compatible with
-AGPL-3.0-or-later, and geky/gf256 has carried that license throughout.
+The Shamir scheme itself was published by Adi Shamir in "How to Share a
+Secret", Communications of the ACM 22(11), 1979,
+https://doi.org/10.1145/359168.359176.
+
+The geky/gf256 license follows:
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+- Neither the name of ARM nor the names of its contributors may be used to
+  endorse or promote products derived from this software without specific prior
+  written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================================
 CONTACT

@@ -7,19 +7,14 @@
 //!
 //! Design and algorithms originate in:
 //!     geky/gf256 - <https://github.com/geky/gf256>
-//!     Copyright C. Haster and contributors
+//!     Copyright (c) 2021, Christopher Haster
 //!     BSD-3-Clause
 //!
-//! Independently rewritten here and adapted for constant-time operation (see
-//! below), then validated against reference arithmetic by exhaustive testing
-//! of all 65 536 operand pairs, property tests, fuzzing, and inspection of the
-//! compiled output.
-//!
-//! No code was copied, and re-implementing a published algorithm does not by
-//! itself produce a derivative work. The credit is recorded regardless: it
-//! documents where the technical choice came from, so an auditor who notices
-//! the conceptual resemblance finds the provenance declared rather than
-//! unexplained. See NOTICE and source.md.
+//! Adapted in-tree for constant-time operation (see below), then validated
+//! against reference arithmetic by exhaustive testing of all 65 536 operand
+//! pairs and all 255 non-zero inverses, property tests, fuzzing, and inspection
+//! of the compiled output. See NOTICE for the complete attribution and
+//! BSD-3-Clause license text, and source.md for the implementation record.
 //!
 //! Field: GF(2^8) with reduction polynomial
 //!     p(x) = x^8 + x^4 + x^3 + x + 1   = 0x11B
@@ -67,11 +62,10 @@
 //!   For m = 8 : `inv(a) = a^254`, computed in 7 squarings and
 //!   6 multiplications (no field-element-indexed lookups).
 //!
-//!: C. Haster (`geky/gf256` v0.3.1, BSD-3-Clause). Used as a
-//!   cross-check reference for `mul` and `reduce` during the
-//!   2026-05-15 implementation pass. No code copied verbatim ;
-//!   our impl is derived directly from the textbook polynomial-ring
-//!   definition (clmul + degree-8 reduction).
+//!: C. Haster (`geky/gf256` v0.3.1, BSD-3-Clause). Source of the
+//!   GF(2^8) design adapted here. Horizon's implementation uses the
+//!   textbook polynomial-ring definition (carry-less multiplication plus
+//!   degree-8 reduction) with project-specific constant-time constraints.
 
 /// Reduction polynomial : p(x) = x^8 + x^4 + x^3 + x + 1.
 /// Stored as a `u16` because its degree (8) requires bit 8 set.
@@ -93,9 +87,10 @@ const P: u16 = 0x11B;
 /// ```
 ///
 /// LLVM is free in principle to lower this back to a branch ; the
-/// `tools/check-gf-ct.sh` CI gate runs `cargo asm` on the release
-/// build and fails the pipeline if any conditional jump or `cmov`
-/// instruction keyed on the inputs appears in the generated code.
+/// `tools/check-gf-ct.sh` CI gate emits release assembly and fails
+/// the pipeline if a conditional branch appears in the generated
+/// code. Branchless selection instructions such as x86 `cmov` or
+/// AArch64 `csel` are allowed and reported.
 #[inline]
 #[doc(hidden)]
 pub fn clmul_u8(a: u8, b: u8) -> u16 {

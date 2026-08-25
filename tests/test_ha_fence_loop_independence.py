@@ -40,6 +40,10 @@ class _FakeVault:
         self.sealed = sealed
         self.must_seal = must_seal
         self.seal_calls = 0
+        self.detach_calls = 0
+
+    def detach_rpc_client(self):
+        self.detach_calls += 1
 
     def seal(self):
         self.seal_calls += 1
@@ -355,6 +359,7 @@ async def test_concurrent_triggers_do_not_overlap_the_teardown(monkeypatch):
 
     assert overlap["max"] == 1, "fence teardowns ran concurrently"
     assert all(v.seal_calls == 1 for v in vaults)
+    assert all(v.detach_calls == 1 for v in vaults)
 
 
 def test_sealing_drops_the_authority_deadline_it_can_no_longer_renew():

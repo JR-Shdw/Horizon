@@ -276,7 +276,7 @@ and certificate signatures remain classical. See
 ## See also
 
 - [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) - full MITRE ATT&CK + OWASP ASVS Level 2 mapping, explicit limitations
-- [docs/SIDE-CHANNELS.md](docs/SIDE-CHANNELS.md) - constant-time design, exhaustive amd64/aarch64 functional tests, the x86_64 assembly gate, memory protection, and residual risks
+- [docs/SIDE-CHANNELS.md](docs/SIDE-CHANNELS.md) - constant-time design, exhaustive amd64/aarch64 functional tests, native assembly gates on both architectures, memory protection, and residual risks
 - [docs/POST-QUANTUM.md](docs/POST-QUANTUM.md) - post-quantum posture: hybrid ML-KEM transport + PQ-by-construction storage core
 - [docs/NIS2-COMPLIANCE.md](docs/NIS2-COMPLIANCE.md) - NIS2 Art. 21 control matrix
 - [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) - internal security audit findings + remediation log

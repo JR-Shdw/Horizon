@@ -56,14 +56,19 @@ where a primitive's implementation came from is a property worth having in
 its own right - it lets an auditor trace a design back to its source instead
 of inferring it.
 
-- geky/gf256 - <https://github.com/geky/gf256>, Copyright C. Haster and
-  contributors, BSD-3-Clause. Origin of the GF(2^8) design and algorithms in
-  `api/rust/custody-core/src/gf256.rs` (the field arithmetic under Shamir
-  custody). Independently rewritten and adapted for constant-time operation,
-  then validated against reference arithmetic by exhaustive testing of all
-  65 536 operand pairs, property tests, fuzzing, and inspection of the
-  compiled output. No code copied; BSD-3-Clause is compatible with
-  AGPL-3.0-or-later. See [NOTICE](NOTICE).
+- geky/gf256 v0.3.1 - <https://github.com/geky/gf256>, Copyright Christopher
+  Haster, BSD-3-Clause. Source of the GF(2^8) arithmetic and Shamir
+  split/reconstruction structure adapted in `api/rust/custody-core`. Horizon
+  maintains only the required operations in-tree rather than linking the
+  upstream crate, with additional fail-closed validation, caller-supplied OS
+  randomness, constant-time field arithmetic, zeroization and locked memory.
+  The field implementation is checked exhaustively over all 65 536 operand
+  pairs and 255 non-zero inverses, alongside Rust/Python parity, property,
+  fuzzing and compiled-output checks. See [NOTICE](NOTICE) for the complete
+  attribution and BSD-3-Clause text.
+- Adi Shamir, [*How to Share a Secret*](https://doi.org/10.1145/359168.359176),
+  Communications of the ACM 22(11), 1979. Original description of the secret
+  sharing scheme implemented by the custody core.
 
 ## Security assessment & compliance frameworks
 

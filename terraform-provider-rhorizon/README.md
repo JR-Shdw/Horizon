@@ -24,7 +24,7 @@ terraform {
   required_providers {
     rhorizon = {
       source  = "shdw/rhorizon"
-      version = "~> 0.1"
+      version = "~> 0.9"
     }
   }
 }
@@ -107,8 +107,8 @@ go build -o terraform-provider-rhorizon
 Drop the binary in your Terraform plugin cache :
 
 ```bash
-mkdir -p ~/.terraform.d/plugins/registry.terraform.io/shdw/rhorizon/0.1.0/linux_amd64
-cp terraform-provider-rhorizon ~/.terraform.d/plugins/registry.terraform.io/shdw/rhorizon/0.1.0/linux_amd64/
+mkdir -p ~/.terraform.d/plugins/registry.terraform.io/shdw/rhorizon/0.9.2-beta/linux_amd64
+cp terraform-provider-rhorizon ~/.terraform.d/plugins/registry.terraform.io/shdw/rhorizon/0.9.2-beta/linux_amd64/
 ```
 
 Then `terraform init` will pick it up.

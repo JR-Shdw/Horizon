@@ -259,6 +259,7 @@ def test_peers_can_delay_the_seal_but_not_cancel_it():
     # Each call may push the seal deadline further, up to the cap fixed at
     # renewal from the last moment authority was actually proven.
     assert vs.prolong_frozen(5) is True
+    assert vs.peer_seal_deferred is True
     moved_again = vs.prolong_frozen(5)
     assert vs.prolong_frozen(9999) is False or moved_again, "must converge on the cap"
     # Hammering it cannot walk the ceiling forward.
@@ -270,6 +271,17 @@ def test_peers_can_delay_the_seal_but_not_cancel_it():
     remaining = vs._seal_deadline_cap - time.monotonic()
     time.sleep(max(0.0, remaining) + 0.1)
     assert vs.must_seal is True, "a bounded prolongation must still end sealed"
+
+
+def test_db_reconfirmation_clears_peer_fence_deferral():
+    vs = _unsealed()
+    vs.renew_db_confirmation(0.05, 10)
+    time.sleep(0.1)
+    assert vs.prolong_frozen(60) is True
+    assert vs.peer_seal_deferred is True
+
+    vs.renew_db_confirmation(10, 10)
+    assert vs.peer_seal_deferred is False
 
 
 def test_prolong_is_a_noop_without_a_lease():

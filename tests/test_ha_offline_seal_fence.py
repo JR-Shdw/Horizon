@@ -39,6 +39,10 @@ class _FakeVault:
         self.sealed = sealed
         self.must_seal = must_seal
         self.seal_calls = 0
+        self.detach_calls = 0
+
+    def detach_rpc_client(self):
+        self.detach_calls += 1
 
     def seal(self):
         self.seal_calls += 1
@@ -182,6 +186,11 @@ async def test_fence_seal_drops_custodians_and_local_keys(monkeypatch):
 
     assert stopped == [vs]
     assert pool.seal_all_calls == 1
+    assert vs.detach_calls == 1, (
+        "the hard fence retained a client to the now-sealed custodian; the "
+        "next password unseal will delegate its audit entry to that stale "
+        "client and fail with 'vault sealed'"
+    )
     assert vs.seal_calls == 1
 
 
