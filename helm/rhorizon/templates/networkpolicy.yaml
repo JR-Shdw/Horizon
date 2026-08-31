@@ -16,6 +16,7 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- if .Values.frontend.enabled }}
     # Frontend can reach the API.
     - from:
         - podSelector:
@@ -25,6 +26,7 @@ spec:
       ports:
         - port: 8200
           protocol: TCP
+    {{- end }}
     # Same-namespace pods (e.g. rh-fetch / rh-watch sidecars) can reach
     # the API directly. Cross-namespace clients must add their own rule.
     - from:
@@ -35,6 +37,18 @@ spec:
         - port: 8200
           protocol: TCP
   egress:
+    {{- if and .Values.api.clusterEnabled .Values.frontend.enabled }}
+    # HA JOIN, renewal and live preflight traverse the same HTTPS/mTLS
+    # frontend path as production traffic.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "rhorizon.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: frontend
+      ports:
+        - port: {{ .Values.service.frontend.httpsPort }}
+          protocol: TCP
+    {{- end }}
     # PostgreSQL.
     {{- if not .Values.postgres.external.enabled }}
     - to:
@@ -61,6 +75,13 @@ spec:
       ports:
         - port: {{ .Values.postgres.external.port }}
           protocol: TCP
+        {{- if .Values.postgres.external.patroniRestUrls }}
+        # The HA tier is polled over Patroni's REST API, not the SQL port.
+        # Declaring patroniRestUrls without opening this makes the poll fail
+        # and cluster health report database_ha red on a healthy cluster.
+        - port: {{ .Values.postgres.external.patroniRestPort }}
+          protocol: TCP
+        {{- end }}
     {{- end }}
     # DNS.
     - to:
@@ -73,6 +94,7 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+{{- if .Values.frontend.enabled }}
 ---
 # Frontend : ingress from anywhere (or restricted via ingressFrontendCidrs) ; egress to API only.
 apiVersion: networking.k8s.io/v1
@@ -91,6 +113,18 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- if .Values.api.clusterEnabled }}
+    # API pods must reach the frontend for JOIN, renewal and live preflight,
+    # independently of the external client allow-list below.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "rhorizon.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports:
+        - port: {{ .Values.service.frontend.httpsPort }}
+          protocol: TCP
+    {{- end }}
     {{- if .Values.networkPolicy.ingressFrontendCidrs }}
     - from:
         {{- range .Values.networkPolicy.ingressFrontendCidrs }}
@@ -100,6 +134,10 @@ spec:
       ports:
         - port: 8200
           protocol: TCP
+        {{- if or .Values.frontend.tls.enabled .Values.api.clusterEnabled }}
+        - port: {{ .Values.service.frontend.httpsPort }}
+          protocol: TCP
+        {{- end }}
     {{- else }}
     # No CIDR restriction declared, accept from any pod or ingress
     # controller in the cluster. Lock down via .Values.networkPolicy.ingressFrontendCidrs.
@@ -124,4 +162,5 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+{{- end }}
 {{- end -}}

@@ -1,4 +1,4 @@
-FROM docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS builder
+FROM docker.io/library/python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17 AS builder
 
 WORKDIR /build
 
@@ -41,7 +41,7 @@ RUN set -eu; \
 
 
 # -- Rust extension builder (secure memory: mlock + zeroize) --
-FROM docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS rust-builder
+FROM docker.io/library/python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17 AS rust-builder
 
 # Pin the rustup-init BINARY (not just the install script) by sha256, fetched
 # directly from static.rust-lang.org. Upstream publishes no GPG/cosign signature
@@ -91,7 +91,7 @@ RUN cargo build --release --locked -p rhorizon-custodian && \
     pip install --no-cache-dir --prefix=/install target/wheels/*.whl
 
 
-FROM docker.io/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
+FROM docker.io/library/python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17
 
 # OCI labels for Docker Hub / GHCR / Gitea registry display.
 # REVISION + CREATED are filled in by the CI build (--build-arg) ;
@@ -133,6 +133,14 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 # intended reminder.
 ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
 
+# Same pattern, same reason, different source package. CVE-2026-14456 is an
+# unbounded-memory DoS in OpenSSL's QUIC server. Not reachable here -- nothing
+# in this image speaks QUIC -- but the fix is already in the Debian archive
+# while the base image still ships the vulnerable build, so taking it costs
+# nothing and keeps the scan honest about what is actually installed.
+# DELETE once python:3.12-slim ships >= 3.5.7-1~deb13u2.
+ARG OPENSSL_VERSION=3.5.7-1~deb13u2
+
 # Runtime only: libsodium + libldap (no -dev, no gcc)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --only-upgrade \
@@ -144,7 +152,10 @@ RUN apt-get update && \
         libsmartcols1=${UTIL_LINUX_VERSION} \
         libuuid1=${UTIL_LINUX_VERSION} \
         mount=${UTIL_LINUX_VERSION} \
-        login=1:4.16.0-2+really${UTIL_LINUX_VERSION} && \
+        login=1:4.16.0-2+really${UTIL_LINUX_VERSION} \
+        libssl3t64=${OPENSSL_VERSION} \
+        openssl=${OPENSSL_VERSION} \
+        openssl-provider-legacy=${OPENSSL_VERSION} && \
     apt-get install -y --no-install-recommends libsodium23 libldap2 libsasl2-2 && \
     rm -rf /var/lib/apt/lists/* && \
     # Remove tools an attacker could use

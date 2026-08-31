@@ -460,6 +460,12 @@ class VaultClient:
     def cluster_health(self) -> dict:
         return self.get("/api/v1/vault/cluster/health")
 
+    def cluster_preflight(self, *, live: bool = True) -> dict:
+        return self.get(
+            "/api/v1/vault/cluster/preflight",
+            params={"live": str(live).lower()},
+        )
+
     def cluster_ha_self(self) -> dict:
         return self.get("/api/v1/vault/cluster/ha/self")
 

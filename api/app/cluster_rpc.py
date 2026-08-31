@@ -203,6 +203,11 @@ class MasterRpcClient:
             raise MasterUnreachable(f"master closed connection: {e}") from e
         except asyncio.TimeoutError as e:
             raise MasterUnreachable("master response timeout") from e
+        except (ConnectionError, OSError) as e:
+            # The socket can disappear after connect while a custodian or API
+            # service is being restarted.  This is the same recoverable
+            # transport loss as a refused connect, not an application 500.
+            raise MasterUnreachable(f"master connection failed: {e}") from e
         finally:
             try:
                 writer.close()

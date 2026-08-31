@@ -396,6 +396,8 @@ cp "$SOURCE_DIR/schema.sql" "$WORK_DIR/schema.sql"
 cp "$SOURCE_DIR/dynamic-engines.ini" "$WORK_DIR/dynamic-engines.ini"
 cp "$SOURCE_DIR/tools/docker-compose.memory-lock.yml" \
     "$WORK_DIR/docker-compose.memory-lock.yml"
+cp "$SOURCE_DIR/tools/docker-compose.ha-join.yml" \
+    "$WORK_DIR/docker-compose.ha-join.yml"
 
 # Pick the compose variant for the detected engine - a host runs one, not both.
 # podman needs the portable tmpfs + plain depends_on; Docker keeps the strict form.
@@ -509,6 +511,14 @@ TLS_ENABLED=true
 TLS_CERT_DIR=$CERT_DIR
 TLS_CERT=/certs/cert.pem
 TLS_KEY=/certs/key.pem
+# Preserved on installer re-runs. Standalone remains the default; switching to
+# HA is explicit and is then verified with the cluster preflight command.
+RH_CLUSTER_HA_ENABLED=${RH_CLUSTER_HA_ENABLED:-false}
+RH_CLUSTER_ADVERTISE_IP=${RH_CLUSTER_ADVERTISE_IP:-}
+RH_HA_PRIMARY_URL=${RH_HA_PRIMARY_URL:-}
+RH_HA_SERVER_CA_FILE=${RH_HA_SERVER_CA_FILE:-/ha-server-certs/cert.pem}
+RH_HA_AUTO_JOIN=${RH_HA_AUTO_JOIN:-false}
+RH_PROXY_TRUSTED_IPS=${RH_PROXY_TRUSTED_IPS:-}
 EOF
 chmod 0600 "$WORK_DIR/.env"
 

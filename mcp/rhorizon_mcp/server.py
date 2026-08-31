@@ -34,8 +34,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from . import __version__
-from .policy import Policy, load_policy
+from . import __version__, proxy
+from .policy import Policy, ProxyDenied, load_policy, same_authority
 
 log = logging.getLogger("rhorizon-mcp")
 
@@ -185,6 +185,14 @@ class VaultClient:
         # so this path and the hub's cannot drift (they already did once).
         return self._get("/api/v1/vault/cluster/health", {"summary": "true"})
 
+    def cluster_preflight(self) -> Any:
+        # MCP is observational: do not make an agent trigger live network
+        # probes repeatedly. Operators use the CLI/UI for live=true.
+        return self._get(
+            "/api/v1/vault/cluster/preflight",
+            {"summary": "true", "live": "false"},
+        )
+
 
 # ============================================================
 # Tool catalog (plain JSON Schema dicts -- no pydantic)
@@ -195,6 +203,92 @@ class VaultClient:
 TOOLS: list[dict] = json.loads(
     (Path(__file__).parent / "tools.json").read_text(encoding="utf-8")
 )["tools"]
+
+
+_RATE = proxy.RateLimiter()
+
+
+def _denied(message: str) -> dict:
+    return {"error": "policy_denied", "message": message}
+
+
+def _call_api(args: dict, client: VaultClient, policy: Policy) -> Any:
+    """Use a credential without disclosing it (see proxy.py). Every refusal
+    precedes the vault read, so a denied call never decrypts the credential."""
+    credential = str(args.get("credential") or "")
+    if not credential:
+        return _denied(
+            "credential is required: name one the operator bound in policy.toml "
+            f"({policy.bound_credentials()})."
+        )
+    binding = policy.proxy_binding(credential)
+    if binding is None:
+        if credential.strip("/") in policy.proxy:
+            return _denied(
+                f"The [proxy.{credential}] binding exists but has "
+                "allow_proxy = false, so it may not be used for calls."
+            )
+        return _denied(
+            f"No proxy binding for credential '{credential}'. The operator must "
+            f"add a [proxy.{credential}] table with allow_proxy = true to "
+            f"policy.toml. Bound today: {policy.bound_credentials()}."
+        )
+    method = str(args.get("method") or "GET")
+    if not binding.method_allowed(method):
+        return _denied(
+            f"Method {method.upper()} is not allowed for '{credential}' "
+            f"(allowed: {binding.methods_listed()})."
+        )
+    try:
+        binding.validate_inject()
+    except ProxyDenied as e:
+        return _denied(str(e))
+    if not _RATE.allow(credential, binding.rate_limit_per_min):
+        return _denied(
+            f"Rate limit reached for '{credential}': "
+            f"{binding.rate_limit_per_min} calls/minute. Retry within a minute."
+        )
+    if same_authority(binding.base_url, client.base):
+        # The one destination this tool may never reach. This server holds a
+        # vault token; a binding aimed at the vault would let an agent borrow
+        # it to make authenticated calls, which is direct API access wearing a
+        # tool's name. Refused here rather than documented, and before the
+        # credential is read.
+        return _denied(
+            f"'{credential}' is bound to the vault itself ({binding.base_url}). "
+            "The proxy exists to reach OTHER services; pointing it at the vault "
+            "would let this tool act as the vault's own client."
+        )
+    try:
+        url = binding.build_url(str(args.get("path") or ""), args.get("query") or None)
+    except ProxyDenied as e:
+        return _denied(str(e))
+
+    # Not policy.secret_allowed: allow_read = false would refuse here, and it
+    # is the configuration this tool exists for. The binding authorises it.
+    try:
+        value = client.get_secret(binding.credential, binding.namespace).get(
+            "value", ""
+        )
+    except VaultHTTPError as e:
+        # Same shape as every other refusal from this tool: a machine-readable
+        # code plus a sentence, not a bare string.
+        return {
+            "error": "vault_error",
+            "message": (
+                f"The vault refused to serve '{binding.namespace}/"
+                f"{binding.credential}' (HTTP {e.code}). The MCP server's own "
+                "token needs secrets:r on that namespace."
+            ),
+        }
+    try:
+        result = proxy.call(binding, value, url, method=method)
+    except ProxyDenied as e:
+        log.info("vault_call_api: %s -> refused (%s)", credential, e)
+        return {"error": "proxy_refused", "message": str(e)}
+    # Name, destination, status. Never the value.
+    log.info("vault_call_api: %s -> %s [%s]", credential, url, result["status"])
+    return result
 
 
 def _dispatch(name: str, args: dict, client: VaultClient, policy: Policy) -> Any:
@@ -219,24 +313,32 @@ def _dispatch(name: str, args: dict, client: VaultClient, policy: Policy) -> Any
     if name == "vault_get_secret":
         secret_name = args["name"]
         ns = args.get("namespace") or "default"
+        if policy.read_denied_by_proxy(ns, secret_name):
+            # Distinct from "not whitelisted": the operator granted this secret
+            # for use. Telling them to whitelist it would undo the binding.
+            return _denied(
+                f"Credential '{ns}/{secret_name}' is bound for use, not for "
+                "reading. Call it with vault_call_api instead."
+            )
         if not policy.secret_allowed(ns, secret_name):
-            return {
-                "error": "policy_denied",
-                "message": (
-                    f"Secret '{ns}/{secret_name}' not allowed. Operator must add "
-                    f"it to [secrets].whitelist (or [namespaces].allow) in policy.toml."
-                ),
-            }
+            return _denied(
+                f"Secret '{ns}/{secret_name}' not allowed. Operator must add "
+                f"it to [secrets].whitelist (or [namespaces].allow) in policy.toml."
+            )
         r = client.get_secret(secret_name, ns)
         log.info(
             "vault_get_secret: %s/%s served", ns, secret_name
         )  # name only, never value
         return r
+    if name == "vault_call_api":
+        return _call_api(args, client, policy)
     if name == "vault_audit_tail":
         limit = int(args.get("limit", 10))
         return client.audit_tail(limit=max(1, min(100, limit)))
     if name == "vault_cluster_health":
         return client.cluster_health()
+    if name == "vault_cluster_preflight":
+        return client.cluster_preflight()
     raise ValueError(f"Unknown tool: {name}")
 
 

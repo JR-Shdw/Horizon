@@ -65,6 +65,7 @@ which rhorizon-mcp-server   # absolute path -- clients need it (see below)
 | `RH_VAULT_CAFILE` | optional CA bundle for a private-CA HTTPS vault. TLS stays **verified**; only the trust anchor changes. |
 | `RH_VAULT_PQ` | `prefer` (default) or `require` a post-quantum TLS group (X25519MLKEM768) to the vault. `require` fails the handshake if the vault cannot negotiate it. |
 | `RH_MCP_POLICY` | policy file path (default `~/.config/rhorizon-mcp/policy.toml`) |
+| `RH_MCP_EGRESS_CAFILE` | credential proxy only: extra CA anchor for the UPSTREAM leg (internal API on a private CA). Added to the system store, never replacing it. Separate from `RH_VAULT_CAFILE` -- the vault's CA must not certify an upstream. |
 
 ## Setup
 
@@ -109,7 +110,21 @@ allow = [
     "vault_list_namespaces",
     "vault_list_secrets",
     "vault_get_secret",
+    # Add vault_cluster_health and vault_cluster_preflight only when the token
+    # has cluster:r. Preflight is passive and does not run the live mTLS probe.
+    # Add vault_call_api to let the AI USE a credential it may not read; it
+    # needs a [proxy] binding below, and refuses everything without one.
 ]
+
+# Optional -- the credential proxy: the AI picks the path, base_url and inject
+# are yours, and only the API's answer comes back. See docs/MCP.md 4.1.
+# [proxy.github-prod]
+# namespace   = "mcp"
+# allow_read  = false                       # vault_get_secret refuses it -- the point
+# allow_proxy = true
+# base_url    = "https://api.github.com"
+# methods     = ["GET"]
+# inject      = { type = "header", name = "Authorization", format = "Bearer {value}" }
 EOF
 chmod 600 ~/.config/rhorizon-mcp/policy.toml
 ```

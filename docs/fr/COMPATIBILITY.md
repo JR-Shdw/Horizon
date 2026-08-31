@@ -45,8 +45,9 @@ par-OS utilisée pour réévaluer le support vit dans
 |---|---|---|
 | Docker / Docker Compose | Testé | déploiement principal ; compose durci livré |
 | Podman (rootless) | Testé | tourne en rootless ; relever `RLIMIT_MEMLOCK` pour mlock |
-| Kubernetes | Testé | chart Helm (`helm/rhorizon`) : api + frontend + Postgres se déploient, descellent, et prennent la forme cluster multi-worker sur un vrai cluster. `make k8s-e2e` (k3d) le garde ; également joué contre un Patroni externe |
-| k3s | Testé | même chart Helm, validé sur k3s (le palier `make k8s-e2e` monte k3d/k3s) |
+| Kubernetes (un nœud applicatif) | Testé | Le chart Helm (`helm/rhorizon`) déploie l'API, le frontend et PostgreSQL, puis vérifie l'unseal et le redémarrage sur k3d/k3s. `make k8s-e2e` garde ce chemin ; le chemin base externe Patroni est aussi couvert. |
+| HA applicative Kubernetes | Testé | `make k8s-ha-e2e` valide le bootstrap à un Pod, le JOIN mTLS à trois Pods, la suppression du Secret JOIN temporaire, le redémarrage d'un secondaire, le failover du primaire après 30 secondes en FROZEN et la récupération sur k3d/k3s. Avec PostgreSQL inclus dans le chart, cela prouve la HA applicative, pas la HA de la base ; utiliser le chemin Patroni externe pour les deux. |
+| k3s | Testé | Même chart Helm et même chemin à un nœud applicatif, validés via k3d/k3s. |
 
 ## Datastore (le stockage propre du vault)
 

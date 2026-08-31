@@ -47,7 +47,26 @@ computer for **local use** (not production, not internet-exposed).
    destructive (no `rm -rf`, no `docker system prune`, no
    `docker compose -f tools/docker-compose.quickstart.yml down -v` without explicit confirmation).
 
+### If the user asks for high availability
+
+This local guide is not an HA recipe. Use `docs/HA-CLUSTER.md` for the
+bootstrap sequence and the deployment-specific Helm/Compose instructions.
+Never interpret healthy containers, `/health`, a replica count, or a green
+dashboard card as proof that HA works. The final deterministic check is:
+
+```bash
+rhorizon cluster preflight
+```
+
+Report its stable failed-check IDs, reasons and remediations verbatim. Do not
+silence a check or substitute `--no-live` for the final check. The MCP tool
+`vault_cluster_preflight` is passive and topology-free; it cannot prove the
+live HTTPS/mTLS path. Fault tolerance remains proven by the documented K7
+harness, never by the dashboard alone.
+
 ### Safety boundaries
+
+**Never do any of the following**, even if the user asks:
 
 - Modify code or configuration files inside the cloned repo
 - Run any container in `--privileged` mode
@@ -331,7 +350,7 @@ their scripts and tools.
 
 ```bash
 curl http://localhost:8200/api/v1/vault/status
-# expected: {"sealed": false, "version": "0.9.2-beta", ...}
+# expected: {"sealed": false, "version": "0.9.4-beta", ...}
 ```
 
 If `sealed` is `true`, something went wrong. Have them re-do Step 6.

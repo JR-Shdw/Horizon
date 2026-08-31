@@ -22,6 +22,29 @@ port          = 9110
 sidecar_socket = "~/.local/run/rhorizon/mcp-gateway.sock"  # rh-mcp-gateway RH_MCP_GATEWAY_SOCK
 emit_server_audit = true                                 # POST every call to the vault /audit/mcp chain
 
+# ---- credential proxy (OPTIONAL) ------------------------------------------
+# Lets an agent USE a credential without being authorised to READ it: the
+# rh-mcp-gateway sidecar resolves it with the agent's own bearer, attaches it,
+# calls the API and returns only the reply -- the value never enters this hub.
+#
+# One table per credential; no table -> every call refused. The agent picks the
+# path, never the host. The sidecar re-checks the destination against its own
+# allow-list, so a bug here cannot reach a host you never listed:
+#
+#   RH_MCP_EGRESS_ALLOW="https://api.github.com" rh-mcp-gateway
+#
+# [proxy.github-prod]
+# namespace   = "mcp"                       # where the credential lives
+# allow_read  = false                       # vault_get_secret refuses it here too
+# allow_proxy = true
+# base_url    = "https://api.github.com"    # https only; the agent cannot change it
+# methods     = ["GET"]
+# inject      = { type = "header", name = "Authorization", format = "Bearer {value}" }
+# max_response_bytes = 262144
+#
+# inject.format must contain {value}. Forgejo/Gitea want "token {value}",
+# Woodpecker and GitHub "Bearer {value}". Options and errors: docs/MCP.md 4.1.
+
 # ---- backends -------------------------------------------------------------
 # Each [backends.<name>] becomes the tool prefix "<name>_". command = the same
 # stdio server you would otherwise put in your agent config directly.

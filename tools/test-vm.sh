@@ -15,7 +15,18 @@
 #
 # Native installer validation (instead of legacy install-${OS}.sh + pytest):
 #   RH_NATIVE=1 [RH_INSTALL_MODE=system|user] tools/test-vm.sh {freebsd|netbsd|...}
-#   -> runs tools/install.sh and asserts the vault unseals end-to-end.
+#   -> runs tools/install.sh and asserts identity, effective memlock, file
+#      access boundaries, vault memory-protection status and end-to-end unseal.
+#   Linux system installs also exercise required/best-effort/protected-swap
+#   failure modes. Set RH_NATIVE_NEGATIVE=0 to skip those negative checks.
+#
+# Native migration validation (Linux system mode):
+#   RH_NATIVE=1 RH_INSTALL_MODE=system RH_NATIVE_MIGRATION=1 \
+#     tools/test-vm.sh debian
+#   RH_NATIVE_MIGRATION_REF selects the old tracked revision (default: 333d51a).
+#
+# Read-only OpenBSD daemon login-class measurement (no install or edits):
+#   RH_OPENBSD_CLASS_MEASURE=1 tools/test-vm.sh openbsd
 #
 # Prerequisites:
 #   tools/qemu.yml ansible playbook installs qemu-base + cloud-utils +
@@ -480,6 +491,34 @@ fi
 # 6. Push checkout + run install-${OS}.sh + pytest
 # ---------------------------------------------------------------------------
 
+# Read-only OpenBSD decision probe. Applying a guessed login.conf class can
+# prevent su(1), and therefore the service, from starting. This mode measures
+# the stock daemon class in the preserved golden image and exits without
+# installing or editing the guest.
+if [ "${RH_OPENBSD_CLASS_MEASURE:-0}" = 1 ]; then
+    [ "$OS" = openbsd ] \
+        || { echo ">> RH_OPENBSD_CLASS_MEASURE is valid only for openbsd" >&2; exit 2; }
+    echo ">> OpenBSD daemon login-class record (read-only):"
+    ${SSH} "getcap -f /etc/login.conf daemon 2>/dev/null || true"
+    echo ">> OpenBSD daemon-class effective memorylocked limit:"
+    # su's first -c selects the login class; the -c after the login name is
+    # passed to root's shell. No account or login.conf entry is changed.
+    CLASS_LIMIT=$(${SSH} "su -c daemon root -c 'ulimit -l'" | tail -1 | tr -d '[:space:]')
+    printf '   %s\n' "$CLASS_LIMIT"
+    case "$CLASS_LIMIT" in
+        unlimited) echo ">> daemon class covers the 622592 KiB home-tier budget" ;;
+        ''|*[!0-9]*) echo ">> FAIL: could not parse the daemon-class limit" >&2; exit 1 ;;
+        *)
+            if [ "$CLASS_LIMIT" -ge 622592 ]; then
+                echo ">> daemon class covers the 622592 KiB home-tier budget"
+            else
+                echo ">> daemon class is below 622592 KiB; keep the vault root-run until a tested class exists"
+            fi
+            ;;
+    esac
+    exit 0
+fi
+
 # Honour .gitignore as well as the explicit list below. The list is hand
 # maintained and had already drifted: tools/chaos/results is gitignored, was
 # not in it, and at 8.4G filled the guest disk mid-transfer -- rsync died with
@@ -514,25 +553,86 @@ fi
 if [[ -n "${RH_NATIVE:-}" ]]; then
     RH_MODE_ARG="${RH_INSTALL_MODE:-system}"
     echo ">> running native installer (tools/install.sh --mode ${RH_MODE_ARG}) on ${OS}"
+    # A fresh native install is sealed by default. This disposable VM needs a
+    # supplied password so the existing end-to-end unseal assertion still
+    # tests an unseal rather than depending on the pre-sealed-default behavior.
+    TEST_MASTER_FILE=/tmp/rhorizon-native-test-master-password
+    if [ "$RH_MODE_ARG" = system ] && [ "$SSH_USER" != root ]; then
+        ${SSH} "sudo sh -c 'umask 077; printf rhorizon-vm-test-only > ${TEST_MASTER_FILE}'"
+    else
+        ${SSH} "sh -c 'umask 077; printf rhorizon-vm-test-only > ${TEST_MASTER_FILE}'"
+    fi
+
+    # Optional migration lane: install the last root-service version first,
+    # then let the normal path below upgrade it. `git archive` provides exactly
+    # the tracked old tree without changing the checkout copied into the VM.
+    if [ "${RH_NATIVE_MIGRATION:-0}" = 1 ]; then
+        [ "$RH_MODE_ARG" = system ] \
+            || { echo ">> FAIL: migration validation requires system mode" >&2; exit 1; }
+        case "$OS" in
+            debian|ubuntu|rocky|opensuse|arch|fedora) ;;
+            *) echo ">> FAIL: migration validation is intentionally one Linux lane" >&2; exit 1 ;;
+        esac
+        OLD_REF="${RH_NATIVE_MIGRATION_REF:-333d51a}"
+        OLD_DIR=/tmp/rhorizon-native-old
+        echo ">> installing pre-service-account revision ${OLD_REF}"
+        if [ "$SSH_USER" != root ]; then
+            ${SSH} "sudo mkdir -p '${OLD_DIR}'"
+            git -C "$REPO_ROOT" archive "$OLD_REF" \
+                | ${SSH} "sudo tar -x -C '${OLD_DIR}'"
+            OLD_RUN="cd '${OLD_DIR}' && sudo sh tools/install.sh --mode system --master-password-file '${TEST_MASTER_FILE}'"
+        else
+            ${SSH} "mkdir -p '${OLD_DIR}'"
+            git -C "$REPO_ROOT" archive "$OLD_REF" \
+                | ${SSH} "tar -x -C '${OLD_DIR}'"
+            OLD_RUN="cd '${OLD_DIR}' && sh tools/install.sh --mode system --master-password-file '${TEST_MASTER_FILE}'"
+        fi
+        set +e
+        ${SSH} "${OLD_RUN}" 2>&1 | tee "${WORK_DIR}/install-old.log"
+        OLD_INSTALL_RC=${PIPESTATUS[0]}
+        set -e
+        [ "$OLD_INSTALL_RC" -eq 0 ] \
+            || { echo ">> FAIL: old installer exited ${OLD_INSTALL_RC}" >&2; exit 1; }
+        grep -q 'vault unsealed' "${WORK_DIR}/install-old.log" \
+            || { echo ">> FAIL: old install did not unseal" >&2; exit 1; }
+    fi
     # system mode needs root: prefix sudo only when we ssh in as a non-root user
     # (BSD goldens log in as root). user mode always runs AS the login user -- the
     # driver self-elevates with sudo for the pkg/PG steps only (laptop model).
     if [ "$RH_MODE_ARG" = system ] && [ "$SSH_USER" != root ]; then
-        RUN="cd rhorizon && sudo sh tools/install.sh --mode system"
+        RUN="cd rhorizon && sudo sh tools/install.sh --mode system --master-password-file ${TEST_MASTER_FILE}"
     else
-        RUN="cd rhorizon && sh tools/install.sh --mode ${RH_MODE_ARG}"
+        RUN="cd rhorizon && sh tools/install.sh --mode ${RH_MODE_ARG} --master-password-file ${TEST_MASTER_FILE}"
     fi
     # Capture to the file, THEN grep it -- do not `... | grep -q` mid-pipe: under
     # `set -o pipefail` grep -q's early exit SIGPIPEs tee+ssh, which both
     # false-fails the assertion AND kills the remote install before it writes the
     # secrets file and prints "done".
-    ${SSH} "${RUN}" 2>&1 | tee "${WORK_DIR}/install.log" || true
+    set +e
+    ${SSH} "${RUN}" 2>&1 | tee "${WORK_DIR}/install.log"
+    INSTALL_RC=${PIPESTATUS[0]}
+    set -e
+    if [ "$INSTALL_RC" -ne 0 ]; then
+        echo ">> FAIL: native installer exited with status ${INSTALL_RC} on ${OS}" >&2
+        echo ">>       see ${WORK_DIR}/install.log" >&2
+        exit 1
+    fi
     if grep -q 'vault unsealed' "${WORK_DIR}/install.log"; then
         echo ">> PASS: native install + vault unseal on ${OS}"
     else
         echo ">> FAIL: native install did not confirm vault unseal on ${OS}" >&2
         echo ">>       see ${WORK_DIR}/install.log" >&2
         exit 1
+    fi
+    if [ "${RH_NATIVE_MIGRATION:-0}" = 1 ]; then
+        grep -q 'existing system install detected: migrating runtime paths' \
+            "${WORK_DIR}/install.log" \
+            || { echo ">> FAIL: upgrade did not report selective migration" >&2; exit 1; }
+        if rg -n 'chown[[:space:]]+-R' tools/install-native.sh >/dev/null; then
+            echo ">> FAIL: current installer still contains recursive chown" >&2
+            exit 1
+        fi
+        echo ">> PASS: root-service install upgraded through selective migration"
     fi
     # Independent confirmation the API is live inside the VM. The vault is https
     # only (uvicorn terminates TLS), so this needs the CA the installer minted --
@@ -545,6 +645,27 @@ if [[ -n "${RH_NATIVE:-}" ]]; then
             HEALTH_CURL="sudo ${HEALTH_CURL}"
         fi
         echo ">> /health:"; ${SSH} "${HEALTH_CURL}" || true; echo
+
+        echo ">> native identity + memory assertions:"
+        ASSERT="sh rhorizon/tools/assert-native-install.sh '${OS}' '${RH_MODE_ARG}' '${RH_CA}'"
+        if [ "$RH_MODE_ARG" = system ] && [ "$SSH_USER" != root ]; then
+            ASSERT="sudo ${ASSERT}"
+        fi
+        ${SSH} "${ASSERT}"
+
+        # Exercise the failure modes on each disposable Linux system VM. A low
+        # limit alone is not sufficient because the installed service also has
+        # CAP_IPC_LOCK; the helper clears both, proves the three policies, and
+        # restores the original unit before returning. Set RH_NATIVE_NEGATIVE=0
+        # only for a quick installer-development run.
+        case "$OS:$RH_MODE_ARG:${RH_NATIVE_NEGATIVE:-1}" in
+            debian:system:1|ubuntu:system:1|rocky:system:1|opensuse:system:1|arch:system:1|fedora:system:1)
+                echo ">> native Linux negative memlock assertions:"
+                NEGATIVE="sh rhorizon/tools/assert-native-install-linux-negative.sh '${RH_CA}'"
+                [ "$SSH_USER" = root ] || NEGATIVE="sudo ${NEGATIVE}"
+                ${SSH} "${NEGATIVE}"
+                ;;
+        esac
 
         # Record the TLS posture ON THE WIRE, not from the installer's own
         # decision line. Which group nginx was configured with and which one a
@@ -572,6 +693,8 @@ if [[ -n "${RH_NATIVE:-}" ]]; then
         " || true
     else
         echo ">> /health: skipped (installer printed no RH_CA_FILE path)"
+        echo ">> FAIL: native assertions require the installer CA path" >&2
+        exit 1
     fi
     echo ">> done - VM logs in ${WORK_DIR}/qemu.log, install log ${WORK_DIR}/install.log"
     exit 0

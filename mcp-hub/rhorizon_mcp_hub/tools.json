@@ -71,6 +71,33 @@
       }
     },
     {
+      "name": "vault_call_api",
+      "description": "Call a third-party API using a stored credential you are not allowed to see. Name the credential and a request path; the server attaches the credential and returns only the API's answer. The destination host and the way the credential is attached come from the operator's binding for that credential, where one is configured -- you cannot choose them, and a credential with no binding is refused. GET only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "credential": {
+            "type": "string",
+            "description": "Credential name as bound by the operator, e.g. github-prod"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path on the bound API, starting with '/', e.g. /user/repos"
+          },
+          "method": {
+            "type": "string",
+            "default": "GET",
+            "description": "HTTP method. Only GET is available."
+          },
+          "query": {
+            "type": "object",
+            "description": "Query-string parameters, e.g. {\"per_page\": \"10\"}"
+          }
+        },
+        "required": ["credential", "path"]
+      }
+    },
+    {
       "name": "vault_audit_tail",
       "description": "Recent audit entries (requires audit:r on the token).",
       "inputSchema": {
@@ -88,6 +115,14 @@
     {
       "name": "vault_cluster_health",
       "description": "Cluster and PostgreSQL HA health: overall state, readiness, and per-component state with a short reason (database, node, cluster, database_ha). Read-only summary; requires cluster:r on the token.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "vault_cluster_preflight",
+      "description": "Explain production HA readiness as stable checks with pass/warn/fail, a short reason, and an operator remediation. Read-only and topology-free; it does not trigger the live mTLS probe. Requires cluster:r on the token.",
       "inputSchema": {
         "type": "object",
         "properties": {}

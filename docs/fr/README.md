@@ -10,12 +10,19 @@ Vault de secrets self-hosted
   Resurgamus Horizon
 </h1>
 
-**Vault de secrets self-hosted. Open source. Pas de SaaS, pas de télémétrie, pas de lock-in.**
+**Gestionnaire de secrets et vault self-hosted, open source et léger. Pas de
+SaaS, pas de télémétrie, pas de lock-in.**
 
 Resurgamus Horizon (`rhorizon` pour faire court) garde vos mots de
 passe, tokens d'API, clés TLS, credentials de bases de données et clés
 SSH chiffrés au repos, servis par une petite API HTTP qui s'intègre
 avec Ansible, la CI/CD, Kubernetes, les scripts et les agents IA.
+
+Il embarque un serveur MCP natif et un MCP Hub : il sert donc aussi de **vault
+IA** et de **vault MCP**. Un agent peut détenir des credentials scopés,
+auditables et révocables, ou en utiliser un via Horizon sans jamais pouvoir le
+lire. Toutes les fonctionnalités sont publiques ; il n'y a pas d'édition
+Enterprise qui en retienne une partie.
 
 > **Tu utilises Cursor, Cline, Claude Desktop ou opencode avec des
 > credentials client ?** Le quickstart local sort ces credentials du
@@ -115,6 +122,78 @@ export RH_CA_FILE=~/rhorizon/certs/cert.pem
 Guide complet : [`docs/fr/QUICKSTART.md`](QUICKSTART.md). La référence
 d'installation complète (tous les chemins, vérification, mise à jour,
 désinstallation) est dans [`docs/fr/INSTALL.md`](INSTALL.md).
+
+---
+
+## Descellement automatique
+
+Le vault ne garde sa clé maîtresse qu'en RAM : il revient donc **scellé** après
+chaque redémarrage, et quelqu'un doit fournir à nouveau le mot de passe
+maître. Par défaut les installeurs le laissent scellé et n'écrivent rien sur
+disque -- tu choisis le mot de passe au premier descellement.
+
+Si une machine doit repartir seule après un reboot, passe le mot de passe à
+l'installation :
+
+```bash
+sh tools/install.sh --master-password-file /chemin/vers/passphrase
+```
+
+L'installeur descelle alors pour toi et stocke les deux credentials, un secret
+par fichier :
+
+```
+<repertoire-install>/secrets/master-password   # 0400
+<repertoire-install>/secrets/root-token        # 0400, premier descellement seulement
+```
+
+Les installs container utilisent `~/rhorizon/secrets/` ; les installs natives
+`<config-dir>/secrets/` (`~/.config/rhorizon/secrets/` en mode user). Relancer
+l'installeur après un reboot ou un changement de `--tier` réutilise ce fichier
+et rouvre le vault sans rien demander.
+
+Préfère `--master-password-file` à `--master-password` : une valeur passée en
+ligne de commande est lisible dans `/proc/<pid>/cmdline` pendant que
+l'installeur tourne, et atterrit dans ton historique shell.
+
+**Comprends ce que tu échanges.** Descellement automatique et protection au
+repos sont le même fait vu des deux côtés : la machine peut rouvrir le vault
+sans surveillance *précisément parce que* le mot de passe est lisible sur cette
+machine. Quiconque -- ou quoi que ce soit -- capable de lire ces deux fichiers
+possède le vault. Aucune configuration ne donne les deux à la fois.
+
+### Garder les credentials hors de portée d'un agent IA
+
+`0400` veut dire « seul l'utilisateur propriétaire peut lire ». Ça arrête les
+autres utilisateurs non privilégiés de la machine. Ça n'arrête **pas** ce qui
+tourne *en tant que* cet utilisateur, et un assistant de code IA avec accès
+shell sur ton compte est exactement ça : il hérite de ton uid, donc
+`cat ~/rhorizon/secrets/master-password` fonctionne. Le mode n'est pas la
+frontière. Le compte l'est.
+
+Si tu fais tourner des agents, assistants ou automatisations sur la même
+machine :
+
+- **Fais tourner le vault sous un compte que l'agent n'est pas.** `--mode
+  system` installe en root : ses credentials vivent sous `/etc/rhorizon`,
+  possédés par root, et un agent sous ton login ne peut pas les lire quel que
+  soit le mode du fichier. C'est la frontière qui compte ici. (Le service
+  lui-même tourne encore en root plutôt que sous un utilisateur `rhorizon`
+  dédié ; ça limite une compromission de Horizon, pas l'agent, et c'est suivi
+  séparément.) Une install en mode user ne donne aucune frontière de ce type :
+  ses credentials appartiennent au compte sous lequel l'agent tourne.
+- **Ne laisse pas de credentials dans un répertoire vers lequel un agent est
+  pointé.** Mets-les dans un gestionnaire de mots de passe et supprime les
+  fichiers ; le vault n'a besoin du mot de passe qu'au descellement, pas en
+  permanence sur disque.
+- **Ne les colle pas dans un prompt, une issue ou un chat.** Tout ce qui part
+  vers un modèle hébergé quitte la machine, et peut être conservé ou journalisé.
+- **Donne à l'automatisation un token scopé, jamais le root token.** Les tokens
+  par service, à scope étroit et avec allowlist d'IP, sont révocables ; le mot
+  de passe maître ne l'est pas, sauf rotation.
+- Si tu veux à la fois le redémarrage sans surveillance *et* un agent sur la
+  même machine, considère les deux comme incompatibles sur un seul compte et
+  sépare-les par utilisateur.
 
 ---
 

@@ -156,7 +156,7 @@ impossible par design.
 | `secrets` | Lire la valeur d'un secret, lister les noms | Create / update / delete |
 | `tokens` | Lister les tokens existants (sans valeurs) | Creer de nouveaux tokens, revoquer les existants |
 | `audit` | Lire la chaine d'audit | (pas de `audit:rw` - la chaine est append-only) |
-| `cluster` | Statut cluster + HA PostgreSQL (`/cluster`, `/cluster/health`, `/cluster/ha`, CA bundle) | Cycle de vie des noeuds : promote / demote / drain / evict / unrevoke / init / repair |
+| `cluster` | Statut cluster + HA PostgreSQL (`/cluster`, `/cluster/health`, `/cluster/preflight`, `/cluster/ha`, CA bundle) | Cycle de vie des noeuds : promote / demote / drain / evict / unrevoke / init / repair |
 | `admin` | Comme `audit:r` + lire toutes les configs | Seal / unseal, rotate master, changer la 2FA, gerer YubiKeys/TOTP/WebAuthn |
 
 Un token ne peut pas accorder un scope qu'il ne possede pas lui-meme. Si

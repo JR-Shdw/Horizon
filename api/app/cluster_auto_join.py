@@ -51,7 +51,7 @@ from pathlib import Path
 
 import httpx
 
-from . import cluster_cert, ha_bootstrap, ha_password, nginx_reload
+from . import cluster_cert, cluster_tls, ha_bootstrap, ha_password, nginx_reload
 from .config import settings
 from .node_uuid import get_node_uuid
 from .vault_state import vault
@@ -165,7 +165,9 @@ async def _reconcile_stale_cert(node_uuid: str) -> None:
         settings.cluster_cert_path, settings.cluster_cert_key_path
     ):
         return
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+    async with httpx.AsyncClient(
+        timeout=_HTTP_TIMEOUT, verify=cluster_tls.server_context()
+    ) as client:
         try:
             member = await _get_membership(client, node_uuid)
         except AutoJoinError as exc:
@@ -371,10 +373,7 @@ async def _attempt_join_once(node_uuid: str) -> bool:
     """
     async with httpx.AsyncClient(
         timeout=_HTTP_TIMEOUT,
-        # No verify=False -- we expect TLS termination in front of
-        # the primary's API. The CA bundle is the system default ;
-        # an operator running self-signed primary TLS sets
-        # SSL_CERT_FILE or REQUESTS_CA_BUNDLE in the env.
+        verify=cluster_tls.server_context(),
     ) as client:
         if settings.ha_password_storage == "age_vault":
             try:
@@ -493,7 +492,11 @@ async def _attempt_join_once(node_uuid: str) -> bool:
             # at the next refresh-cert tick once the primary upgrades.
             server_cert_str = join_resp.get("server_cert_pem")
             server_wrapped_hex = join_resp.get("server_cert_key_wrapped_hex")
-            if server_cert_str and server_wrapped_hex:
+            if (
+                settings.cluster_server_cert_managed
+                and server_cert_str
+                and server_wrapped_hex
+            ):
                 server_cert_pem = server_cert_str.encode()
                 server_wrapped = bytes.fromhex(server_wrapped_hex)
                 server_key_pem = ha_password.unwrap_server_key_for_joiner(
@@ -506,10 +509,15 @@ async def _attempt_join_once(node_uuid: str) -> bool:
                     settings.cluster_server_cert_key_path,
                 )
                 nginx_reload.reload_nginx(settings.cluster_nginx_reload_cmd)
-            else:
+            elif settings.cluster_server_cert_managed:
                 log.info(
                     "cluster_auto_join: primary did not ship a server cert "
                     "(no stored cert yet) ; renewal loop will pick it up later"
+                )
+            else:
+                log.info(
+                    "cluster_auto_join: HTTPS certificate is deployment-managed; "
+                    "skipping server key persistence"
                 )
 
             # Unlink the age ciphertext + bootstrap token now that the

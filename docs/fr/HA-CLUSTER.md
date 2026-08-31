@@ -21,12 +21,12 @@ Trois rôles indépendants couvrent les couches process, application et base :
 
 | Rôle | Portée | Responsabilité |
 |---|---|---|
-| **Master crypto local** | un worker uvicorn dans chaque conteneur rhorizon | détient les sous-clés du conteneur ; les workers followers délèguent la crypto via une socket Unix locale |
+| **Leader de custody local** | un processus de custody par hôte API | détient les sous-clés ; en mode embedded c'est un worker API, en mode separated il appartient au pool de custodians Rust/Python |
 | **Primary applicatif** | un conteneur rhorizon dans le cluster applicatif | détient les locks singleton cross-cluster : rotation DEK, compaction d'audit, rotation de password |
 | **Leader de base de données** | un membre PostgreSQL choisi par le fournisseur Database HA | accepte les écritures via l'endpoint/VIP stable et streame le WAL vers les replicas |
 
 Ces rôles ne s'impliquent jamais entre eux. Chaque conteneur applicatif a
-normalement son propre master crypto local, y compris un secondary applicatif.
+normalement son propre leader de custody local, y compris un secondary applicatif.
 Le primary applicatif n'a pas besoin de tourner sur l'hôte qui possède le
 leader de base ou le VIP d'écriture. L'état process vit dans `vault_workers`
 (`worker_state`) ; l'état applicatif dans `vault_cluster_nodes` (`ha_state`).
@@ -36,10 +36,10 @@ et la supervision de la base (Patroni via son DCS, ou `pgha` via son mécanisme
 de quorum natif BSD).
 
 Dans les messages opérateur et rapports d'incident, toujours qualifier le
-rôle : **master crypto local**, **primary applicatif** ou **leader de base de
+rôle : **leader de custody local**, **primary applicatif** ou **leader de base de
 données**. « master » et « primary » seuls sont ambigus.
 
-**Remplacement d'un worker process.** L'élection du master crypto local réagit
+**Remplacement d'un worker process.** En mode embedded, l'élection du leader de custody local réagit
 au timeout court du heartbeat. Séparément, le reaper de maintenance supprime
 une ligne `vault_workers` après cinq minutes sans heartbeat. Si ce processus
 reprend ensuite, son prochain heartbeat ne peut plus modifier la ligne supprimée :
@@ -88,8 +88,8 @@ flowchart TB
         pg["leader PostgreSQL + replicas<br/>endpoint / VIP d'écriture stable"]
     end
     subgraph APP["App HA (conteneurs rhorizon)"]
-        A["Conteneur A - primary applicatif<br/>1 master crypto local + N followers"]
-        B["Conteneur B - secondary applicatif<br/>1 master crypto local + N followers"]
+        A["Conteneur A - primary applicatif<br/>quorum custody local + workers API"]
+        B["Conteneur B - secondary applicatif<br/>quorum custody local + workers API"]
         A <-->|"coordination HA<br/>advisory locks + heartbeats"| B
     end
     A -->|RH_DATABASE_URL = endpoint d'écriture| pg
@@ -117,6 +117,8 @@ flowchart TB
 | `RH_TLS_ENABLED=true` | tous les nœuds | requis sauf si un proxy TLS externe est devant l'API |
 | `RH_HA_AUTO_JOIN=true` | joiners | auto-JOIN au démarrage du conteneur |
 | `RH_HA_PRIMARY_URL` | tous les nœuds | membre joignable utilisé pour renouveler les certificats ; l'initialisateur peut utiliser sa propre URL |
+| `RH_HA_SERVER_CA_FILE` | nœuds utilisant une PKI HTTPS privée | CA ou certificat épinglé pour vérifier l'URL primaire ; vide utilise le trust store public du système |
+| `RH_CLUSTER_SERVER_CERT_MANAGED` | déploiements natifs personnalisés | activer seulement si l'API possède des chemins cert/key HTTPS inscriptibles et une commande nginx reload testée ; Compose/Helm gardent `false` |
 | `RH_HA_PASSWORD_FILE` | joiners | chemin vers le ha_password **brut 32 octets** (pas base64) |
 | `RH_HA_BOOTSTRAP_VAULT_URL` | joiners | défaut `RH_HA_PRIMARY_URL` |
 
@@ -137,7 +139,31 @@ Réglages d'exécution (préfixe d'environnement `RH_`, défauts indiqués) :
 | `cluster_joining_orphan_ttl_secs` | 90 | suppression des rows bloquées en `joining` ; jamais sous la quarantine plus la boucle state/reaper la plus lente |
 | `cluster_drain_deadline_secs` | 30 (5-600) | grâce avant qu'un nœud en drain soit évincé |
 | `cluster_primary_lease_ttl_secs` | 20 (5-3600) | durée du lease de failover autonome ; au moins 3x le heartbeat |
+| `cluster_frozen_max_secs` | 30 (20-86400) | grâce passée en `FROZEN`, sans servir, avant le scellement et l'effacement des clés |
 | `cluster_auto_promote_cooldown_secs` | 20 | tient un nœud juste rétrogradé hors du pool d'élection pendant au moins un lease ; 0 désactive |
+
+`FROZEN` n'est pas un délai pendant lequel le nœud continue à servir. Après la
+dernière confirmation PostgreSQL, le nœud refuse les requêtes dès l'expiration
+du lease (20 s par défaut), conserve ses clés pendant la grâce configurée, puis
+se scelle. Le délai d'un nœud isolé avant scellement vaut donc environ
+`cluster_primary_lease_ttl_secs + cluster_frozen_max_secs`.
+
+Profils conseillés pour `RH_CLUSTER_FROZEN_MAX_SECS` :
+
+| Déploiement | Grâce FROZEN avant scellement |
+|---|---:|
+| même datacenter / même LAN | 20-30 s (`30` par défaut) |
+| multi-site dans une même région | 45-60 s |
+| multi-région | 90-120 s |
+
+Choisir la borne haute si le failover PostgreSQL, le VIP ou le routage ont déjà
+été mesurés proches de la borne basse. Des pairs mTLS qui prouvent une panne DB
+partagée peuvent prolonger la conservation des clés, sans jamais rendre le
+nœud actif, jusqu'au plafond borné de trois fois cette grâce. Sans preuve de
+pair, la valeur du tableau est la limite effective.
+
+Définir explicitement `RH_CLUSTER_FROZEN_MAX_SECS` avant un rollout multi-site.
+Sans variable, le défaut de 30 s prévu pour un même LAN s'applique au démarrage.
 
 ## Commandes
 
@@ -147,6 +173,7 @@ CLI :
 rhorizon cluster init --cluster-name <nom> --save-ha-password ./ha_password.b64
 rhorizon cluster status                 # membres, ha_state, heartbeats, expiry cert
 rhorizon cluster health                 # app + nœud + base + Database HA
+rhorizon cluster preflight              # configuration + santé + preuve HTTPS/mTLS active
 rhorizon cluster join --timeout 60      # poll un joiner jusqu'à ce qu'il ait un ha_state
 ```
 
@@ -173,25 +200,28 @@ API (tout sous `/api/v1/vault/cluster/`) :
 
 | Méthode | Path | Auth | But |
 |---|---|---|---|
-| POST | `init` | `admin:w` (une fois) | mint `cluster_id` + `ha_password` + CA cluster (atomique) |
+| POST | `init` | `cluster:w` (une fois) | mint `cluster_id` + `ha_password` + CA cluster (atomique) |
 | POST | `challenge` | rate-limited | JOIN étape 1 : nonce serveur lié à (node_uuid, source_ip), TTL 30s |
 | POST | `join` | HMAC (1er) / mTLS (rejoin) | JOIN étape 2 : preuve + mint du cert par-nœud |
-| GET | `ha` | `admin:r` | membres, `ha_state`, timers de quarantine, heartbeats, conflits |
+| GET | `ha` | `cluster:r` | membres, `ha_state`, timers de quarantine, heartbeats, conflits |
 | GET | `ha/self` | n'importe quel bearer | un joiner poll sa propre transition d'état |
-| POST | `promote/{uuid}` | `admin:w` | force `secondary -> primary` |
-| POST | `demote/{uuid}` | `admin:w` | force l'état applicatif `primary -> secondary` (avant drain/evict d'un primary applicatif) |
-| POST | `drain/{uuid}` | `admin:w` | retrait gracieux (finir l'in-flight, puis évincer) |
-| POST | `evict/{uuid}` | `admin:w` | retrait immédiat + révocation du `node_uuid` |
-| POST | `unrevoke/{uuid}` | `admin:w` | annule la révocation d'une éviction (ne ré-ajoute pas le nœud) |
+| POST | `promote/{uuid}` | `cluster:w` | force `secondary -> primary` |
+| POST | `demote/{uuid}` | `cluster:w` | force l'état applicatif `primary -> secondary` (avant drain/evict d'un primary applicatif) |
+| POST | `drain/{uuid}` | `cluster:w` | retrait gracieux (finir l'in-flight, puis évincer) |
+| POST | `evict/{uuid}` | `cluster:w` | retrait immédiat + révocation du `node_uuid` |
+| POST | `unrevoke/{uuid}` | `cluster:w` | annule la révocation d'une éviction (ne ré-ajoute pas le nœud) |
 | POST | `rotate-ha-password/{stage,confirm,cancel}` | `admin:w` | fait tourner le secret de bootstrap (certs intacts) |
 | POST | `refresh-cert` | mTLS | un nœud renouvelle **son propre** cert (le CN du cert est l'unique cible) |
 | POST | `rotate-cert/{node_uuid\|all}` | `admin:w` | forçage opérateur : bascule `force_renew_at`, la boucle de renouvellement du nœud appelle ensuite `refresh-cert` |
-| GET | `ca-bundle` | `admin:r` | cert PEM de la CA du cluster + empreinte SHA-256 (matériel public uniquement) |
+| GET | `ca-bundle` | `cluster:r` | cert PEM de la CA du cluster + empreinte SHA-256 (matériel public uniquement) |
 | POST | `rotate-ca` | `admin:w` | émet une nouvelle CA de cluster, l'ancienne reste valide pendant la fenêtre de grâce |
 | POST | `issue-server-cert` | `admin:w` | émet un cert serveur nginx signé par la CA |
-| GET | `ha/membership/{node_uuid}` | `admin:r` | consultation de l'appartenance d'un nœud |
-| GET | `health` | `admin:r` | vue de readiness bout-en-bout (app + nœud + base + Database HA) |
-| POST | `repair` | `admin:w` | chemin de réparation opérateur pour un état de cluster incohérent |
+| GET | `ha/membership/{node_uuid}` | aucun | lookup public minimal utilisé uniquement pour résoudre les retries JOIN |
+| GET | `health` | `cluster:r` | vue de readiness bout-en-bout (app + nœud + base + Database HA) |
+| GET | `preflight?live=false` | `cluster:r` | contrôles bornés avec identifiants, raisons et corrections stables |
+| GET | `preflight?live=true` | `cluster:r` | mêmes contrôles plus un trajet réel certificat nœud -> frontend HTTPS -> API |
+| GET | `mtls-self` | mTLS | endpoint d'identité minimal utilisé par le contrôle actif |
+| POST | `repair` | `cluster:w` | chemin de réparation opérateur pour un état de cluster incohérent |
 
 Métriques : `rhorizon_cluster_state_transitions_total`,
 `rhorizon_cluster_join_attempts_total{outcome}`,
@@ -229,6 +259,16 @@ Métriques : `rhorizon_cluster_state_transitions_total`,
    tiennent leurs certs (le mTLS steady-state ne l'utilise pas), sauvegarder le
    `ca_fingerprint` quelque part où les opérateurs peuvent comparer, et lancer
    un drill de rotation avant le trafic de production.
+
+6. **Prouver le déploiement** :
+
+   ```bash
+   rhorizon cluster preflight
+   ```
+
+   La commande sort avec le code `2` tant qu'un contrôle bloquant échoue. La
+   Web UI affiche les mêmes identifiants et corrections. MCP reçoit une vue
+   bornée sans topologie et ne déclenche jamais la sonde réseau active.
 
 ## Dépannage
 

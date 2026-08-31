@@ -92,6 +92,11 @@ EOF"
     run chmod +x "$_wd/run-app.sh"
     RH_RUN="$_wd/run-app.sh"; export RH_RUN
     [ "${RH_MODE:-system}" = user ] && return 0
+    # NetBSD's rc.subr has no daemon_user for a custom start_cmd, so drop
+    # identity explicitly with su(1). Empty when no account exists, which keeps
+    # the generated script identical to the previous root-run one.
+    _asuser=""
+    [ "${RH_ACCOUNT_READY:-0}" = 1 ] && _asuser="/usr/bin/su -m $RH_SERVICE_USER -c "
     run sh -c "cat > /etc/rc.d/rhorizon <<EOF
 #!/bin/sh
 # PROVIDE: rhorizon
@@ -102,7 +107,7 @@ rcvar=\\\$name
 pidfile=${RH_NATIVE_RUNTIME_DIR:-/var/run/rhorizon}/rhorizon.pid
 start_cmd=rhorizon_start
 stop_cmd=rhorizon_stop
-rhorizon_start() { mkdir -p ${RH_NATIVE_RUNTIME_DIR:-/var/run/rhorizon} ${RH_NATIVE_AUDIT_DIR:-/var/log/rhorizon}; /usr/bin/nohup $_wd/run-app.sh > ${RH_NATIVE_AUDIT_DIR:-/var/log/rhorizon}/service.log 2>&1 & echo \\\$! > \\\$pidfile; }
+rhorizon_start() { ulimit -l $RH_MEMLOCK_KB 2>/dev/null || true; mkdir -p ${RH_NATIVE_RUNTIME_DIR:-/var/run/rhorizon} ${RH_NATIVE_AUDIT_DIR:-/var/log/rhorizon}; /usr/bin/nohup ${_asuser}$_wd/run-app.sh > ${RH_NATIVE_AUDIT_DIR:-/var/log/rhorizon}/service.log 2>&1 & echo \\\$! > \\\$pidfile; }
 rhorizon_stop() { [ -f \\\$pidfile ] && kill \"\\\$(cat \\\$pidfile)\"; }
 load_rc_config \\\$name
 run_rc_command \\\$1

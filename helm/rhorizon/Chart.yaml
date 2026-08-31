@@ -1,17 +1,24 @@
 apiVersion: v2
 name: rhorizon
 description: |
-  Resurgamus Horizon, self-hosted secrets vault.
+  Resurgamus Horizon, a lightweight self-hosted secrets manager and vault for
+  automation, CI/CD and AI/MCP agents. Native MCP server and MCP Hub.
   PostgreSQL + FastAPI + libsodium + Rust memory protection.
   AGPL-3.0-or-later.
 type: application
-version: 0.9.2
-appVersion: "0.9.2-beta"
+version: 0.9.4
+appVersion: "0.9.4-beta"
 keywords:
   - secrets
+  - secrets-manager
+  - secrets-management
   - vault
+  - ai-vault
+  - mcp
+  - mcp-vault
   - rbac
   - encryption
+  - self-hosted
   - rhorizon
 home: https://github.com/JR-Shdw/Horizon
 sources:

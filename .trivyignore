@@ -1,0 +1,17 @@
+# Exemptions with an expiry date. Trivy re-opens each one on the date below, so
+# an exemption cannot become permanent by being forgotten.
+
+# CVE-2026-14456 -- OpenSSL, unbounded memory growth in the QUIC server.
+#
+# Not reachable in this deployment: nothing here speaks QUIC. PostgreSQL does
+# not, and the frontend nginx terminates TLS 1.2/1.3 over TCP with no HTTP/3.
+# The vulnerable code path is never entered.
+#
+# The fix (3.5.7-1~deb13u2 on Debian, 3.5.8-r0 on Alpine) is in both archives
+# but not yet in the published base images, so there is nothing to bump to.
+# api/Dockerfile installs the fixed build directly and is therefore NOT covered
+# by this entry; it remains only for postgres:18-trixie and nginx:stable-alpine,
+# which are pulled as-is.
+#
+# Re-evaluate when the base images rebuild.
+CVE-2026-14456 exp:2026-09-15

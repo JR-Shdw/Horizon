@@ -73,8 +73,12 @@ async def test_cluster_topology_with_master_and_follower(
     assert r.status_code == 200
     hosts = r.json()["hosts"]
     assert "testhost" in hosts
+    # Exact equality on purpose: a field must not appear in a cluster topology
+    # payload without a test saying so. process_role is None outside
+    # custody_mode="separated", which is this fixture's default.
     assert hosts["testhost"]["master"] == {
         "pid": 1001,
+        "process_role": None,
         "age_sec": pytest.approx(0, abs=2),
     }
     assert len(hosts["testhost"]["followers"]) == 1

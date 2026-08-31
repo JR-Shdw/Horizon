@@ -347,27 +347,49 @@ exec $_run
 EOF"
         run chmod 0755 "$_wrap"
         _unit=$(printf '%s\n' "$_unit" | sed "s#^ExecStart=.*#ExecStart=$_wrap#")
+        # Drop the daemon to its own account. Installation is privileged; the
+        # vault afterwards is not.
+        if [ "${RH_ACCOUNT_READY:-0}" = 1 ]; then
+            _unit=$(printf '%s\n' "$_unit" | sed "/^\[Service\]/a User=$RH_SERVICE_USER\nGroup=$RH_SERVICE_GROUP")
+        fi
         _swap_state=$(_rh_swap_protection)
-        case "$_swap_state" in
-            unencrypted)
-                _unit=$(printf '%s\n' "$_unit" | sed "/^LimitMEMLOCK=/a AmbientCapabilities=CAP_IPC_LOCK")
-                warn "unencrypted swap present: system service will request memory locking"
-                ;;
-            unknown)
-                _unit=$(printf '%s\n' "$_unit" | sed '/^LimitMEMLOCK=/d')
-                warn "swap encryption could not be verified: memory locking remains best effort"
-                ;;
-            protected)
-                _unit=$(printf '%s\n' "$_unit" | sed '/^LimitMEMLOCK=/d')
-                ;;
-        esac
-        _unit=$(printf '%s\n' "$_unit" | sed "/^Restart=/a RuntimeDirectory=rhorizon")
+        if [ "${RH_ACCOUNT_READY:-0}" = 1 ]; then
+            # A non-root service cannot raise its own hard limit, and the distro
+            # default (commonly 8 MB) is two orders of magnitude under the
+            # budget. Dropping LimitMEMLOCK here -- which is what the
+            # root-service logic below does when swap looks protected -- would
+            # guarantee a failed mlockall and a silent slide to "swappable".
+            # So the limit stays in every branch, and CAP_IPC_LOCK is granted
+            # and simultaneously bounded to itself.
+            _unit=$(printf '%s\n' "$_unit" | sed "/^LimitMEMLOCK=/a AmbientCapabilities=CAP_IPC_LOCK\nCapabilityBoundingSet=CAP_IPC_LOCK")
+            case "$_swap_state" in
+                unencrypted) warn "unencrypted swap present: memory locking is enforced for the service" ;;
+                unknown)     warn "swap encryption could not be verified: memory locking is still enforced" ;;
+            esac
+        else
+            case "$_swap_state" in
+                unencrypted)
+                    _unit=$(printf '%s\n' "$_unit" | sed "/^LimitMEMLOCK=/a AmbientCapabilities=CAP_IPC_LOCK")
+                    warn "unencrypted swap present: system service will request memory locking"
+                    ;;
+                unknown)
+                    _unit=$(printf '%s\n' "$_unit" | sed '/^LimitMEMLOCK=/d')
+                    warn "swap encryption could not be verified: memory locking remains best effort"
+                    ;;
+                protected)
+                    _unit=$(printf '%s\n' "$_unit" | sed '/^LimitMEMLOCK=/d')
+                    ;;
+            esac
+        fi
+        # systemd otherwise creates /run/rhorizon as 0755, widening the 0700
+        # directory prepared by the installer every time the service starts.
+        _unit=$(printf '%s\n' "$_unit" | sed "/^Restart=/a RuntimeDirectory=rhorizon\nRuntimeDirectoryMode=0700")
         # AppArmor (Debian/Ubuntu): load the profile first, then bind the unit to
         # it only on success -- a stale AppArmorProfile= makes systemd refuse start.
         if _rh_apparmor_setup "$_wd"; then
             _unit=$(printf '%s\n' "$_unit" | sed "/^Restart=/a AppArmorProfile=rhorizon")
         fi
-        run sh -c "printf '%s\n' \"\$1\" > /etc/systemd/system/rhorizon.service" _ "$_unit"
+        _sudo sh -c "printf '%s\n' \"\$1\" > /etc/systemd/system/rhorizon.service" _ "$_unit"
         _sudo systemctl daemon-reload
         _sudo systemctl enable rhorizon.service
         # Confine under SELinux (no-op unless the host is actively enforcing).
@@ -418,7 +440,7 @@ WantedBy=default.target"
             RH_NGINX_SVC="direct"
         fi
     else
-        run sh -c "printf '%s\n' \"\$1\" > /etc/systemd/system/rhorizon-nginx.service" _ "$_nunit"
+        _sudo sh -c "printf '%s\n' \"\$1\" > /etc/systemd/system/rhorizon-nginx.service" _ "$_nunit"
         _sudo systemctl daemon-reload
         _sudo systemctl enable rhorizon-nginx.service
         # SELinux labels the port nginx binds, not just uvicorn's. Without this
@@ -437,8 +459,10 @@ WantedBy=default.target"
 
 driver_start_nginx() {
     case "${RH_NGINX_SVC:-}" in
-        user-systemd)   run systemctl --user start rhorizon-nginx.service ;;
-        system-systemd) _sudo systemctl start rhorizon-nginx.service ;;
+        # restart also starts an inactive unit. On an installer re-run, start
+        # alone leaves the old process and old unit configuration in memory.
+        user-systemd)   run systemctl --user restart rhorizon-nginx.service ;;
+        system-systemd) _sudo systemctl restart rhorizon-nginx.service ;;
         direct)         run "$RH_NGINX_BIN" -p "$RH_NGINX_PREFIX" -c "$RH_NGINX_CONF" ;;
         *)              warn "nginx service not configured; start it manually" ;;
     esac
@@ -446,8 +470,8 @@ driver_start_nginx() {
 
 driver_start() {
     case "${RH_SVC:-}" in
-        user-systemd)   run systemctl --user start rhorizon.service ;;
-        system-systemd) _sudo systemctl start rhorizon.service ;;
+        user-systemd)   run systemctl --user restart rhorizon.service ;;
+        system-systemd) _sudo systemctl restart rhorizon.service ;;
         nohup:*)        run sh -c "nohup '${RH_SVC#nohup:}' >/dev/null 2>&1 &" ;;
         *)              warn "no service configured; start manually" ;;
     esac

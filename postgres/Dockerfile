@@ -15,7 +15,7 @@
 # --squash-all, no registry, no daemon-specific flags. PQ TLS (ML-KEM
 # X25519MLKEM768) is preserved; verified in tools (privilege drop + handshake).
 
-ARG POSTGRES_VERSION=18-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
+ARG POSTGRES_VERSION=18-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
 
 FROM docker.io/library/postgres:${POSTGRES_VERSION} AS base
 

@@ -34,7 +34,7 @@ flowchart TB
 | Endpoint client | 1 | hostname et certificat stables |
 | Edge | 2 | domaines de panne distincts |
 | API | 3 | hôtes distincts ; `/var/lib/rhorizon` persistant par nœud |
-| Workers | 5 par API Linux de référence | un master crypto local et quatre followers |
+| Custody | 5 workers embedded ou un pool de custodians séparé par hôte API | un leader de custody local ; le mode separated garde les workers HTTP jetables |
 | PostgreSQL | 3 | hôtes/stockages dans des domaines distincts |
 | Supervision DB | quorum impair | Patroni+DCS sous Linux/Kubernetes ; `pgha` sous BSD |
 | Backup | hors hôte | backup chiffré, archive WAL et restore testé |
@@ -80,8 +80,8 @@ Recalibrer le profil quatre/900 si les limites du proxy ou de nginx changent.
 | 502/504 gateway du backend | éjecter immédiatement |
 
 Après unseal, attendre readiness **et** la convergence workers. La topologie de
-management doit montrer un master crypto local, le nombre configuré de workers,
-tous les autres workers followers avec heartbeat frais, et l'état applicatif
+management doit montrer un leader de custody local, les processus API/custodian
+configurés avec heartbeat frais, et l'état applicatif
 `primary` ou `secondary`. Un `sleep` fixe ne remplace pas ce contrôle.
 
 ### Retries et erreurs
@@ -228,7 +228,8 @@ réconcilier l'opération.
 ## Contrôles de mise en production
 
 - [ ] Une URL client, deux edges sains, trois API ready.
-- [ ] Un master crypto local et tous les followers sur chaque API.
+- [ ] `rhorizon cluster preflight` passe, y compris son contrôle HTTPS/mTLS actif.
+- [ ] Un leader de custody local et tous les processus API/custodian prévus sur chaque hôte API.
 - [ ] Un primary applicatif et deux secondaries avec heartbeats frais.
 - [ ] Trois membres PostgreSQL supervisés et un write endpoint stable.
 - [ ] Réserve connexions, réplication, WAL/archive, disque et restore validés.
@@ -237,7 +238,8 @@ réconcilier l'opération.
 - [ ] Perte leader DB : un successeur et bon déplacement de l'endpoint.
 - [ ] `RH_MAX_CONCURRENT_REQUESTS` défini à une valeur non nulle et mesurée (`0`/désactivé par défaut).
 - [ ] Surcharge en 429 structuré, pas en 502/503 brut.
-- [ ] Audit asynchrone complet valide avant et après les tests.
+- [ ] Audit asynchrone complet valide avant et après les tests ; sa dernière
+      ancre signée est récente dans le preflight.
 - [ ] Aucun composant HA orange, rouge ou gris.
 
 Le soak long vient après ces tests bornés.

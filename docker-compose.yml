@@ -4,6 +4,9 @@ networks:
   rhorizon_internal:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: "${RH_INTERNAL_SUBNET:-172.31.250.0/24}"
   traefik_proxy:
     external: true
 
@@ -23,7 +26,7 @@ services:
       context: .
       dockerfile: postgres/Dockerfile
       args:
-        POSTGRES_VERSION: ${POSTGRES_VERSION:-18-trixie@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941}
+        POSTGRES_VERSION: ${POSTGRES_VERSION:-18-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280}
     container_name: rhorizon_postgres
     restart: unless-stopped
     entrypoint:
@@ -109,7 +112,24 @@ services:
       RH_DATABASE_SSL: "${RH_DATABASE_SSL:-${RHORIZON_DATABASE_SSL:-verify-full}}"
       RH_DATABASE_CA_CERT: "${RH_DATABASE_CA_CERT:-${RHORIZON_DATABASE_CA_CERT:-/pg-certs/server.crt}}"
       RH_PROXY_AUTH_ENABLED: "${RH_PROXY_AUTH_ENABLED:-${RHORIZON_PROXY_AUTH_ENABLED:-false}}"
-      RH_PROXY_TRUSTED_IPS: "${RH_PROXY_TRUSTED_IPS:-${RHORIZON_PROXY_TRUSTED_IPS:-}}"
+      # The bundled frontend has a fixed address on the private bridge. Trust
+      # exactly that peer for X-Client-Cert / SSO headers; direct API clients
+      # remain unable to forge them.
+      RH_PROXY_TRUSTED_IPS: "${RH_PROXY_TRUSTED_IPS:-${RHORIZON_PROXY_TRUSTED_IPS:-${RH_FRONTEND_TRUST_CIDR:-172.31.250.10/32}}}"
+      RH_CLUSTER_HA_ENABLED: "${RH_CLUSTER_HA_ENABLED:-${RHORIZON_CLUSTER_HA_ENABLED:-false}}"
+      RH_TLS_ENABLED: "${RH_TLS_ENABLED:-${RHORIZON_TLS_ENABLED:-${RH_CLUSTER_HA_ENABLED:-false}}}"
+      RH_CLUSTER_ADVERTISE_IP: "${RH_CLUSTER_ADVERTISE_IP:-${RHORIZON_CLUSTER_ADVERTISE_IP:-${WG_IP:-}}}"
+      RH_HA_AUTO_JOIN: "${RH_HA_AUTO_JOIN:-${RHORIZON_HA_AUTO_JOIN:-false}}"
+      RH_HA_PRIMARY_URL: "${RH_HA_PRIMARY_URL:-${RHORIZON_HA_PRIMARY_URL:-}}"
+      # Private/self-signed HTTPS stays verified: the API sees the same
+      # certificate directory as nginx and pins this file for HA calls.
+      RH_HA_SERVER_CA_FILE: "${RH_HA_SERVER_CA_FILE:-${RHORIZON_HA_SERVER_CA_FILE:-/ha-server-certs/cert.pem}}"
+      RH_CLUSTER_SERVER_CERT_MANAGED: "false"
+      RH_HA_BOOTSTRAP_VAULT_URL: "${RH_HA_BOOTSTRAP_VAULT_URL:-${RHORIZON_HA_BOOTSTRAP_VAULT_URL:-}}"
+      RH_HA_PASSWORD_FILE: "${RH_HA_PASSWORD_FILE:-${RHORIZON_HA_PASSWORD_FILE:-}}"
+      # node_uuid_data is a named volume, so node identity and certificates
+      # survive container replacement. The HA preflight verifies this claim.
+      RH_CLUSTER_IDENTITY_PERSISTENT: "true"
       RH_MEMORY_LOCK_MODE: "${RH_MEMORY_LOCK_MODE:-${RHORIZON_MEMORY_LOCK_MODE:-best-effort}}"
       # Containers cannot reliably inspect the host swap backing device.
       RH_SWAP_PROTECTION: "${RH_SWAP_PROTECTION:-${RHORIZON_SWAP_PROTECTION:-unknown}}"
@@ -130,8 +150,9 @@ services:
       - "10.0.1.1:8200:8200"
       - "${WG_IP:-10.0.0.1}:8200:8200"   # admin direct access
     networks:
-      - rhorizon_internal
-      - traefik_proxy
+      rhorizon_internal:
+        ipv4_address: "${RH_API_BRIDGE_IP:-172.31.250.20}"
+      traefik_proxy:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_proxy"
@@ -151,6 +172,7 @@ services:
       - audit_logs:/var/log/rhorizon
       - node_uuid_data:/var/lib/rhorizon
       - pg_certs:/pg-certs:ro
+      - ${TLS_CERT_DIR:-./certs}:/ha-server-certs:ro
       # The closed dynamic-engine catalog is copied into the API image.
       # Edit dynamic-engines.ini and rebuild the image to change it. A runtime
       # bind cannot be used here because CI talks to an external Docker daemon.
@@ -196,7 +218,10 @@ services:
     environment:
       MAX_BODY_API: "${MAX_BODY_API:-1m}"
       MAX_BODY_BACKUP: "${MAX_BODY_BACKUP:-100m}"
-      TLS_ENABLED: "${TLS_ENABLED:-false}"
+      # Enabling application HA automatically enables the bundled HTTPS/mTLS
+      # frontend. A non-HA install retains the existing TLS_ENABLED behavior.
+      TLS_ENABLED: "${TLS_ENABLED:-${RH_CLUSTER_HA_ENABLED:-${RHORIZON_CLUSTER_HA_ENABLED:-false}}}"
+      RH_CLUSTER_MTLS: "${RH_CLUSTER_MTLS:-${RH_CLUSTER_HA_ENABLED:-${RHORIZON_CLUSTER_HA_ENABLED:-false}}}"
       TLS_CERT: "${TLS_CERT:-/certs/cert.pem}"
       TLS_KEY: "${TLS_KEY:-/certs/key.pem}"
       # nginx upstream for the API (reachable by container_name on rhorizon_internal).
@@ -212,8 +237,9 @@ services:
     volumes:
       - ${TLS_CERT_DIR:-./certs}:/certs:ro
     networks:
-      - rhorizon_internal
-      - traefik_proxy
+      rhorizon_internal:
+        ipv4_address: "${RH_FRONTEND_BRIDGE_IP:-172.31.250.10}"
+      traefik_proxy:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_proxy"

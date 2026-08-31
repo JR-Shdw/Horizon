@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Vault
     auto_seal_minutes: int = 0  # 0 = never auto-seal
-    version: str = "0.9.2-beta"
+    version: str = "0.9.4-beta"
     # Closed-catalog dynamic backend selection. This resolves to the repository
     # root in source and /app in the image, independent of process cwd.
     dynamic_modules_file: str = _default_dynamic_modules_file()
@@ -143,6 +143,11 @@ class Settings(BaseSettings):
     # (the native path, which has no nginx). Read at boot by ha_boot_check.py to
     # refuse-to-start an HA-enabled node without TLS.
     cluster_ha_enabled: bool = False
+    # Deployment contract consumed by the HA preflight. The application cannot
+    # reliably distinguish a Kubernetes emptyDir from a PVC, or a Docker bind
+    # mount from a named volume, from inside the container. Supported
+    # installers set this only when /var/lib/rhorizon survives replacement.
+    cluster_identity_persistent: bool = False
     cluster_challenge_ttl_secs: int = 30
     cluster_join_quarantine_secs: int = 60
     # Provider-neutral database-HA health shown by /cluster/health. "auto"
@@ -230,38 +235,30 @@ class Settings(BaseSettings):
     # one primary lease. 0 disables. Range [0, 3600]. NULL role_changed_at =
     # no cooldown.
     cluster_auto_promote_cooldown_secs: int = 20
-    # cluster_frozen_max_secs : how long a node may stay FROZEN -- keys retained
-    # in RAM, all authority suspended -- before the hard fence seals it and the
-    # key material goes.
-    #
-    # The node stops being authoritative at cluster_primary_lease_ttl_secs; this
-    # governs only how long it waits, holding its keys, for the database to come
-    # back. That wait is the point: there is no auto-unseal, so sealing at the
-    # TTL meant every PostgreSQL outage longer than it cost a manual /unseal on
-    # the primary -- and a Patroni failover takes 10-30s against a 20s default.
-    #
-    # 300s covers a database failover comfortably while bounding how long a
-    # possibly-stale node sits on key material.
+    # cluster_frozen_max_secs : key-retention grace after a node enters FROZEN.
+    # FROZEN suspends all authority; expiry seals the node and drops its keys.
+    # The 30s default targets a same-site deployment. Use 60s for same-region
+    # multi-site and 120s for multi-region. An isolated node seals after
+    # cluster_primary_lease_ttl_secs + this grace.
     #
     # There is deliberately NO "never seal" value -- see
-    # standalone_db_seal_secs. Range [30, 86400].
-    cluster_frozen_max_secs: int = 300
+    # standalone_db_seal_secs. Range [20, 86400].
+    cluster_frozen_max_secs: int = 30
     # -- standalone / embedded / custodian : seal on a dead local database --
     #
-    # These apply ONLY when cluster_ha_enabled is false, and they are tuned the
-    # opposite way to the HA knobs above, because the evidence is different.
+    # These apply ONLY when cluster_ha_enabled is false. The failure domain is
+    # different from HA: there is no healthy peer to carry service, and a local
+    # PostgreSQL restart is a normal recovery path.
     #
     # In HA, "cannot reach the database" is ambiguous: it may be this node's
     # NIC, a BGP/OSPF reconvergence, a VIP still settling, or load. A peer can
     # cover, so the node freezes and waits, and recovers by self-demoting.
     # Sealing on that signal would destroy keys over a transient network event.
     #
-    # Standalone has no such excuse. The database is on this machine. There is
-    # no partition to blame and no peer that could be serving, so sustained
-    # unreachability IS evidence rather than ambiguity -- and the vault is
-    # already serving nothing, since every read needs the database. Keys held
-    # in RAM past that point are pure exposure. Data protection wins: freeze,
-    # then seal.
+    # Standalone freezes sooner because local PostgreSQL unreachability is a
+    # stronger signal, but keeps a 60s recovery grace so a routine database or
+    # package restart does not force a manual unseal. HA can seal an isolated
+    # node sooner because healthy peers preserve service.
     #
     # standalone_db_freeze_secs : unreachable this long -> stop being
     #   authoritative (FROZEN). Keys retained; a database that comes back
@@ -337,6 +334,10 @@ class Settings(BaseSettings):
     # systemd path unit, etc.). Typical:
     # "sudo /bin/systemctl reload nginx" with a NOPASSWD sudoers entry.
     cluster_server_cert_validity_days: int = 90
+    # True only when the API owns writable nginx certificate paths and a
+    # reload mechanism. Container/Helm TLS is deployment-managed and sets
+    # this false; node mTLS certificates remain Horizon-managed either way.
+    cluster_server_cert_managed: bool = True
     cluster_server_cert_path: str = "/etc/nginx/ssl/server.crt"
     cluster_server_cert_key_path: str = "/etc/nginx/ssl/server.key"
     cluster_nginx_reload_cmd: str = ""
@@ -369,6 +370,9 @@ class Settings(BaseSettings):
     # confirmed. 20 x 30s = ~10 min window, outlasting bootstrap churn.
     # ha_auto_join_retry_secs : backoff between auto-JOIN attempts.
     ha_primary_url: str = ""
+    # Optional private/self-signed CA for outbound JOIN, renewal and preflight
+    # HTTPS calls. Empty keeps the platform trust store.
+    ha_server_ca_file: str = ""
     ha_password_file: str = ""
     ha_cluster_id: str = ""
     ha_auto_join: bool = True
@@ -733,9 +737,10 @@ class Settings(BaseSettings):
     @classmethod
     def clamp_cluster_frozen_max(cls, v: int) -> int:
         # No zero: retaining keys indefinitely on an unresolved node waives the
-        # invariant that ambiguity ends sealed. 30s floor gives a partition
-        # room to heal; 86400 bounds the accidental "effectively forever".
-        return max(30, min(86400, v))
+        # invariant that ambiguity ends sealed. 20s floor gives a same-LAN
+        # partition room to heal while matching the documented strict profile;
+        # 86400 bounds the accidental "effectively forever".
+        return max(20, min(86400, v))
 
     @field_validator("cluster_operator_weight")
     @classmethod

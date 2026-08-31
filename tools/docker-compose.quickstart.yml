@@ -17,6 +17,9 @@ networks:
   # NAT to an internal-only network). internal: DB isolation (no host port, no egress).
   rhorizon_edge:
     driver: bridge
+    ipam:
+      config:
+        - subnet: "${RH_EDGE_SUBNET:-172.31.251.0/24}"
   rhorizon_internal:
     driver: bridge
     internal: true
@@ -85,19 +88,30 @@ services:
       RH_CUSTODY_MODE: "${RH_CUSTODY_MODE:-${RHORIZON_CUSTODY_MODE:-embedded}}"
       RH_CUSTODIAN_WORKERS: "${RH_CUSTODIAN_WORKERS:-${RHORIZON_CUSTODIAN_WORKERS:-5}}"
       RH_PROXY_AUTH_ENABLED: "${RH_PROXY_AUTH_ENABLED:-${RHORIZON_PROXY_AUTH_ENABLED:-false}}"
-      RH_PROXY_TRUSTED_IPS: "${RH_PROXY_TRUSTED_IPS:-${RHORIZON_PROXY_TRUSTED_IPS:-}}"
+      RH_PROXY_TRUSTED_IPS: "${RH_PROXY_TRUSTED_IPS:-${RHORIZON_PROXY_TRUSTED_IPS:-${RH_FRONTEND_TRUST_CIDR:-172.31.251.10/32}}}"
+      RH_CLUSTER_HA_ENABLED: "${RH_CLUSTER_HA_ENABLED:-false}"
+      RH_TLS_ENABLED: "${RH_TLS_ENABLED:-${RH_CLUSTER_HA_ENABLED:-false}}"
+      RH_CLUSTER_ADVERTISE_IP: "${RH_CLUSTER_ADVERTISE_IP:-${RHORIZON_API_BIND:-127.0.0.1}}"
+      RH_HA_AUTO_JOIN: "${RH_HA_AUTO_JOIN:-false}"
+      RH_HA_PRIMARY_URL: "${RH_HA_PRIMARY_URL:-}"
+      RH_HA_SERVER_CA_FILE: "${RH_HA_SERVER_CA_FILE:-/ha-server-certs/cert.pem}"
+      RH_CLUSTER_SERVER_CERT_MANAGED: "false"
+      RH_HA_PASSWORD_FILE: "${RH_HA_PASSWORD_FILE:-}"
+      RH_CLUSTER_IDENTITY_PERSISTENT: "true"
       RH_MEMORY_LOCK_MODE: "${RH_MEMORY_LOCK_MODE:-${RHORIZON_MEMORY_LOCK_MODE:-best-effort}}"
       RH_SWAP_PROTECTION: "${RH_SWAP_PROTECTION:-${RHORIZON_SWAP_PROTECTION:-unknown}}"
     ports:
       # Localhost-only by default. Override RH_API_BIND to expose.
       - "${RH_API_BIND:-${RHORIZON_API_BIND:-127.0.0.1}}:${RH_API_PORT:-${RHORIZON_API_PORT:-8200}}:8200"
     networks:
-      - rhorizon_internal
-      - rhorizon_edge
+      rhorizon_internal: {}
+      rhorizon_edge:
+        ipv4_address: "${RH_API_EDGE_IP:-172.31.251.20}"
     volumes:
       - audit_logs:/var/log/rhorizon
       - node_uuid_data:/var/lib/rhorizon
       - ./dynamic-engines.ini:/app/dynamic-engines.ini:ro
+      - ${TLS_CERT_DIR:-./certs}:/ha-server-certs:ro
     read_only: true
     tmpfs:
       - /tmp:size=16M,noexec,nosuid
@@ -132,14 +146,16 @@ services:
     environment:
       MAX_BODY_API: "${MAX_BODY_API:-1m}"
       MAX_BODY_BACKUP: "${MAX_BODY_BACKUP:-100m}"
-      TLS_ENABLED: "${TLS_ENABLED:-false}"
+      TLS_ENABLED: "${TLS_ENABLED:-${RH_CLUSTER_HA_ENABLED:-false}}"
+      RH_CLUSTER_MTLS: "${RH_CLUSTER_MTLS:-${RH_CLUSTER_HA_ENABLED:-false}}"
       TLS_CERT: "${TLS_CERT:-/certs/cert.pem}"
       TLS_KEY: "${TLS_KEY:-/certs/key.pem}"
     ports:
       - "${RH_FRONTEND_BIND:-${RHORIZON_FRONTEND_BIND:-127.0.0.1}}:${RH_FRONTEND_PORT:-${RHORIZON_FRONTEND_PORT:-8443}}:8443"
       - "${RH_FRONTEND_BIND:-${RHORIZON_FRONTEND_BIND:-127.0.0.1}}:${RH_FRONTEND_HTTP_PORT:-${RHORIZON_FRONTEND_HTTP_PORT:-8080}}:8200"
     networks:
-      - rhorizon_edge
+      rhorizon_edge:
+        ipv4_address: "${RH_FRONTEND_EDGE_IP:-172.31.251.10}"
     volumes:
       - ${TLS_CERT_DIR:-./certs}:/certs:ro
     read_only: true

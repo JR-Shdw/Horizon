@@ -10,11 +10,11 @@
 // the moment the user loads the page after a deploy.
 //
 // Convention : bump on every release that touches frontend/.
-const CACHE = 'rhorizon-v32';
+const CACHE = 'rhorizon-v33';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/style.css?v=17',
+  '/css/style.css?v=20',
   '/js/pixelarray.js',
   '/js/blackhole.js',
   '/js/qr.js',
@@ -27,6 +27,7 @@ const SHELL = [
   '/js/views/quasar.js',
   '/js/views/jets.js',
   '/js/views/cluster.js',
+  '/js/views/cluster-ha.js',
   '/js/views/nebula.js',     // Namespaces view (added 2026-05-07)
   '/js/views/accretion.js',
   '/js/views/pulsar.js',

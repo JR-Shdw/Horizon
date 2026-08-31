@@ -48,12 +48,13 @@ Trois formes :
   quorum, promotion, réplication et propriété du VIP d'écriture.
 - **Docker Swarm** : API en `replicas=3` ; PG+Patroni sur des VMs dédiées **hors**
   Swarm (son rescheduling entre en conflit avec l'identité PG).
-- **Kubernetes** : API `Deployment replicas=3` ; PG via un opérateur PG
-  StatefulSet (Zalando / CrunchyData / CloudNativePG) - ne jamais bricoler Patroni.
+- **Kubernetes** : API `StatefulSet replicas=3` avec un PVC d'identité par
+  Pod ; PG via un opérateur PG StatefulSet (Zalando / CrunchyData /
+  CloudNativePG) - ne jamais bricoler Patroni.
 
 Les trois rôles de leadership sont distincts : le **primary applicatif**
 possède les tâches singleton rhorizon, chaque conteneur applicatif a un
-**master crypto local**, et le **leader de base de données** possède les
+**leader de custody local**, et le **leader de base de données** possède les
 écritures PostgreSQL. Changer un rôle ne change jamais automatiquement les
 deux autres.
 
@@ -321,7 +322,7 @@ plus proche), **primary applicatif en dernier** (seulement après démotion).
 
 ```bash
 # chaque secondary :
-docker service update --force rhorizon_api      # ou : kubectl rollout restart deployment/rhorizon-api
+docker service update --force rhorizon_api      # ou : kubectl rollout restart statefulset/rhorizon-api
 sleep 120                                        # 2 * cluster_join_quarantine_secs
 rhorizon cluster status                          # confirmer hb < 5 + SECONDARY
 

@@ -17,14 +17,42 @@ Self-hosted secrets vault
 > | Fedora 39+ | validée | `dnf` ; voir notes SELinux |
 > | RHEL 9 / Rocky 9 / AlmaLinux 9 | validée | EPEL pour `python3.12` si absent |
 > | openSUSE Leap 15.5+ / Tumbleweed | validée | `zypper` ; AppArmor au lieu de SELinux |
-> | FreeBSD 14+ | validée | Toutes les primitives IPC shimmées 2026-05 |
-> | OpenBSD 7.4+ | validée | Même chemin shim que FreeBSD |
-> | macOS 13+ | squelette / non testée | `tools/install-macos.sh --mode user` |
+> | FreeBSD 14+ | validée | Le service rc.d relève le budget memlock, puis un lanceur détenu par root exécute directement `setgid`/`setuid` avant l'API. Cela évite `daemon -u`, qui recharge la classe de login et réinitialiserait la limite |
+> | OpenBSD 7.4+ | validée | Le service système universel reste volontairement root : la classe `daemon` standard a été mesurée à 87381 Kio, sous les 622592 Kio du tier home |
+> | macOS Apple Silicon | validée | `tools/install-macos.sh --mode user`, testé bout en bout sur le runner GitHub `macos-latest` ; le mode système n'est pas implémenté |
+> | macOS Intel | non testée | Aucun runner gratuit disponible ; le chemin Darwin x86_64 reste non vérifié |
 > | stack Linux aarch64 | validée | Raspberry Pi 4 |
 > | AIX / Solaris | non supporté | POWER/SPARC + IBM/Oracle proprio, hors scope |
 >
 > Chaque OS validé ci-dessus a été déroulé bout-en-bout via son script
 > `tools/install-<os>.sh` (lanes BSD aussi gatées en CI, `.cirrus.yml`).
+
+### Identité du service système et tests de régression
+
+En mode système, Linux, FreeBSD et NetBSD exécutent l'API avec le compte
+non-login dédié `rhorizon`. La configuration reste détenue par root et lisible
+par le groupe ; les répertoires d'état, d'exécution et d'audit, ainsi que la clé
+TLS, sont confiés au compte de service. `<config>/secrets/` reste uid/gid 0 en
+0700 et ses credentials en 0400. L'API ne peut pas lire son propre matériel de
+récupération.
+
+La création du compte échoue de manière fermée. L'installeur s'arrête au lieu
+de continuer en root, sauf choix explicite de l'opérateur avec
+`RH_ACCOUNT_FALLBACK_ROOT=1`. OpenBSD est l'exception actuelle décrite dans le
+tableau ; l'installeur ne modifie pas `/etc/login.conf`.
+
+Le lane VM contrôle le processus réel, pas seulement le fichier de service. Il
+vérifie l'uid d'exécution, la limite memlock effective sous Linux, les verdicts
+`memory_protection` et `process_memory_protection` de l'API, et les deux côtés
+de la frontière de permissions. Sous Linux, il force aussi une limite de 8 Mio
+sans `CAP_IPC_LOCK` pour prouver les comportements `required`, `best-effort` et
+l'exception documentée lorsque le swap est explicitement `protected`.
+
+```bash
+make test-native-install-matrix
+make test-native-install-migration
+RH_OPENBSD_CLASS_MEASURE=1 tools/test-vm.sh openbsd
+```
 
 ### Portabilité
 

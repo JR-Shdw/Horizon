@@ -2,8 +2,8 @@
 # Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 [project]
 name = "rhorizon"
-version = "0.9.2b1"
-description = "Self-hosted secrets vault for infrastructure teams"
+version = "0.9.4b1"
+description = "Lightweight self-hosted secrets manager and vault for automation, CI/CD and AI/MCP agents"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
 authors = [{name = "shdw"}]

@@ -7,7 +7,7 @@ Adds, on top of the stdio hub (which is unchanged):
     /tokens/whoami over the sidecar, with positive/negative caches + a rolling
     per-IP reject rate-limit (re-derives the mcp bearer-middleware hardening
     pattern, stdlib only);
-  - VaultBackend: the 6 vault tools dispatched to the vault over the sidecar with
+  - VaultBackend: the vault tools dispatched to the vault over the sidecar with
     the PER-REQUEST agent bearer (so the vault's own audit attributes to the real
     agent);
   - emit_mcp_audit: POST every tool call to the vault's chained /audit/mcp with the
@@ -31,8 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 try:  # package mode
+    from .policy import ProxyDenied, ProxyPolicy, load_proxy_policy
     from .sidecar import SidecarClient, SidecarError
 except ImportError:  # script mode (running directly / tests)
+    from policy import ProxyDenied, ProxyPolicy, load_proxy_policy
     from sidecar import SidecarClient, SidecarError
 
 log = logging.getLogger("rhorizon-mcp-hub")
@@ -132,6 +134,10 @@ class BearerAuth:
         return None
 
 
+def _denied(message: str) -> dict:
+    return {"error": "policy_denied", "message": message}
+
+
 def _mcp_result(data: object) -> dict:
     """Wrap a vault response as an MCP tools/call result (text content)."""
     return {"content": [{"type": "text", "text": json.dumps(data)}]}
@@ -153,11 +159,18 @@ class VaultBackend:
     ``Backend`` (``.name``, ``.tools``, ``.destructive_requires_confirm``,
     ``.call(tool, args, ctx)``) so the hub routes to it uniformly."""
 
-    def __init__(self, sidecar: SidecarClient, name: str = "rhorizon") -> None:
+    def __init__(
+        self,
+        sidecar: SidecarClient,
+        name: str = "rhorizon",
+        config: dict | None = None,
+    ) -> None:
         self.name = name
         self._sidecar = sidecar
         self.tools = VAULT_TOOLS
         self.destructive_requires_confirm = False
+        # No config -> no bindings -> vault_call_api refuses everything.
+        self._proxy: ProxyPolicy = load_proxy_policy(config or {})
 
     def _get(
         self,
@@ -196,8 +209,18 @@ class VaultBackend:
         if tool == "vault_get_secret":
             ns = arguments.get("namespace") or "default"
             name = arguments["name"]
+            if self._proxy.read_denied(ns, name):
+                # Bound with allow_read = false: usable, not readable.
+                return _mcp_result(
+                    _denied(
+                        f"Credential '{ns}/{name}' is bound for use, not for "
+                        "reading. Call it with vault_call_api instead."
+                    )
+                )
             path = "/api/v1/vault/secrets/" + urllib.parse.quote(name, safe="")
             return _mcp_result(self._get(b, path, {"namespace": ns}, client_ip=ip))
+        if tool == "vault_call_api":
+            return _mcp_result(self._call_api(b, arguments, ip))
         if tool == "vault_audit_tail":
             limit = max(1, min(100, int(arguments.get("limit", 10))))
             return _mcp_result(
@@ -214,7 +237,74 @@ class VaultBackend:
                     client_ip=ip,
                 )
             )
+        if tool == "vault_cluster_preflight":
+            return _mcp_result(
+                self._get(
+                    b,
+                    "/api/v1/vault/cluster/preflight",
+                    {"summary": "true", "live": "false"},
+                    client_ip=ip,
+                )
+            )
         raise ValueError(f"unknown vault tool: {tool}")
+
+    def _call_api(self, bearer: str, arguments: dict, ip: str | None) -> dict:
+        """Use a credential without disclosing it, via the sidecar.
+
+        Every refusal precedes the sidecar call, so a denied call never reads
+        the credential. The sidecar re-checks the destination against its own
+        allow-list: this layer decides whether, that one decides where.
+        """
+        credential = str(arguments.get("credential") or "")
+        if not credential:
+            return _denied(
+                "credential is required: name one the operator bound in hub.toml "
+                f"({self._proxy.bound_credentials()})."
+            )
+        binding = self._proxy.binding(credential)
+        if binding is None:
+            if credential.strip("/") in self._proxy.bindings:
+                return _denied(
+                    f"The [proxy.{credential}] binding exists but has "
+                    "allow_proxy = false, so it may not be used for calls."
+                )
+            return _denied(
+                f"No proxy binding for credential '{credential}'. The operator "
+                f"must add a [proxy.{credential}] table with allow_proxy = true "
+                f"to hub.toml. Bound today: {self._proxy.bound_credentials()}."
+            )
+        method = str(arguments.get("method") or "GET")
+        if not binding.method_allowed(method):
+            return _denied(
+                f"Method {method.upper()} is not allowed for '{credential}' "
+                f"(allowed: {binding.methods_listed()})."
+            )
+        try:
+            # Before the sidecar is asked, so a malformed table never spends a
+            # vault read.
+            binding.validate_inject()
+        except ProxyDenied as e:
+            return _denied(str(e))
+        try:
+            url = binding.build_url(
+                str(arguments.get("path") or ""), arguments.get("query") or None
+            )
+        except ProxyDenied as e:
+            return _denied(str(e))
+        try:
+            return self._sidecar.proxy(
+                bearer,
+                namespace=binding.namespace,
+                credential=binding.credential,
+                url=url,
+                method=method.upper(),
+                inject=binding.as_inject(),
+                max_response_bytes=binding.max_response_bytes,
+                client_ip=ip,
+            )
+        except SidecarError as e:
+            # Transport failure, or the sidecar's own refusals.
+            return {"error": "proxy_refused", "message": str(e)}
 
 
 def emit_mcp_audit(

@@ -1825,7 +1825,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="rhorizon",
-    description="Self-hosted secrets vault - API reference",
+    description=(
+        "Lightweight self-hosted secrets manager and vault for automation, "
+        "CI/CD and AI/MCP agents - API reference"
+    ),
     version=settings.version,
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,

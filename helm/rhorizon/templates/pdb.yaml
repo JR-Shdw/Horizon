@@ -13,7 +13,7 @@ spec:
       {{- include "rhorizon.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
 {{- end -}}
-{{- if .Values.pdb.frontend.enabled }}
+{{- if and .Values.pdb.frontend.enabled .Values.frontend.enabled }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

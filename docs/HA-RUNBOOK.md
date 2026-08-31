@@ -45,12 +45,13 @@ Three shapes:
   quorum, promotion, replication, and write-VIP ownership.
 - **Docker Swarm**: API as `replicas=3`; PG+Patroni on dedicated VMs **outside**
   Swarm (its rescheduling clashes with PG identity).
-- **Kubernetes**: API `Deployment replicas=3`; PG via a PG operator
-  StatefulSet (Zalando / CrunchyData / CloudNativePG) - never hand-roll Patroni.
+- **Kubernetes**: API `StatefulSet replicas=3`, with one identity PVC per Pod;
+  PG via a PG operator StatefulSet (Zalando / CrunchyData / CloudNativePG) -
+  never hand-roll Patroni.
 
 The three leadership roles are separate: the **application primary** owns
-rhorizon singleton work, each application container has a **local crypto
-master**, and the **database leader** owns PostgreSQL writes. Never assume
+rhorizon singleton work, each application container has a **local custody
+leader**, and the **database leader** owns PostgreSQL writes. Never assume
 changing one role changes either of the other two.
 
 ### 0.2 Patroni reference provider
@@ -161,9 +162,11 @@ drives the LB:
 | sealed / quarantined | `503` on `/readiness` | no keys / fenced | **eject** |
 | load-shed / recovering | `429` + Retry-After | transient | **back off**, do NOT eject |
 
-k8s: `livenessProbe` on `/health`, `readinessProbe` on `/readiness`. To avoid
-the per-worker blind spot, run one worker per pod (`RH_WORKERS=1`, scale
-via `replicas`) or add Envoy/Istio `outlierDetection`.
+k8s: `livenessProbe` on `/health`, `readinessProbe` on `/readiness`. Keep the
+five-worker Shamir floor in embedded mode, or use separated Rust custody when
+HTTP workers must be replaceable independently. Envoy/Istio outlier detection
+is useful at the Pod boundary but does not replace Horizon's worker and
+custodian convergence checks.
 
 ### 0.4 Backup (pgBackRest)
 
@@ -403,7 +406,7 @@ Order: **secondaries first** (lowest version, then closest cert expiry),
 
 ```bash
 # each secondary:
-docker service update --force rhorizon_api      # or: kubectl rollout restart deployment/rhorizon-api
+docker service update --force rhorizon_api      # or: kubectl rollout restart statefulset/rhorizon-api
 sleep 120                                        # 2 * cluster_join_quarantine_secs
 rhorizon cluster status                          # confirm hb < 5 + SECONDARY
 

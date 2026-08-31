@@ -29,6 +29,7 @@ a policy whitelist on every call, and **fails closed** (no
 | `vault_get_secret` | value of a whitelisted secret |
 | `vault_audit_tail` | optional audit lines; requires `audit:r` on the vault token |
 | `vault_cluster_health` | optional cluster + PostgreSQL HA health; requires `cluster:r` on the vault token |
+| `vault_cluster_preflight` | passive, topology-free HA checks and remediations; requires `cluster:r`; live mTLS remains an operator action |
 
 No write tool, no seal/unseal, no token management. If you need an
 agent to do more, write a new MCP tool that wraps your own policy -

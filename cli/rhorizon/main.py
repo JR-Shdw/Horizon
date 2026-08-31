@@ -1827,6 +1827,41 @@ def cluster_health(as_json: bool = typer.Option(False, "--json")):
         typer.secho(f"  {dot} {label:<14} {st:<7} {c['reason']}", fg=fg.get(st))
 
 
+@cluster_app.command("preflight")
+def cluster_preflight(
+    live: bool = typer.Option(
+        True,
+        "--live/--no-live",
+        help="Traverse the real HTTPS/mTLS proxy path (default: enabled).",
+    ),
+    as_json: bool = typer.Option(False, "--json"),
+):
+    """Production HA readiness with a reason and remediation per check."""
+    result = _client().cluster_preflight(live=live)
+    if as_json:
+        print(json.dumps(result, indent=2))
+    else:
+        overall = str(result.get("overall", "fail")).upper()
+        colour = {"PASS": "green", "WARN": "yellow", "FAIL": "red"}.get(overall)
+        typer.secho(
+            f"HA preflight: {overall}  (ready={str(bool(result.get('ready'))).lower()})",
+            fg=colour,
+            bold=True,
+        )
+        for check in result.get("checks", []):
+            status = str(check.get("status", "fail"))
+            icon = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}.get(status, "FAIL")
+            typer.secho(
+                f"  [{icon}] {check.get('label', check.get('id', 'check'))}: "
+                f"{check.get('reason', '')}",
+                fg={"pass": "green", "warn": "yellow", "fail": "red"}.get(status),
+            )
+            if status != "pass" and check.get("remediation"):
+                print(f"         -> {check['remediation']}")
+    if not result.get("ready"):
+        raise typer.Exit(2)
+
+
 @cluster_app.command("init")
 def cluster_init(
     cluster_name: str = typer.Option(

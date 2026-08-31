@@ -45,6 +45,7 @@ with `Could not set up host forwarding rule`), move the base:
 make k8s-setup     # once: install k3d v5.9.0 (ansible, pinned + sha256-verified)
 make k8s-test      # FAST: k3d + server-side validate/apply k8s/ manifests (dry-run)
 make k8s-e2e       # FULL: build+load images -> helm install -> unseal -> assert cluster
+make k8s-ha-e2e    # HA: bootstrap 1 -> join 3 -> mTLS -> restart -> failover
 ```
 
 `k8s-test` is image-free (manifests validated against a real API server via
@@ -68,12 +69,16 @@ automatically:
 | Command | Asserts | Needs |
 |---|---|---|
 | `make native-smoke` | bare `uvicorn --workers 5` unseals + forms 1 master + 4 followers (the native install path) | container runtime (throwaway PG) + venv |
+| `make custody-smoke` | the Rust custodian quorum survives replacement of disposable API workers | container runtime (throwaway PG) + venv |
 | `make k8s-e2e` | the Helm chart deploys + unseals + clusters on k3d | k3d + kubectl + helm + docker |
-| `make retest` | both (each skips cleanly where its runtime is absent) | -- |
+| `make k8s-ha-e2e` | one Pod bootstraps HA, two join over mTLS, identity survives restart, and primary failover converges | k3d + kubectl + helm + docker |
+| `make retest` | native, custody, Kubernetes standard and configured MCP proxy checks | runtimes required by each tier |
 
-`make retest` is the target CI calls. `.woodpecker/e2e.yml` runs it on
-pushes/PRs touching `helm/`, `api/`, `frontend/`, `schema.sql` -- the paths
-that can break a deploy -- so the heavy k3d run skips docs/test-only commits.
+`.woodpecker/e2e.yml` runs the standard Kubernetes test followed by the HA
+test on pushes/PRs touching `helm/`, `api/`, `frontend/`, `schema.sql` -- the
+paths that can break a deployment. CI binds the k3d API only to the private
+bridge gateway shared by the step and Docker host; local runs keep it on
+loopback. `make retest` remains the broader local post-change command.
 
 ## Cluster (HA)
 

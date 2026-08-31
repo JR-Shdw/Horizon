@@ -1,0 +1,70 @@
+{{- if and .Values.frontend.enabled (eq .Values.frontend.mode "proxy") }}
+{{- /*
+Proxy-only frontend, rendered onto a STOCK nginx image.
+
+`api.clusterEnabled` needs an HTTPS/mTLS terminator in front of the API: HA
+JOIN, certificate renewal and the live preflight all traverse it. It does not
+need the web UI. Requiring the published rhorizon-frontend image for that was
+what made HA impossible to deploy from a public registry, since that image is
+deliberately not published.
+
+So this mode keeps the terminator and drops the SPA: stock nginx plus this
+config, no image to build or maintain. `frontend.mode: image` remains the
+default and is unchanged for anyone who wants the UI.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-frontend-proxy" (include "rhorizon.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rhorizon.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    # Plain listener: in-cluster callers and the readiness probe.
+    server {
+        listen {{ .Values.service.frontend.port }};
+        server_name _;
+
+        # No SPA is served in this mode, so / is not a document root. Answer
+        # the probe here rather than proxying it, so the frontend stays Ready
+        # while the API is still sealed -- otherwise the JOIN target that every
+        # node needs disappears exactly when the cluster is bootstrapping.
+        location = / { return 200 "rhorizon frontend (proxy mode)\n"; }
+
+        location /api/ {
+            proxy_pass http://{{ printf "%s-api" (include "rhorizon.fullname" .) }}:{{ .Values.service.api.port }};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 300s;
+        }
+        location /health {
+            proxy_pass http://{{ printf "%s-api" (include "rhorizon.fullname" .) }}:{{ .Values.service.api.port }};
+        }
+    }
+    {{- if or .Values.frontend.tls.enabled .Values.api.clusterEnabled }}
+
+    # TLS listener: this is the one HA actually depends on.
+    server {
+        listen {{ .Values.service.frontend.httpsPort }} ssl;
+        server_name _;
+
+        ssl_certificate     /certs/{{ .Values.frontend.tls.certKey }};
+        ssl_certificate_key /certs/{{ .Values.frontend.tls.keyKey }};
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers off;
+
+        location / {
+            proxy_pass http://{{ printf "%s-api" (include "rhorizon.fullname" .) }}:{{ .Values.service.api.port }};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            # JOIN and certificate renewal are not fast; do not cut them off.
+            proxy_read_timeout 300s;
+        }
+    }
+    {{- end }}
+{{- end }}

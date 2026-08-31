@@ -18,14 +18,14 @@ flowchart TB
     dbvip --> db["3 PostgreSQL members<br/>Patroni or BSD pgha"]
 ```
 
-Keep these roles separate: local crypto master (one per API host), application
+Keep these roles separate: local custody leader (one per API host), application
 primary (one per rhorizon cluster), and database leader (one per Database HA
 cluster).
 
 ## Routing
 
 - `/health` is liveness only; route on `/readiness`.
-- After unseal, wait for one local crypto master and all followers before
+- After unseal, wait for one local custody leader and full API/custodian convergence before
   re-enabling a node.
 - Retry `GET`, `HEAD` and `OPTIONS` on another ready backend.
 - Do not replay mutations without application idempotency.
@@ -43,6 +43,44 @@ WAL slots/archive and disk reserve.
 
 Audit recording stays enabled. Run full verification through the durable job
 API before and after fault tests; use audit-lite canaries during active load.
+
+## FROZEN timing
+
+A node that cannot confirm canonical state stops serving after the application
+lease expires (20 seconds by default). It then remains `FROZEN`, retaining keys
+but exercising no authority, for `RH_CLUSTER_FROZEN_MAX_SECS` before it seals.
+The default is 30 seconds for a same-site/LAN deployment. Use 45-60 seconds for
+same-region multi-site deployments and 90-120 seconds for multi-region. Measure
+database, VIP and routing convergence before choosing the lower bound.
+
+The total isolated-node time from the last database confirmation to sealing is
+the 20-second lease plus this grace. mTLS evidence of a shared database outage
+may retain keys for up to three times the configured grace; it never permits a
+frozen node to serve.
+
+Set the intended 60- or 120-second profile before restarting nodes in a
+multi-site deployment. If the variable is unset, the 30-second same-LAN
+default applies.
+
+## Preflight
+
+Run one contract on every installation type:
+
+```bash
+rhorizon cluster preflight
+```
+
+It checks declared HA/TLS configuration, persistent identity, the proxy trust
+boundary, node certificate, all `/cluster/health` components, worker/custodian
+convergence, the latest signed full-audit verification anchor, and a live mTLS
+round trip through the HTTPS frontend. A failed blocking check exits with code
+2 and includes an operator action. `--no-live` is useful for passive polling,
+but it does not prove the network path.
+
+The HA Web UI uses the same API. `vault_cluster_preflight` exposes a bounded,
+topology-free summary to MCP clients and deliberately skips the active mTLS
+request. The K7 harness remains the release proof for node loss, pressure and
+convergence; the dashboard is an observation surface, not a chaos test.
 
 ## Release gate
 

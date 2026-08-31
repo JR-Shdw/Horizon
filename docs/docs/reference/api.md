@@ -44,6 +44,8 @@ These paths are served at the API root, without the `/api/v1/vault` prefix.
 |--------|------|------|---------|
 | GET | `/cluster` | cluster:r | Worker topology and held cluster locks |
 | GET | `/cluster/health` | cluster:r | Aggregated application, worker and database health |
+| GET | `/cluster/preflight` | cluster:r | Stable HA readiness checks; `live=true` traverses HTTPS and mTLS |
+| GET | `/cluster/mtls-self` | cluster member certificate | Minimal end-to-end mTLS identity probe |
 | POST | `/cluster/init` | cluster:w | Initialise cluster identity, HA password, CA and primary node |
 | POST | `/cluster/repair` | cluster:w | Complete a partially initialised cluster without replacing valid state |
 | POST | `/cluster/rotate-ha-password/stage` | admin:w | Stage an HA-password rotation |

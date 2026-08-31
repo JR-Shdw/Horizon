@@ -787,22 +787,28 @@ stop_node() {
     host=$(host_for_uuid "$uuid")
     url=$(url_for_uuid "$uuid")
     [[ -n "$host" ]] || { json_failure fault "no host mapping for $uuid" critical; return 1; }
+    # Publish the expected-fault window before the remote stop begins.  The
+    # command takes a few seconds; readers and the sampler keep running during
+    # that interval and must not misclassify the resulting 429/502 as a vault
+    # or database-HA defect.  Roll the marker back if no node was stopped.
+    mark_down "$uuid"
     json_event fault "down uuid=$uuid host=$host"
     if [[ -n "${CHAOS_DOWN_CMD:-}" ]]; then
         if ! run_template node_down "$CHAOS_DOWN_CMD" "$uuid" "$host" "$url"; then
+            unmark_down "$uuid"
             json_failure fault "down command failed uuid=$uuid host=$host" critical
             return 1
         fi
     else
         cid=$(container_id_for_host "$host")
         [[ -n "$cid" ]] \
-            || { json_failure fault "no container label=$LABEL on $host" critical; return 1; }
+            || { unmark_down "$uuid"; json_failure fault "no container label=$LABEL on $host" critical; return 1; }
         if ! docker_lab "$host" stop "$cid" >/dev/null; then
+            unmark_down "$uuid"
             json_failure fault "docker stop failed uuid=$uuid host=$host" critical
             return 1
         fi
     fi
-    mark_down "$uuid"
 }
 
 start_node() {
@@ -1387,13 +1393,27 @@ alert_loop() {
 }
 
 sample_once() {
-    local idx="$1" ts readiness_file health_file uuid base code
+    local idx="$1" ts readiness_file health_file health_detail uuid base code
     ts="$(date -u +%FT%TZ)"
     api "/cluster/ha" > "$RUN_DIR/samples/ha/${idx}.json" 2>"$RUN_DIR/samples/ha/${idx}.err" \
         || json_failure sample "cluster/ha failed idx=$idx"
     health_file="$RUN_DIR/samples/health/${idx}.json"
     if ! api "/cluster/health" > "$health_file" 2>"$RUN_DIR/samples/health/${idx}.err"; then
-        json_failure database_ha "cluster/health failed idx=$idx" critical
+        health_detail=$(http_failure_summary "$(
+            cat "$health_file" "$RUN_DIR/samples/health/${idx}.err" 2>/dev/null
+        )")
+        # An unavailable authenticated health route does not establish that
+        # PostgreSQL HA is unhealthy.  During an injected outage it is expected
+        # availability evidence; outside one it is a transient sample failure.
+        # A successful response reporting a non-green database tier remains a
+        # critical below, and preflight/final verification stay hard gates.
+        if expected_fault_window; then
+            json_event expected_fault \
+                "cluster/health unavailable while node fault active idx=$idx $health_detail"
+        else
+            json_failure sample \
+                "cluster/health unavailable idx=$idx $health_detail"
+        fi
     elif ! jq -e '
         .components.database.state == "green"
         and .components.database_ha.state == "green"

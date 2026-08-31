@@ -57,8 +57,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "rhorizon.image.frontend" -}}
+{{- /* Stock nginx in proxy mode: the config lives in a ConfigMap, so there
+       is no rhorizon-specific image to resolve or publish. */ -}}
+{{- if eq .Values.frontend.mode "proxy" -}}
+{{- .Values.frontend.proxyImage -}}
+{{- else -}}
 {{- $tag := .Values.image.frontend.tag | default .Chart.AppVersion -}}
 {{ printf "%s:%s" .Values.image.frontend.repository $tag }}
+{{- end -}}
 {{- end -}}
 
 {{- define "rhorizon.image.postgres" -}}

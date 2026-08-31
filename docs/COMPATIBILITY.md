@@ -44,8 +44,9 @@ The per-OS component checklist used to reassess support lives in
 |---|---|---|
 | Docker / Docker Compose | Tested | primary deployment; hardened compose shipped |
 | Podman (rootless) | Tested | runs rootless; raise `RLIMIT_MEMLOCK` for mlock |
-| Kubernetes | Tested | Helm chart (`helm/rhorizon`): api + frontend + Postgres deploy, unseal, and the multi-worker cluster form on a real cluster. `make k8s-e2e` (k3d) gates it; also run against external Patroni |
-| k3s | Tested | same Helm chart, validated on k3s (the `make k8s-e2e` tier spins k3d/k3s) |
+| Kubernetes (single application node) | Tested | Helm chart (`helm/rhorizon`): API + frontend + PostgreSQL deploy, unseal and restart on k3d/k3s. `make k8s-e2e` gates this path; the external Patroni database path is also covered. |
+| Kubernetes application HA | Tested | `make k8s-ha-e2e` validates one-Pod bootstrap, three-Pod mTLS JOIN, removal of the temporary JOIN Secret, secondary restart, 30-second FROZEN primary failover and recovery on k3d/k3s. With the in-chart PostgreSQL this proves application HA, not database HA; use the external Patroni path for both. |
+| k3s | Tested | Same Helm chart and single-application-node path, validated through k3d/k3s. |
 
 ## Datastore (the vault's own storage)
 

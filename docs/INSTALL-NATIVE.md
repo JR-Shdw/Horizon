@@ -17,8 +17,8 @@ Self-hosted secrets vault
 > | Fedora 39+ | validated | `dnf`; SELinux notes below |
 > | RHEL 9 / Rocky 9 / AlmaLinux 9 | validated | EPEL for `python3.12` if not in base |
 > | openSUSE Leap 15.6+ / Tumbleweed | validated | `zypper`; AppArmor instead of SELinux. Leap 15.6 is the last suite-green release; 16.0 is the current revalidation lane |
-> | FreeBSD 14+ | validated | All IPC primitives shimmed 2026-05. Needs the `memorylocked=unlimited` login class the installer adds - the vault mlocks key material |
-> | OpenBSD 7.4+ | validated | Same shim path as FreeBSD. `install-openbsd.sh` builds CPython against the OpenSSL port: base LibreSSL's `ssl` cannot load the Ed25519 cluster certs |
+> | FreeBSD 14+ | validated | The rc.d service raises the computed memlock budget, then a root-owned launcher uses direct `setgid`/`setuid` calls before exec. This avoids `daemon -u`, which reloads the login class and would reset the limit |
+> | OpenBSD 7.4+ | validated | The universal system service intentionally remains root-run: the stock `daemon` class was measured at 87381 KiB, below the 622592 KiB home-tier memlock budget. `install-openbsd.sh` builds CPython against the OpenSSL port |
 > | NetBSD 10+ | validated | `tools/drivers/netbsd.sh`; golden image built with anita. Only OS whose pkgsrc binary repo is unsigned upstream - pinned versions + HTTPS are the mitigation |
 > | macOS (Apple Silicon) | validated | `tools/install-macos.sh --mode user`. Green end-to-end on GitHub-hosted `macos-latest` (`.github/workflows/macos-native.yml`): Homebrew deps, PostgreSQL, venv, Rust extension, LaunchAgent, unseal. User mode only |
 > | macOS (Intel) | untested | No free runner: GitHub retired the `macos-13` image, so x86_64 darwin is unverified rather than known-broken |
@@ -36,6 +36,39 @@ Self-hosted secrets vault
 > `install-<os>.sh` scripts remain for the *test* path (they also create the
 > `rhorizon_test` DB + install `test-requirements.txt` for pytest); they are
 > not superseded by the prod installer.
+
+### System service identity and installer regression tests
+
+In system mode, Linux, FreeBSD, and NetBSD run the API under the dedicated
+non-login `rhorizon` account. Configuration remains root-owned and
+group-readable; state, runtime, audit files, and the TLS key are handed to the
+service account. `<config>/secrets/` remains uid/gid 0 with mode 0700 and its
+credential files remain 0400. The API cannot read its own recovery material.
+
+Account creation is fail-closed. The installer stops instead of continuing as
+root unless the operator explicitly sets `RH_ACCOUNT_FALLBACK_ROOT=1`. OpenBSD
+is the current exception described in the table above; no change is made to
+`/etc/login.conf`.
+
+The native VM lane checks the running process rather than trusting the rendered
+unit or rc.d file. It asserts the runtime uid, the Linux process's actual
+`Max locked memory` limit, the API's `memory_protection` and
+`process_memory_protection` verdicts, and both sides of the file-permission
+boundary. On Linux it also forces an 8 MiB limit and removes `CAP_IPC_LOCK` to
+prove all three policy outcomes: `required` refuses to serve, `best-effort`
+serves while reporting `swappable`, and `required` permits the failure only
+when swap is explicitly `protected`.
+
+```bash
+# Debian + FreeBSD + NetBSD + OpenBSD system installer lanes
+make test-native-install-matrix
+
+# Old root-service revision -> current dedicated-account migration
+make test-native-install-migration
+
+# Read the stock OpenBSD daemon class without installing or editing the guest
+RH_OPENBSD_CLASS_MEASURE=1 tools/test-vm.sh openbsd
+```
 >
 > **Mode selection & security.** Prefer, in order: (1) **docker / podman**
 > (`--mode docker`; the laptop default that `auto` picks when a container engine

@@ -29,7 +29,28 @@ allow = [
     "vault_list_secrets",
     "vault_get_secret",
     # "vault_audit_tail",             # needs audit:r on the token
+    # "vault_call_api",               # credential proxy -- needs a [proxy] binding
     # "vault_set_secret",             # write -- opt-in only
     # "vault_delete_secret",          # destructive -- opt-in only
     # "vault_create_ephemeral_token", # escalation -- opt-in only
 ]
+
+# Credential proxy -- let the AI USE a credential without being able to READ it.
+# Horizon makes the call and returns only the API's answer, so the value never
+# lands in the conversation. One table per credential; no table -> every call
+# refused. The AI supplies the path; base_url and inject are yours.
+#
+# [proxy.github-prod]
+# namespace   = "mcp"                       # where the credential lives
+# allow_read  = false                       # vault_get_secret REFUSES it -- the point
+# allow_proxy = true                        # without this, no proxying either
+# base_url    = "https://api.github.com"    # https only; the AI cannot change it
+# methods     = ["GET"]                     # GET is all the first pass supports
+# inject      = { type = "header", name = "Authorization", format = "Bearer {value}" }
+# timeout_secs        = 15
+# max_response_bytes  = 262144              # larger replies come back truncated
+# rate_limit_per_min  = 30                  # per credential; 0 means no calls
+#
+# inject.format must contain {value}. Forgejo/Gitea want "token {value}",
+# Woodpecker and GitHub "Bearer {value}" -- a 401 from the API usually means
+# this line, not the credential. Options and errors: docs/MCP.md 4.1.

@@ -13,6 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CLUSTER_JS = ROOT / "frontend/js/views/cluster.js"
+CLUSTER_HA_JS = ROOT / "frontend/js/views/cluster-ha.js"
 STYLE_CSS = ROOT / "frontend/css/style.css"
 
 
@@ -60,6 +61,7 @@ const context = {
 context.window = context;
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
 
 (async () => {
   const result = await vm.runInContext(`(async () => {
@@ -127,8 +129,8 @@ def _fixtures():
                     "followers": [
                         {
                             "pid": 102,
-                            "role": "follower",
-                            "status": "ready",
+                            "process_role": "api",
+                            "worker_state": "follower",
                             "age_sec": 0.7,
                         }
                     ],
@@ -166,13 +168,39 @@ def _fixtures():
                 }
             },
         },
+        "/cluster/preflight?live=false": {
+            "schema_version": 1,
+            "ready": True,
+            "overall": "warn",
+            "live_mtls_requested": False,
+            "failed_checks": [],
+            "warning_checks": ["mtls_live"],
+            "checks": [
+                {
+                    "id": "health_database",
+                    "label": "Database write path",
+                    "status": "pass",
+                    "blocking": True,
+                    "reason": "database is writable",
+                    "remediation": "",
+                },
+                {
+                    "id": "mtls_live",
+                    "label": "End-to-end mTLS path",
+                    "status": "warn",
+                    "blocking": False,
+                    "reason": "live network verification was not requested",
+                    "remediation": "Run the live preflight.",
+                },
+            ],
+        },
     }
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node is not installed")
 def test_ha_tab_fetches_and_renders_all_three_ha_layers():
     proc = subprocess.run(
-        ["node", "-e", NODE_HARNESS, str(CLUSTER_JS)],
+        ["node", "-e", NODE_HARNESS, str(CLUSTER_JS), str(CLUSTER_HA_JS)],
         input=json.dumps(_fixtures()),
         text=True,
         capture_output=True,
@@ -185,16 +213,22 @@ def test_ha_tab_fetches_and_renders_all_three_ha_layers():
         ["GET", "/cluster/ha"],
         ["GET", "/cluster"],
         ["GET", "/cluster/health"],
+        ["GET", "/cluster/preflight?live=false"],
     ]
     assert result["timerDelays"] == [5000]
     assert html.count('id="cluster-ha-section"') == 1
+    assert html.count('id="cluster-preflight-section"') == 1
+    assert "Production HA Readiness" in html
+    assert "STATIC READY" in html
+    assert "Database write path" in html
+    assert "Run live mTLS check" in html
     assert "Application HA primary" in html
     assert "APP PRIMARY" in html
     assert "Database HA &amp; Replication" in html
     assert "Database leader" in html and "db-a" in html
     assert "Write VIP owner" in html
     assert "db-c" in html and "512 B" in html
-    assert "LOCAL CRYPTO MASTER" in html
+    assert "LOCAL CUSTODY LEADER" in html
     assert "Cluster Locks Held" in html
     assert "Unknown / unconfigured (black)" in result["unconfiguredHtml"]
     assert "not reported" in result["unconfiguredHtml"]
@@ -204,7 +238,7 @@ def test_ha_tab_fetches_and_renders_all_three_ha_layers():
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node is not installed")
 def test_ha_status_dots_always_include_visible_state_text():
     proc = subprocess.run(
-        ["node", "-e", NODE_HARNESS, str(CLUSTER_JS)],
+        ["node", "-e", NODE_HARNESS, str(CLUSTER_JS), str(CLUSTER_HA_JS)],
         input=json.dumps(_fixtures()),
         text=True,
         capture_output=True,
@@ -225,9 +259,12 @@ def test_ha_status_dots_always_include_visible_state_text():
 
 def test_ha_dashboard_has_distinct_non_recursive_renderers_and_dot_styles():
     source = CLUSTER_JS.read_text()
+    ha_source = CLUSTER_HA_JS.read_text()
     css = STYLE_CSS.read_text()
 
-    assert source.count("function renderHaDashboard(") == 1
+    assert "function renderHaDashboard(" not in source
+    assert ha_source.count("function renderHaDashboard(") == 1
+    assert ha_source.count("function renderHaPreflightSection(") == 1
     assert source.count("function renderMembershipSection(") == 1
     assert "function renderHaSection(" not in source
     for state in ("green", "orange", "red", "black"):

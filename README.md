@@ -11,12 +11,18 @@ Source: https://github.com/JR-Shdw/Horizon
   Resurgamus Horizon
 </h1>
 
-**Self-hosted secrets vault. Open source. No SaaS, no telemetry, no lock-in.**
+**Open-source self-hosted secrets manager and vault. No SaaS, no telemetry,
+no lock-in.**
 
 Resurgamus Horizon (`rhorizon` for short) keeps your passwords, API
 tokens, TLS keys, database credentials and SSH keys encrypted at rest,
 behind an HTTP API for Ansible, CI/CD, Kubernetes, scripts, and AI
 agents.
+
+It ships a native MCP server and MCP Hub, so it doubles as an **AI vault** and
+**MCP vault**: an agent can hold scoped, auditable, revocable credentials, or
+use one through Horizon without ever being able to read it. The whole feature
+set is public; there is no Enterprise tier holding pieces back.
 
 ## Install in 5 minutes
 
@@ -238,10 +244,13 @@ mode is not the boundary. The account is.
 
 If you run agents, assistants or automation on the same machine:
 
-- **Run the vault under its own OS account** and keep the secrets directory
-  owned by it (`chown rhorizon: ~rhorizon/secrets`, `chmod 700`). An agent under
-  your login then cannot read them regardless of file mode. The native installer
-  in `--mode system` already runs the service as a dedicated user.
+- **Run the vault under an account the agent is not.** `--mode system` installs
+  as root, so its credentials live under `/etc/rhorizon` owned by root and an
+  agent under your login cannot read them regardless of file mode. That is the
+  boundary that matters here. (The service itself still runs as root rather than
+  a dedicated `rhorizon` user; that limits a Horizon compromise, not the agent,
+  and is tracked separately.) A user-mode install gives you no such boundary:
+  its credentials are owned by the same account the agent runs as.
 - **Do not leave credentials in a directory an agent is pointed at.** Move them
   into a password manager and delete the files; the vault only needs the
   password at unseal time, not permanently on disk.
@@ -285,7 +294,7 @@ Full matrix with per-row notes: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) - local, private/VPN, reverse proxy + SSO, LDAP/AD, clustering, backup, hardening checklist
 - [`docs/DOCKER.md`](docs/DOCKER.md) - compose stack anatomy, multi-stage Dockerfile, volumes/networks, override patterns, rootless/Podman
 - [`docs/K8S.md`](docs/K8S.md) - agent patterns (rh-fetch / rh-inject / rh-watch / cronjob), NetworkPolicy, RBAC, TLS from vault
-- [`docs/HA-CLUSTER.md`](docs/HA-CLUSTER.md) - high availability - application membership, local crypto masters, Database HA, identity, JOIN, auto-promote, and per-node mTLS
+- [`docs/HA-CLUSTER.md`](docs/HA-CLUSTER.md) - high availability - application membership, local custody leaders, Database HA, identity, JOIN, auto-promote, and per-node mTLS
 - [`docs/HA-PRODUCTION-REFERENCE.md`](docs/HA-PRODUCTION-REFERENCE.md) - the production HA target - one stable HTTPS endpoint, two redundant edges, three API nodes, three database members, retry/idempotency rules, worker convergence, WAL/audit guardrails, and release gates
 - [`docs/HA-RUNBOOK.md`](docs/HA-RUNBOOK.md) - HA operations - provider-neutral Database HA (Patroni reference / BSD `pgha`), PostgreSQL replication and WAL guardrails, bootstrap, rolling restart, and recovery
 

@@ -175,7 +175,7 @@ Post-restore stubs are a separate flow: `GET /tokens/pending/` lists them and
 | `secrets` | Read a secret value, list names | Create / update / delete |
 | `tokens` | List existing tokens (no values) | Create new tokens, revoke existing ones |
 | `audit` | Read the audit chain | (no `audit:rw` - the chain is append-only) |
-| `cluster` | Cluster + PostgreSQL HA status (`/cluster`, `/cluster/health`, `/cluster/ha`, CA bundle) | Node lifecycle: promote / demote / drain / evict / unrevoke / init / repair |
+| `cluster` | Cluster + PostgreSQL HA status (`/cluster`, `/cluster/health`, `/cluster/preflight`, `/cluster/ha`, CA bundle) | Node lifecycle: promote / demote / drain / evict / unrevoke / init / repair |
 | `admin` | Same as `audit:r` + read all configs | Seal / unseal, rotate master, change 2FA, manage YubiKeys/TOTP/WebAuthn |
 
 A token cannot grant a scope it does not itself have. If your token

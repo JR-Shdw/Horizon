@@ -519,6 +519,49 @@ async def test_rpc_client_missing_peer_socket_fails_closed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rpc_connection_reset_after_connect_is_master_unreachable(monkeypatch):
+    """A service restart can reset an established custodian socket.
+
+    It must enter the normal RPC recovery/429 path, never escape as a 500.
+    """
+    import asyncio as _asyncio
+
+    from api.app import cluster_rpc
+
+    class _ResetReader:
+        async def readexactly(self, _size):
+            raise ConnectionResetError(104, "connection reset by peer")
+
+    class _ResetWriter:
+        def get_extra_info(self, _name):
+            return object()
+
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            raise ConnectionResetError(104, "connection reset by peer")
+
+    async def _fake_open(_path):
+        return _ResetReader(), _ResetWriter()
+
+    monkeypatch.setattr(_asyncio, "open_unix_connection", _fake_open)
+    monkeypatch.setattr(
+        cluster_rpc, "_read_peer_cred", lambda _sock: (1, os.getuid(), 1)
+    )
+
+    client = MasterRpcClient(_socket("reset-after-connect"))
+    with pytest.raises(MasterUnreachable, match="master connection failed"):
+        await client.call("hmac_sha512", {"message": "00"})
+
+
+@pytest.mark.asyncio
 async def test_rpc_server_missing_peer_socket_rejected():
     """Server side: a transport with no socket object is rejected (writer
     closed, no dispatch) instead of escaping _handle_client as an unhandled

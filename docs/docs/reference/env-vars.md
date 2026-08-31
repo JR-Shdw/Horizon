@@ -65,6 +65,10 @@ Any setting `foo_bar` is set as `RH_FOO_BAR`.
 | `RH_AUTHFAIL_LOG` | `/var/log/rhorizon/authfail.log` | fail2ban-ready log |
 | `RH_XFF_TRUSTED_IPS` | loopback, RFC 1918 and IPv6 ULA | Proxies allowed to supply `X-Forwarded-For`; does not authorize identity headers |
 | `RH_PROXY_TRUSTED_IPS` | `""` | SSO/mTLS identity proxy CIDRs; required when proxy auth or cluster HA is enabled |
+| `RH_CLUSTER_IDENTITY_PERSISTENT` | `false` | Deployment declaration checked by HA preflight; set only when `/var/lib/rhorizon` survives replacement |
+| `RH_CLUSTER_FROZEN_MAX_SECS` | `30` | Non-serving FROZEN grace before an isolated HA node seals and drops keys; use 45-60s same-region or 90-120s multi-region |
+| `RH_HA_SERVER_CA_FILE` | `""` | Optional private/self-signed CA or leaf pin for outbound HA HTTPS calls; empty uses system trust |
+| `RH_CLUSTER_SERVER_CERT_MANAGED` | `true` | API may rewrite/reload the frontend HTTPS certificate; bundled Compose/Helm/native paths set false because TLS is deployment-managed |
 | `RH_AUTO_SEAL_MINUTES` | `0` | Auto-seal after N minutes idle; `0` = never (the recommended posture) |
 | `RH_MAX_CONCURRENT_REQUESTS` | `0` | Per-worker in-flight cap; above it, requests get `429 capacity_overloaded` + `Retry-After`. **`0` disables load shedding** - set it in production, ~2-4x the DB pool |
 | `RH_SECRET_GRACE_SECONDS` | `0` | Rotation grace: prior secret value stays readable via `?previous=true` for this long. `0` = off (opt-in), clamped to 1 day |

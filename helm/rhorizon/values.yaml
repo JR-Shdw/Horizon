@@ -22,6 +22,32 @@ image:
 # --- API deployment -----------------------------------------------------------
 api:
   replicas: 1
+  # Cross-pod application HA. The templates reject partial HA configurations
+  # instead of starting a cluster with ephemeral identity or no mTLS path.
+  clusterEnabled: false
+  # Frontend Pod CIDR(s) allowed to forward identity headers. Keep narrow.
+  proxyTrustedIps: ""
+  haPrimaryUrl: ""
+  # Optional Secret holding the CA that signs the internal HTTPS listener.
+  # Leave empty when that certificate chains to the image's public trust store.
+  haServerCaSecretName: ""
+  haServerCaSecretKey: "ca.crt"
+  haAutoJoin: false
+  # Existing Secret containing the raw 32-byte bootstrap password. It is only
+  # needed while new Pods join and should be removed afterwards.
+  # The secret's value must be the raw, base64-DECODED cluster password, NOT
+  # the base64 string POST /cluster/init returns. The wire format is raw bytes
+  # (api/app/cluster_auto_join.py:236, where the ansible path b64decodes before
+  # writing the file). Supplying the base64 text fails JOIN with a 401
+  # "ha_password proof mismatch" that never names the encoding:
+  #   kubectl create secret generic rhorizon-ha-password -n <ns> \
+  #     --from-literal=ha-password="$(printf %s "$INIT_B64" | base64 -d)"
+  haPasswordSecretName: ""
+  haPasswordSecretKey: "ha-password"
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
   # Closed built-in catalog. A false value prevents that backend module from
   # being imported after restart. Revoke/delete its leases and engines first:
   # startup fails closed when persisted state still depends on a disabled one.
@@ -41,6 +67,10 @@ api:
   # limit before enabling it; see concepts/key-custody.md.
   custodyMode: embedded
   custodianWorkers: 5
+  # Per-worker in-flight request cap. Zero disables load shedding and is kept
+  # only for backwards compatibility; size production deployments from the DB
+  # pool and workload (a common starting point is 2-4x the pool per worker).
+  maxConcurrentRequests: 0
   # best-effort: continue with zeroize-only buffers if mlock is unavailable;
   # swapProtection decides whether that state is a warning. required: fail
   # closed on the first lock failure.
@@ -54,7 +84,6 @@ api:
   # Forwarded identity and client-IP headers are ignored unless the direct
   # proxy addresses are explicitly trusted.
   proxyAuthEnabled: false
-  proxyTrustedIps: ""
   resources:
     requests:
       memory: 512Mi
@@ -68,6 +97,14 @@ api:
     runAsNonRoot: true
     runAsUser: 1500
     fsGroup: 1500
+    # Without this, the kubelet recursively chmods the identity volume g+rw on
+    # EVERY mount. The vault writes cluster-cert.pem 0400 (cluster_cert.py:66)
+    # and refuses to boot unless it is still 0400 (:149), so the first restart
+    # of a joined Pod finds 0660 and dies with HaBootInvariantError. HA is
+    # exactly where Pods restart, so this bricks the node it is meant to
+    # protect. OnRootMismatch skips the walk when the volume root already
+    # matches, which it does after the first mount.
+    fsGroupChangePolicy: OnRootMismatch
     seccompProfile:
       type: RuntimeDefault
   containerSecurityContext:
@@ -80,7 +117,17 @@ api:
         # mlock(2) on the Rust wrap key + secure buffers (defense against
         # swap-leak of master keys).
         - IPC_LOCK
-  # Health probes, `/health` is unauthenticated and idempotent.
+  # Multi-worker startup serialises schema and boot-time checks. Keep liveness
+  # disabled until that work completes so kubelet cannot turn a slow first
+  # start or upgrade into a restart loop.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8200
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 60
+  # Runtime health probes; `/health` is unauthenticated and idempotent.
   livenessProbe:
     httpGet:
       path: /health
@@ -100,8 +147,35 @@ api:
   # capability, configure the node runtime limit or use best-effort mode.
 
 # --- Frontend (nginx) ---------------------------------------------------------
+# The web UI. Optional: the API is the product, the frontend is a convenience,
+# and its image is not published to the public registries. Leaving this on
+# while pulling images from a public registry gives a permanent
+# ImagePullBackOff next to a perfectly healthy API, which reads as a broken
+# install.
+#
+# Disabling it drops the UI, the frontend Service, its NetworkPolicy and the
+# Ingress path that fronts it. The API keeps its own Service and Ingress path.
+# `api.clusterEnabled` needs the frontend for HTTPS/mTLS termination, so that
+# combination is refused rather than rendered (see api-deployment.yaml).
 frontend:
+  enabled: true
+  # image : the published rhorizon-frontend, which serves the web UI.
+  # proxy : stock nginx plus a generated config, TLS terminator only, no UI.
+  #
+  # `api.clusterEnabled` needs a terminator in front of the API (HA JOIN,
+  # renewal and live preflight traverse it) but does not need the UI. Proxy
+  # mode provides that path with a stock nginx image.
+  mode: image
+  # Only used with mode: proxy. Any stock nginx works; pin by digest in
+  # production the way the other images here are pinned.
+  proxyImage: nginx:stable-alpine
   replicas: 1
+  tls:
+    enabled: false
+    # Existing kubernetes.io/tls Secret. Mandatory with clusterEnabled.
+    secretName: ""
+    certKey: tls.crt
+    keyKey: tls.key
   resources:
     requests:
       memory: 32Mi
@@ -150,6 +224,20 @@ postgres:
     # port cluster-wide (covers an in-cluster Patroni without its pod IP); set
     # CIDR(s) to restrict.
     egressCidrs: []
+    # How the vault learns the DB tier is highly available. Without these the
+    # cluster health reports `database_ha: grey -- provider not configured`
+    # even against a healthy Patroni, and any harness gating on that tier
+    # (tools/chaos K7) refuses to start. Pointing `host` at Patroni is not
+    # enough on its own: the vault polls the REST API to see members and lag.
+    #   auto | patroni | pgha | none
+    haProvider: ""
+    # Comma-separated Patroni REST endpoints, one per member. With the Zalando
+    # operator these are the per-pod DNS names on port 8008, e.g.
+    #   http://rh-pg-0.rh-pg:8008,http://rh-pg-1.rh-pg:8008,http://rh-pg-2.rh-pg:8008
+    patroniRestUrls: ""
+    # Port the REST endpoints above listen on. Opened in the API NetworkPolicy
+    # egress only when patroniRestUrls is set.
+    patroniRestPort: 8008
     # When external.enabled, the chart looks up `existingSecret` for the
     # password (key: postgres-password). Otherwise generates one.
     existingSecret: ""
@@ -180,7 +268,7 @@ service:
   frontend:
     type: ClusterIP
     port: 8200       # internal HTTP ; TLS termination at ingress
-    httpsPort: 8443  # exposed only when frontend.tls.enabled
+    httpsPort: 8443  # exposed when frontend TLS or application HA is enabled
 
 ingress:
   enabled: false

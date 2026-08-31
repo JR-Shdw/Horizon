@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile as _tf
 from pathlib import Path
 
 import asyncpg
@@ -8,21 +9,22 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-os.environ.setdefault(
-    "RHORIZON_DATABASE_URL",
-    os.environ.get(
-        "TEST_DATABASE_URL",
-        "postgresql+asyncpg://rhorizon_test:rhorizon_test@localhost:55434/rhorizon_test",
-    ),
+# Keep bare pytest, `make test`, the watcher and docker-compose.test.yml on the
+# same host port. TEST_DATABASE_URL remains the highest-priority full override
+# for CI and remote databases; RH_TEST_PG_PORT is the local collision escape.
+_test_pg_port = os.environ.get("RH_TEST_PG_PORT", "55434")
+_test_database_url = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://rhorizon_test:rhorizon_test@"
+    f"localhost:{_test_pg_port}/rhorizon_test",
 )
+os.environ.setdefault("RHORIZON_DATABASE_URL", _test_database_url)
 # Test PostgreSQL has no TLS
 os.environ.setdefault("RHORIZON_DATABASE_SSL", "false")
 
 # Override prod paths that are not writable locally (containerized CI is fine,
 # dev box is not root). Tests that touch audit_dir / authfail_log would hit
 # PermissionError otherwise.
-import tempfile as _tf
-
 _test_audit_dir = Path(_tf.gettempdir()) / "rhorizon-test-audit"
 _test_audit_dir.mkdir(exist_ok=True)
 os.environ.setdefault("RHORIZON_AUDIT_DIR", str(_test_audit_dir))

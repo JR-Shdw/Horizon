@@ -349,6 +349,28 @@ def test_pressure_worker_fault_is_one_shot_and_selects_only_a_follower():
     assert "old_pid=$pid" in worker_fault_body
 
 
+def test_fault_window_is_marked_before_remote_stop_and_rolled_back_on_failure():
+    source = K7.read_text()
+    stop_body = source.split("stop_node() {", 1)[1].split("\n}\n\nstart_node()", 1)[0]
+
+    assert stop_body.index('mark_down "$uuid"') < stop_body.index(
+        "run_template node_down"
+    )
+    assert stop_body.count('unmark_down "$uuid"') >= 3
+
+
+def test_failed_health_request_is_not_false_database_ha_critical():
+    source = K7.read_text()
+    sample_body = source.split("sample_once() {", 1)[1].split(
+        "\n}\n\nsampler_loop()", 1
+    )[0]
+
+    assert "json_event expected_fault" in sample_body
+    assert "json_failure sample" in sample_body
+    assert '"cluster/health unavailable idx=$idx $health_detail"' in sample_body
+    assert '"PostgreSQL tier not green idx=$idx' in sample_body
+
+
 def test_disk_pressure_rejects_missing_remote_cleanup(tmp_path):
     env = {
         **os.environ,

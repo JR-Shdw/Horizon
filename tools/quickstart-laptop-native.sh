@@ -53,7 +53,12 @@ for _rn in DIR CONFIG_DIR STATE_DIR RUNTIME_DIR AUDIT_DIR API_PORT FRONTEND_PORT
 done
 unset _rn _rv
 CONFIG_DIR="${RHORIZON_CONFIG_DIR:-$XDG_CONFIG_HOME/rhorizon}"
-SECRET_FILE="$CONFIG_DIR/rhorizon.env-secrets"   # written by install-native.sh
+# Authoritative since the installer moved to one-file-per-credential; the
+# KEY=VALUE mirror below is only refreshed when it already exists, so on a
+# fresh host it is absent. Reading the mirror first is what made this script
+# die on exactly the installs it is meant to serve.
+ROOT_TOKEN_FILE="$CONFIG_DIR/secrets/root-token"
+SECRET_FILE="$CONFIG_DIR/rhorizon.env-secrets"   # legacy mirror, older installs
 APP_DIR="${RHORIZON_DIR:-$XDG_DATA_HOME/rhorizon}"
 
 API_PORT="${RHORIZON_API_PORT:-8200}"
@@ -173,9 +178,14 @@ INSTALL_ARGS="--mode user --workers $WORKERS"
 # shellcheck disable=SC2086
 sh "$REPO_ROOT/tools/install-native.sh" $INSTALL_ARGS
 
-[ -f "$SECRET_FILE" ] || die "Expected $SECRET_FILE after the installer. Check its output above."
-ROOT_TOKEN="$(sed -n 's/^ROOT_TOKEN=//p' "$SECRET_FILE" 2>/dev/null || true)"
-[ -n "$ROOT_TOKEN" ] || die "No admin token in $SECRET_FILE. The vault may be unsealed from a previous install with a token that was not saved; mint one with 'rhorizon tokens create' and re-run."
+if [ -f "$ROOT_TOKEN_FILE" ]; then
+    ROOT_TOKEN="$(cat "$ROOT_TOKEN_FILE")"
+elif [ -f "$SECRET_FILE" ]; then
+    ROOT_TOKEN="$(sed -n 's/^ROOT_TOKEN=//p' "$SECRET_FILE" 2>/dev/null || true)"
+else
+    ROOT_TOKEN=""
+fi
+[ -n "$ROOT_TOKEN" ] || die "No admin token at $ROOT_TOKEN_FILE (nor in $SECRET_FILE). A default install stays SEALED and writes no token: unseal it once, or re-run with RH_MASTER_PASSWORD set. If the vault was unsealed by an earlier install whose token was not saved, mint one with 'rhorizon tokens create' and re-run."
 
 # Sanity: the trunk already unsealed and health-checked, but confirm reachable
 # before we mint the MCP key.

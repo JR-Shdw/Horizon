@@ -194,6 +194,18 @@ jobs:
           echo "sealed=$sealed"
           [ "$sealed" = "False" ] || { echo "vault did not unseal"; exit 1; }
 
+          # Whole-process mlock is intentionally unsupported on macOS. Make
+          # that explicit so a future regression cannot silently report a
+          # misleading protected/swappable Linux verdict on Darwin.
+          process_memory_protection=$(curl -fsS --cacert "$cert" \
+            "https://127.0.0.1:8200/api/v1/vault/status" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin)["process_memory_protection"])')
+          echo "process_memory_protection=$process_memory_protection"
+          [ "$process_memory_protection" = "unsupported" ] || {
+            echo "unexpected macOS process memory-protection verdict"
+            exit 1
+          }
+
       - name: Diagnostics on failure
         if: failure()
         run: |

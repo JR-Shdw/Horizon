@@ -194,9 +194,10 @@ Dans une nouvelle conversation, demande :
 
 > *"Qu'est-ce que tu peux faire avec rhorizon ?"*
 
-Il devrait répondre qu'il a six outils disponibles, tous en lecture
-seule, et que rien n'est encore autorisé (ce qui est le défaut
-sécurisé).
+Il devrait lister les outils autorisés par ta policy et dire que rien
+n'est encore autorisé (ce qui est le défaut sécurisé). La policy du
+quickstart en active cinq ; le catalogue complet en compte neuf, et les
+autres restent désactivés tant que tu ne les ajoutes pas.
 
 ---
 

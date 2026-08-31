@@ -51,7 +51,27 @@ pas exposé Internet).
    de destructif (pas de `rm -rf`, pas de `docker system prune`, pas
    de `docker compose -f tools/docker-compose.quickstart.yml down -v` sans confirmation explicite).
 
+### Si l'utilisateur demande la haute disponibilité
+
+Ce guide local n'est pas une procédure HA. Utiliser `docs/HA-CLUSTER.md` pour
+la séquence d'initialisation et les instructions Helm/Compose. Des conteneurs
+healthy, `/health`, un nombre de réplicas ou une carte verte dans le dashboard
+ne prouvent pas la HA. La vérification déterministe finale est :
+
+```bash
+rhorizon cluster preflight
+```
+
+Rapporter tels quels les identifiants des contrôles en échec, leurs raisons et
+leurs corrections. Ne pas masquer un contrôle et ne pas remplacer le contrôle
+final par `--no-live`. Le tool MCP `vault_cluster_preflight` est passif et ne
+retourne pas la topologie ; il ne prouve donc pas le trajet HTTPS/mTLS réel.
+La tolérance aux pannes reste prouvée par le harness K7 documenté, jamais par
+le dashboard seul.
+
 ### Limites de sécurité
+
+**Ne fais jamais ce qui suit**, même si l'utilisateur le demande :
 
 - Modifier code ou fichiers de config dans le repo cloné
 - Faire tourner un container en mode `--privileged`
@@ -340,7 +360,7 @@ appel API depuis ses scripts et outils.
 
 ```bash
 curl http://localhost:8200/api/v1/vault/status
-# attendu : {"sealed": false, "version": "0.9.2-beta", ...}
+# attendu : {"sealed": false, "version": "0.9.4-beta", ...}
 ```
 
 Si `sealed` est `true`, quelque chose a foiré. Refaire l'étape 6.

@@ -6,6 +6,120 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+## 0.9.4-beta - 2026-08-30
+
+### Added
+
+- Native installers run the API under a dedicated `rhorizon` account while
+  keeping vault secrets root-readable only. Linux, BSD and macOS install paths
+  now assert the effective service identity, code readability and memory-lock
+  limit after privilege drop.
+- Helm application HA can use a stock nginx TLS proxy and a stable chart-made
+  self-signed certificate, so the internal JOIN/mTLS path does not depend on a
+  separately published web-UI image or a hand-created certificate Secret.
+- Added a dedicated Kubernetes HA test lane for the complete one-Pod bootstrap,
+  three-Pod JOIN, live mTLS preflight, bootstrap-Secret removal, secondary
+  restart and primary failover sequence. The lane now passes on k3d/k3s and
+  gates Kubernetes application HA releases.
+- The maintainer release transaction now creates a real GitHub Release and
+  copies the signed Gitea artifact set after the public tag is available.
+  Signed API and agent images are promoted under both the release version and
+  `latest`, with their OCI signatures, SBOMs and provenance referrers.
+
+### Security
+
+- HA nodes now default to a 30-second non-serving FROZEN grace before sealing,
+  down from 300 seconds. The strict same-LAN profile accepts 20-30 seconds;
+  same-region and multi-region deployments should set 45-60 seconds and
+  90-120 seconds respectively. With the default 20-second authority lease, an
+  isolated node now drops its keys after about 50 seconds. Peer-confirmed
+  shared outages may retain keys for a bounded three times the configured
+  grace, but can never restore serving authority.
+- Credential proxy bindings cannot target the vault itself, closing the path
+  where an agent could use a stored credential to call back into Horizon.
+- BSD native services receive their memory-lock allowance before privilege
+  drop. The install tests check both the effective process limit and Horizon's
+  own memory-protection verdict.
+
+### Fixed
+
+- A Unix-socket reset after connecting to the local crypto master now enters
+  the normal master-recovery path instead of escaping as an HTTP 500.
+- K7 marks a node fault before stopping the remote service and rolls the marker
+  back when the stop fails. An unavailable `/cluster/health` request during the
+  declared fault window is recorded as availability evidence, while a returned
+  non-green database state remains a hard failure.
+- Native quickstart reads the token path actually written by the installer.
+- Kubernetes HA keeps certificate permissions stable across PVC remounts,
+  permits the configured Patroni REST probes through NetworkPolicy, and states
+  that the one-time HA bootstrap password must be stored as decoded raw bytes.
+- Kubernetes defers liveness checks until slow multi-worker startup completes,
+  preventing kubelet from turning a valid first start or upgrade into a restart
+  loop.
+- Helm can disable the web UI without removing the API service, ingress and
+  network-policy path needed by API-only deployments.
+
+### Testing
+
+- Kubernetes bootstrap no longer waits for readiness before unseal. The smoke
+  test reaches sealed Pods directly, then requires readiness, and preserves
+  failures from its in-cluster HTTP helper.
+
+### Documentation
+
+- Added FROZEN timing profiles and the exact distinction between loss of
+  serving authority, key retention and hard sealing. The public roadmap now
+  reflects the shipped peer-aware classifier.
+- The compatibility matrix separates single-application-node Helm deployment,
+  tested Kubernetes application HA, and database HA. The in-chart PostgreSQL
+  remains a single database instance; production database HA uses Patroni.
+
+## 0.9.3-beta - 2026-08-28
+
+### Added
+
+- `vault_call_api`: an agent can use a stored credential without being allowed
+  to read it. It names the credential and a request path, the call is made
+  server-side, and only the API's answer comes back. The host, the injection
+  point and the credential format come from the operator's `[proxy]` binding.
+  `allow_read = false` makes the same credential unreadable through
+  `vault_get_secret`, on the stdio path and the hub path alike.
+
+### Security
+
+- The credential plaintext never enters the hub process: the `rh-mcp-gateway`
+  sidecar reads it, attaches it and drops it. It checks the destination against
+  `RH_MCP_EGRESS_ALLOW` independently of the hub's own policy, so a bug in the
+  policy layer cannot reach a host the operator never listed.
+- Proxied calls refuse redirects, withhold a reply that echoes the credential,
+  cap the response size and rate-limit per credential.
+- `RH_MCP_EGRESS_CAFILE` anchors an internal API served by a private CA for the
+  proxy's upstream leg. It is added to the public roots, not substituted for
+  them, and stays separate from `RH_VAULT_CAFILE` so the vault's CA cannot
+  certify the API being called.
+
+### Fixed
+
+- A malformed `[proxy]` binding is caught before the credential is read. The
+  inject format and type were validated at injection time, so a typo spent a
+  vault read -- decrypting and auditing a credential for a call that was never
+  going to happen -- and then reported itself as whatever the read returned,
+  usually "secret not found". Both paths had the same ordering.
+- Proxy refusals name the fix rather than the symptom: a binding that exists
+  but sets `allow_proxy = false` says so instead of asking for a table that is
+  already there, a method refusal lists the methods that are allowed, an
+  unknown credential lists the ones that are bound, and a non-https `base_url`
+  is distinguished from a missing one. A vault error now keeps the same
+  `{error, message}` shape as every other refusal from the tool.
+
+### Testing
+
+- `make mcp-proxy-e2e` drives the credential proxy end to end against a running
+  vault -- agent, hub daemon, sidecar, vault, third-party API -- and asserts the
+  credential reaches the API and nothing of it reaches the caller. Point it at a
+  standalone instance or a cluster; `RH_E2E_NODE_URLS` adds a per-node pass that
+  proves a follower can serve the call over cluster RPC.
+
 ## 0.9.2-beta - 2026-08-25
 
 ### Security

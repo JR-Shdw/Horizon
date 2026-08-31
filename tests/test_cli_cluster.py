@@ -362,8 +362,55 @@ def test_cluster_typer_help():
         "rotate-cert",
         "rotate-ca",
         "ca-bundle",
+        "health",
+        "preflight",
     ):
         assert sub in result.output, sub
+
+
+def test_cluster_preflight_reports_remediation_and_live_default(monkeypatch):
+    mc = MagicMock()
+    mc.cluster_preflight.return_value = {
+        "ready": False,
+        "overall": "fail",
+        "failed_checks": ["trusted_proxy"],
+        "warning_checks": [],
+        "checks": [
+            {
+                "id": "trusted_proxy",
+                "label": "mTLS proxy trust boundary",
+                "status": "fail",
+                "reason": "no trusted proxy configured",
+                "remediation": "Set RH_PROXY_TRUSTED_IPS.",
+            }
+        ],
+    }
+    _patch_client(monkeypatch, mc)
+    result = CliRunner().invoke(cli_app, ["cluster", "preflight"])
+    assert result.exit_code == 2
+    mc.cluster_preflight.assert_called_once_with(live=True)
+    assert "NOT READY" not in result.output
+    assert "HA preflight: FAIL" in result.output
+    assert "Set RH_PROXY_TRUSTED_IPS" in result.output
+
+
+def test_cluster_preflight_json_can_skip_live_probe(monkeypatch):
+    mc = MagicMock()
+    payload = {
+        "ready": True,
+        "overall": "warn",
+        "failed_checks": [],
+        "warning_checks": ["mtls_live"],
+        "checks": [],
+    }
+    mc.cluster_preflight.return_value = payload
+    _patch_client(monkeypatch, mc)
+    result = CliRunner().invoke(
+        cli_app, ["cluster", "preflight", "--no-live", "--json"]
+    )
+    assert result.exit_code == 0
+    mc.cluster_preflight.assert_called_once_with(live=False)
+    assert json.loads(result.output) == payload
 
 
 def test_cluster_init_print_ha_password(monkeypatch):

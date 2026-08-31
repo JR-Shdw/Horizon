@@ -6,11 +6,21 @@ rhorizon is being installed in namespace {{ .Release.Namespace }}.
 
 After the API pod becomes Ready :
 
+{{- if .Values.frontend.enabled }}
+
 1. Forward the frontend (or expose via Ingress with .Values.ingress.enabled) :
 
      kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rhorizon.fullname" . }}-frontend 8200:{{ .Values.service.frontend.port }}
 
    Then open http://127.0.0.1:8200/
+{{- else }}
+
+1. The web UI is not deployed (frontend.enabled=false). Everything below is
+   the API, which is the whole product; the UI is a convenience on top.
+   Reach the API directly :
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rhorizon.fullname" . }}-api 8200:{{ .Values.service.api.port }}
+{{- end }}
 
 2. The vault is sealed by design. Perform the FIRST unseal, this also
    sets the master password and emits a one-shot root token :

@@ -116,6 +116,8 @@ allow = [
     # Optional: add vault_cluster_health only if the vault token has cluster:r.
     # It answers "is my cluster healthy?" without granting admin, and returns
     # only states and reasons - no member names, lag figures or timelines.
+    # Optional: vault_cluster_preflight needs the same cluster:r permission.
+    # It returns stable checks/remediations but never starts a live probe.
 ]
 ```
 
@@ -140,8 +142,15 @@ LLM actually do within that bound.
 | `vault_list_namespaces` | Namespaces visible to the token | None |
 | `vault_list_secrets` | Secret **names** (never values) in a namespace | None |
 | `vault_get_secret` | The value of a whitelisted secret | Audit log entry |
+| `vault_call_api` | Optional: call a third-party API with a bound credential attached, without disclosing it (section 4.1); refused unless the operator wrote a binding | Audit log entry + one outbound request |
 | `vault_audit_tail` | Optional: last N audit entries; requires the vault token to have `audit:r` | None |
 | `vault_cluster_health` | Optional: cluster + PostgreSQL HA health (overall state, readiness, per-component state and reason); requires the vault token to have `cluster:r` | None |
+| `vault_cluster_preflight` | Optional: topology-free HA checks with stable IDs, reasons and remediations; passive (`live=false`), requires `cluster:r` | None |
+
+`vault_cluster_preflight` is suitable for diagnosis and automation. It cannot
+certify the active HTTPS/mTLS route because an MCP model must not generate
+repeated network probes. An operator performs that proof with
+`rhorizon cluster preflight` or the Web UI button.
 
 The set is intentionally narrow: read-only on secrets, no
 token-management ops, no seal/unseal. If you want the LLM to do
@@ -152,6 +161,140 @@ endpoint.
 Some clients display the tool name exactly as above. opencode prefixes
 tools with the MCP server name, so a server configured as `"rhorizon"`
 may show `rhorizon_vault_get_secret` instead of `vault_get_secret`.
+
+### 4.1 The credential proxy: use a credential without reading it
+
+`vault_get_secret` hands the value to the model, and it then lives in the
+conversation history, outside the vault's control. That is the right trade for
+some credentials and the wrong one for others.
+
+Credentials are distributed at three tiers. They are alternatives, not stages:
+pick per credential.
+
+| Tier | Mechanism | The credential ends up in |
+|---|---|---|
+| 1 | `vault_get_secret` | the model's context, and the client's history |
+| 2 | `rh-fetch` / `rh-inject` / `rh-watch` | a workload's tmpfs or environment |
+| 3 | `vault_call_api` | nowhere the agent can read |
+
+At tier 3 the agent names a credential and a request; Horizon performs the
+authenticated call and returns only the upstream's answer:
+
+```
+vault_call_api(credential="github-prod", method="GET", path="/user/repos")
+```
+
+The caller supplies the method, the path and the query. It never supplies the
+host, the injection point, or the credential format. Those come from the
+operator's binding:
+
+```toml
+[proxy.github-prod]
+namespace   = "mcp"
+allow_read  = false          # vault_get_secret refuses this credential
+allow_proxy = true
+base_url    = "https://api.github.com"
+methods     = ["GET"]
+inject      = { type = "header", name = "Authorization", format = "Bearer {value}" }
+```
+
+`allow_read = false` is what makes the tier real: the same credential becomes
+usable and unreadable, and the two tools cannot disagree about it. The table
+goes in `policy.toml` for the stdio server and in `hub.toml` for the hub; with
+no table at all, every proxied call is refused.
+
+#### Binding options
+
+| Key | Default | What it does |
+|---|---|---|
+| `namespace` | `"default"` | Where the credential lives in the vault. |
+| `allow_read` | `false` | `false` makes `vault_get_secret` refuse this credential. Leaving it `true` gives you the proxy without the guarantee. |
+| `allow_proxy` | `false` | Must be `true`. A table without it is inert. |
+| `base_url` | *(none)* | `https://` only. May pin a path prefix (`https://gitlab.example/api/v4`), and the caller cannot climb out of it. |
+| `methods` | `["GET"]` | Narrows what the credential may do *through the proxy*, independently of what the credential itself can do. |
+| `inject.type` | `"header"` | Only `header` today. |
+| `inject.name` | `"Authorization"` | Header the credential goes into. Framing headers (`Host`, `Content-Length`, …) are refused. |
+| `inject.format` | `"Bearer {value}"` | Must contain `{value}`. Forgejo/Gitea want `token {value}`, Woodpecker and GitHub `Bearer {value}`. |
+| `timeout_secs` | `15` | Upstream request timeout. |
+| `max_response_bytes` | `262144` | Larger replies come back truncated, with `"truncated": true`. |
+| `rate_limit_per_min` | `30` | Per credential, per process. `0` means no calls at all. |
+
+The method list is the part worth dwelling on. A binding pinned to `["GET"]` in
+front of an admin-scoped token gives the agent strictly less than the
+credential carries -- a narrowing no amount of prompting can achieve.
+
+#### Common errors
+
+Every refusal comes back as `{"error": <code>, "message": <text>}`, and the
+message names the fix.
+
+| Message | Cause |
+|---|---|
+| `No proxy binding for credential 'x'` (with the bound names listed) | Typo, or no `[proxy.x]` table. |
+| `The [proxy.x] binding exists but has allow_proxy = false` | The table is there but inert. |
+| `Method POST is not allowed for 'x' (allowed: GET)` | Outside the binding's `methods`. |
+| `this binding's inject format has no {value} placeholder` | The credential has nowhere to go. Caught before the vault is read. |
+| `this binding injects into 'query'; only "header" is supported` | Same, and same timing. |
+| `base_url must be https, not http` | A plain-HTTP service cannot be a destination. |
+| `path must not start with '//'` / `must start with '/'` / `must not contain dot segments` | The path tried to move the request off the bound host. |
+| `Rate limit reached for 'x': N calls/minute` | Per credential, per process. |
+| `The vault refused to serve 'ns/x' (HTTP 403)` | The MCP server's own token lacks `secrets:r` on that namespace. |
+| `upstream echoed the credential; response withheld` | The API replied with the token in the body. Nothing is returned -- not a failure of the call so much as a refusal to hand the value back. |
+| `destination … is not in RH_MCP_EGRESS_ALLOW` | Hub path only: the binding permits it, the sidecar does not. |
+| `egress not configured (RH_MCP_EGRESS_ALLOW is empty)` | The sidecar was started without an allow-list. |
+| `CaUsedAsEndEntity` | The vault or the API serves a certificate with `basicConstraints CA:TRUE`. The message names the fix. |
+
+A `401` from the upstream is *not* a proxy error -- the call went out and the
+API rejected the credential. Check `inject.format` first: `token {value}` and
+`Bearer {value}` are not interchangeable between forges.
+
+The destination is checked in two places. The policy layer builds the URL from
+the binding and refuses any path that could move the host (`//evil.test/x`,
+`@evil.test/`, dot segments encoded or not, control characters). On the hub path
+the Rust sidecar then re-checks the finished URL against its own allow-list, so
+a bug in the Python layer cannot reach a host the operator never listed:
+
+```bash
+RH_MCP_EGRESS_ALLOW="https://api.github.com,https://gitlab.example/api/v4" rh-mcp-gateway
+```
+
+An internal API served by a private CA needs its anchor: `RH_MCP_EGRESS_CAFILE`,
+added to the public roots rather than replacing them. It is a separate variable
+from `RH_VAULT_CAFILE` on purpose -- the vault's CA must not become able to
+certify the API being called. The file must hold the CA that signed the server
+certificate, not the server certificate itself.
+
+Also enforced on both paths:
+
+- redirects are refused, never followed (a 302 elsewhere would re-attach the
+  credential to whatever the upstream names);
+- a reply echoing the credential is withheld -- APIs repeat the token they
+  rejected often enough for this to matter;
+- GET only, narrowed further by the binding's `methods`;
+- responses capped (`max_response_bytes`), calls rate-limited per credential
+  (`rate_limit_per_min`, stdio path);
+- the audit records the credential *name*, the destination and the status.
+
+Where the credential lives differs by path. On the hub path the sidecar reads
+it, attaches it and drops it: the plaintext never enters the hub process, and
+the upstream leg trusts public roots only, so the vault's private CA cannot
+certify the API being called. On the stdio path the value is a Python `str` for
+the duration of the call, exactly as `vault_get_secret` already leaves it; what
+tier 3 buys there is that it does not reach the model.
+
+To exercise the whole chain against a running vault -- standalone or HA --
+`make mcp-proxy-e2e-init` writes a target file, `make mcp-proxy-e2e` runs it. It
+seeds a throwaway credential, starts the sidecar and the hub daemon, drives the
+tool as an agent would, and deletes what it made. On an HA cluster, set
+`RH_E2E_NODE_URLS` to the per-node URLs: the call is then repeated against each
+node, which is what proves a follower can serve it (a follower holds no
+sub-keys and delegates the decrypt over cluster RPC).
+
+One gap: the server-side MCP audit chain (`vault_audit_mcp`, the "MCP" tab in
+Jets) is a daemon-mode hub feature. On the stdio path a proxied call is audited
+by the vault as an ordinary read of the credential, so the trail shows that it
+was used but not where it went; the destination appears only in the server's
+stderr. Use the hub if you need the destination on the chain.
 
 ---
 
@@ -283,6 +426,14 @@ strongest link in the chain: HTTP/2 over post-quantum TLS 1.3
 (X25519MLKEM768, `aws-lc-rs`), with an optional private-CA anchor via
 `RH_VAULT_CAFILE`. The sidecar is the only component that talks to the vault
 in daemon mode.
+
+That anchor takes the vault's private CA, or a self-signed vault certificate
+issued with `basicConstraints CA:FALSE`. rustls refuses a CA-flagged
+certificate as a server's own leaf, where OpenSSL and Python's `ssl` accept it
+-- so a hand-rolled `openssl req -x509` certificate (CA:TRUE by default on
+OpenSSL 3.x) works with every other client and fails only here. The shipped
+installers already issue CA:FALSE; the sidecar names the fix in the error if
+you hit it.
 
 Edge hardening on the daemon listener: bearer validation cached by
 `sha256(token)` (never the plaintext), negative cache for rejects, per-IP

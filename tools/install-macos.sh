@@ -311,6 +311,8 @@ else
         printf 'RHORIZON_NODE_UUID_PATH=%s\n' "$(sq "$STATE_DIR/node-uuid")"
         printf 'RHORIZON_CLUSTER_CERT_PATH=%s\n' "$(sq "$STATE_DIR/cluster-cert.pem")"
         printf 'RHORIZON_CLUSTER_CERT_KEY_PATH=%s\n' "$(sq "$STATE_DIR/cluster-cert.key")"
+        printf 'RH_CLUSTER_IDENTITY_PERSISTENT=true\n'
+        printf 'RH_CLUSTER_SERVER_CERT_MANAGED=false\n'
     } > "$ENVFILE"
     chmod 600 "$ENVFILE"
 
@@ -334,6 +336,17 @@ if [ "$WANT_SERVICE" = 1 ]; then
         printf '   [dry-run] launchctl kickstart -k %s/com.resurgamus.rhorizon\n' "$LAUNCHD_DOMAIN"
     else
         mkdir -p "$(dirname "$PLIST")"
+        # A LaunchDaemon (system mode) runs as root unless told otherwise. A
+        # LaunchAgent already runs as the logging-in user, so UserName there
+        # would be both redundant and wrong.
+        RH_PLIST_USER=""
+        if [ "$RH_MODE" = system ] && [ "${RH_ACCOUNT_READY:-0}" = 1 ]; then
+            RH_PLIST_USER="  <key>UserName</key>
+  <string>$(xml_escape "$RH_SERVICE_USER")</string>
+  <key>GroupName</key>
+  <string>$(xml_escape "$RH_SERVICE_GROUP")</string>
+"
+        fi
         cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -348,7 +361,7 @@ if [ "$WANT_SERVICE" = 1 ]; then
   </array>
   <key>WorkingDirectory</key>
   <string>$(xml_escape "$ROOT_DIR")</string>
-  <key>RunAtLoad</key>
+${RH_PLIST_USER}  <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>

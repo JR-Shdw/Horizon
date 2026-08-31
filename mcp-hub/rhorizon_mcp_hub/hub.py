@@ -57,7 +57,7 @@ def _import_gateway():
 log = logging.getLogger("rhorizon-mcp-hub")
 
 PROTOCOL_VERSION = "2024-11-05"
-__version__ = "0.9.2b1"
+__version__ = "0.9.4b1"
 _STARTUP_TIMEOUT = 30.0
 _CALL_TIMEOUT = 120.0
 
@@ -267,7 +267,8 @@ class Hub:
                     )
                     continue
                 gw = _import_gateway()
-                be = gw.VaultBackend(self._sidecar, name=bname)
+                # The whole config: [proxy] is top-level, like [backends].
+                be = gw.VaultBackend(self._sidecar, name=bname, config=self._config)
                 self.backends[bname] = be
                 for tool in be.tools:
                     orig = tool["name"]
@@ -365,6 +366,11 @@ class Hub:
         arguments = dict(params.get("arguments", {}) or {})
         # Best-effort target for the audit (name never carries a secret value).
         target = arguments.get("name") or arguments.get("namespace")
+        if arguments.get("credential"):
+            # vault_call_api: the credential name plus the path names the
+            # destination (the host comes from the binding). The vault caps
+            # `target` at 512 chars and a path can be long.
+            target = f"{arguments['credential']}{arguments.get('path', '')}"[:512]
         route = self.routes.get(name)
         if not route:
             self._audit({"event": "denied", "tool": name, "reason": "unknown_tool"})

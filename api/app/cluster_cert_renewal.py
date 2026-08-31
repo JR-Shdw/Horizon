@@ -34,7 +34,6 @@ import asyncio
 import fcntl
 import logging
 import os
-import ssl
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,7 +41,7 @@ from pathlib import Path
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import cluster_ca, cluster_cert, nginx_reload
+from . import cluster_ca, cluster_cert, cluster_tls, nginx_reload
 from . import metrics as _metrics
 from .config import settings
 from .database import async_session
@@ -133,8 +132,7 @@ async def _post_refresh(
     # mTLS client cert via an explicit SSLContext (httpx deprecated `cert=`).
     # Server verification stays at the default system trust store; pinning the
     # primary to the cluster CA would be deployment policy, not done here.
-    ctx = ssl.create_default_context()
-    ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+    ctx = cluster_tls.server_context(client_cert=cert_path, client_key=key_path)
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, verify=ctx) as client:
         try:
             r = await client.post(url, json={})
@@ -249,12 +247,13 @@ async def _renew_locked(
 
     threshold = _needs_threshold_renew(cert_pem)
 
-    # The server cert lives alongside the node cert on disk.
-    # We piggy-back its renewal on the same trigger flags -- the
-    # cluster CA signs both, the renewal threshold is the same, and
-    # the renewal round-trip already returns both pairs. Two paths
-    # would mean two HTTP calls + two reload windows.
-    server_threshold = _server_cert_needs_renew(settings.cluster_server_cert_path)
+    # Custom deployments may delegate the HTTPS server certificate to
+    # Horizon. Bundled Compose/Helm installs keep it deployment-managed
+    # (read-only mount/Secret), so only the node mTLS certificate is renewed.
+    # When enabled, piggy-back the server renewal on the node round-trip.
+    server_threshold = settings.cluster_server_cert_managed and (
+        _server_cert_needs_renew(settings.cluster_server_cert_path)
+    )
 
     if not (force or threshold or server_threshold):
         return "skipped_not_needed"
@@ -277,7 +276,11 @@ async def _renew_locked(
         ) = await _post_refresh(cert_path, key_path)
         await _assert_issued_by_cluster_ca(new_cert_pem, new_server_cert_pem or None)
         cluster_cert.save_cluster_cert(new_cert_pem, new_key_pem, cert_path, key_path)
-        if new_server_cert_pem and new_server_key_pem:
+        if (
+            settings.cluster_server_cert_managed
+            and new_server_cert_pem
+            and new_server_key_pem
+        ):
             nginx_reload.save_server_cert(
                 new_server_cert_pem,
                 new_server_key_pem,

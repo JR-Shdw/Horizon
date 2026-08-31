@@ -1,7 +1,7 @@
 # Kubernetes - Helm
 
 The chart at `helm/rhorizon/` deploys rhorizon on any Kubernetes
-cluster. Defaults render 11 resources and bring up an in-chart
+cluster. Defaults render 12 resources and bring up an in-chart
 PostgreSQL StatefulSet ; production knobs let you point at a
 managed PG, enable Ingress + TLS, configure NetworkPolicies, and
 opt into multi-replica clustering.
@@ -63,11 +63,12 @@ The chart renders :
 | ConfigMap | `vault-rhorizon-schema` | `schema.sql` for first PG init |
 | StatefulSet | `vault-rhorizon-postgres` | PG with 10Gi PVC by default |
 | Service | `vault-rhorizon-postgres` | ClusterIP for in-namespace access |
-| Deployment | `vault-rhorizon-api` | uvicorn x 5 workers per pod (cluster floor), hardened |
+| StatefulSet | `vault-rhorizon-api` | API workers plus one persistent identity PVC per Pod |
+| Headless Service | `vault-rhorizon-api-headless` | stable StatefulSet network identity |
 | Service | `vault-rhorizon-api` | ClusterIP for frontend + sidecars |
 | Deployment | `vault-rhorizon-frontend` | nginx, hardened |
 | Service | `vault-rhorizon-frontend` | ClusterIP, exposed via Ingress if enabled |
-| NetworkPolicy | `vault-rhorizon-api` | Egress lockdown to PG + DNS only |
+| NetworkPolicy | `vault-rhorizon-api` | Egress to PG, DNS and the HA HTTPS frontend only |
 | NetworkPolicy | `vault-rhorizon-frontend` | Ingress configurable, egress to API only |
 
 ## Install - managed PostgreSQL
@@ -102,9 +103,19 @@ at template time, so add a custom rule pointing at it).
 ```yaml
 # values-prod.yaml
 api:
-  replicas: 3
-  clusterEnabled: true # multi-worker cross-pod
+  # Bootstrap with one Pod. After cluster init, add the one-time HA password
+  # Secret and scale to 3 as documented in helm/rhorizon/README.md.
+  replicas: 1
+  clusterEnabled: true
+  proxyTrustedIps: 10.42.0.0/16
+  haPrimaryUrl: https://vault-rhorizon-frontend.rhorizon.svc:8443
+  haServerCaSecretName: rhorizon-frontend-ca
   workers: 5
+
+frontend:
+  tls:
+    enabled: true
+    secretName: rhorizon-frontend-tls
 
 ingress:
   enabled: true
@@ -138,6 +149,16 @@ helm install vault ./rhorizon \
   --set image.frontend.repository=your-registry/rhorizon-frontend \
   --set image.frontend.tag=1.0.0
 ```
+
+This starts the first HA member only. Initialize it, create the temporary raw
+HA-password Secret, then scale to three replicas using the exact two-stage
+procedure in the [Helm chart README](https://github.com/JR-Shdw/Horizon/blob/main/helm/rhorizon/README.md).
+Finish with `rhorizon cluster preflight`; a replica count is not proof of HA.
+
+The chart's three-Pod HA path is currently awaiting completion of the dedicated
+bootstrap/restart/failover release lane. The deployment is available for
+testing, but is not yet listed as production-validated in the compatibility
+matrix.
 
 ## First unseal
 

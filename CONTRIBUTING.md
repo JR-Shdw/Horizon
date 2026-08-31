@@ -7,25 +7,23 @@ Self-hosted secrets vault
 
 # Contributing to Resurgamus Horizon
 
-## Code contributions are closed for now
+## Code contributions are currently closed
 
-This is a secrets vault - the supply chain is part of the threat model. To keep
-that surface small, external pull requests are **not accepted at the moment**.
+Code contributions are currently closed to preserve a clear copyright
+ownership and dual-licensing model. Horizon is released under AGPL-3.0 *and*
+offered under a commercial license; that second option only stays available
+while the copyright rests with a single holder, which merged outside patches
+would end.
 
-Onboarding a code contributor requires, at minimum:
+Substantial long-term contributions may be considered by prior agreement.
 
-- a published signing key and signed commits,
-- an identity check,
-- a real-life meeting,
-- MFA on every account in the contribution path.
+## What is welcome
 
-Until that process is in place, outside patches cannot be merged.
-
-## Reporting bugs, flaws, and CVEs - highly appreciated
-
-Security reports, bug reports, and vulnerability (CVE) disclosures are very
-welcome. See [SECURITY.md](SECURITY.md) for how to report. Never include
-secrets, `.env` files, or private keys in a report.
+- **Bug reports** - including reproduction steps and the version you ran.
+- **Security reports and CVE disclosures** - see [SECURITY.md](SECURITY.md).
+  Never include secrets, `.env` files, or private keys in a report.
+- **Documentation feedback** - a wrong or missing instruction is a defect.
+- **Feature proposals** - the use case matters more than the implementation.
 
 ## Working together
 

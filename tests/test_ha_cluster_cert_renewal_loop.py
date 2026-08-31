@@ -463,6 +463,7 @@ async def test_renew_once_persists_server_pair_and_reloads_nginx(
     ``renew_once`` writes both files atomically and triggers an nginx
     reload via the configured command."""
     cert_p, key_p = _fresh_cluster
+    monkeypatch.setattr(settings, "cluster_server_cert_managed", True)
     cert_pem, key_pem = await _sign_local_node_cert(validity_days=7)
     cluster_cert.save_cluster_cert(cert_pem, key_pem, str(cert_p), str(key_p))
 
@@ -499,6 +500,44 @@ async def test_renew_once_persists_server_pair_and_reloads_nginx(
         (new_server_cert, new_server_key, str(server_cert_p), str(server_key_p))
     ]
     assert reload_calls == ["/bin/true"]
+
+
+@pytest.mark.asyncio
+async def test_renew_once_does_not_touch_deployment_managed_https_cert(
+    _fresh_cluster, monkeypatch
+):
+    """Bundled installs mount HTTPS material read-only.
+
+    Node mTLS renewal must still succeed without writing the returned HTTPS
+    pair or asking the API container to reload the frontend proxy.
+    """
+    cert_p, key_p = _fresh_cluster
+    monkeypatch.setattr(settings, "cluster_server_cert_managed", False)
+    cert_pem, key_pem = await _sign_local_node_cert(validity_days=7)
+    cluster_cert.save_cluster_cert(cert_pem, key_pem, str(cert_p), str(key_p))
+
+    new_node_cert, new_node_key = await _sign_local_node_cert(validity_days=90)
+    new_server_cert, new_server_key = await _sign_local_node_cert(validity_days=90)
+    monkeypatch.setattr(
+        cluster_cert_renewal,
+        "_post_refresh",
+        AsyncMock(
+            return_value=(
+                new_node_cert,
+                new_node_key,
+                new_server_cert,
+                new_server_key,
+            )
+        ),
+    )
+    save_server = patch.object(nginx_reload, "save_server_cert")
+    reload_nginx = patch.object(nginx_reload, "reload_nginx")
+    with save_server as save_mock, reload_nginx as reload_mock:
+        outcome = await cluster_cert_renewal.renew_once()
+
+    assert outcome == "success"
+    save_mock.assert_not_called()
+    reload_mock.assert_not_called()
 
 
 # --- _server_cert_needs_renew paths ----------------------------------------

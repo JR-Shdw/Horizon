@@ -34,7 +34,7 @@ Dépendances minimales : `typer` (commandes), `httpx` (client HTTP),
 
 ```bash
 rhorizon login http://10.0.0.20:8200
-# Connected to rhorizon 0.9.2-beta (sealed=False)
+# Connected to rhorizon 0.9.4-beta (sealed=False)
 # Token (rh_...): ********
 # Token saved.
 ```
@@ -68,7 +68,7 @@ Overrides via env (utile pour CI / scripts) :
 ```bash
 rhorizon status
 # Status:   UNSEALED
-# Version:  0.9.2-beta
+# Version:  0.9.4-beta
 # Uptime:   10h27m
 # 2FA:      none
 
@@ -619,7 +619,7 @@ l'opération ordinaire reprenne.
 ## 11. Cluster (inspection + cycle de vie)
 
 Pour les déploiements HA. `rhorizon cluster status` est une vue read-only du
-membership et du cycle de vie des certificats (`admin:r`), pas un control
+membership et du cycle de vie des certificats (`cluster:r`, ou `admin:r`), pas un control
 panel.
 
 ```bash
@@ -627,6 +627,8 @@ rhorizon cluster status          # table compacte
 rhorizon cluster status --json   # payload /cluster/ha complet
 rhorizon cluster health          # santé live bout-en-bout par composant
 rhorizon cluster health --json   # fournisseur, leader, replicas, lag, preuves
+rhorizon cluster preflight       # contrôles HA + trajet HTTPS/mTLS actif
+rhorizon cluster preflight --no-live --json  # observation passive structurée
 ```
 
 ```text
@@ -660,7 +662,7 @@ pour les preuves propres au fournisseur : nombre de leaders, membres,
 streaming, lag et timelines. Patroni fournit le nombre de leaders vérifié mais
 pas l'identité du membre ; `pgha` ajoute identité du leader, fraîcheur des
 agents, quorum et propriété du VIP d'écriture. Les trois termes distincts sont
-**master crypto local**, **primary applicatif** et **leader de base de
+**leader de custody local**, **primary applicatif** et **leader de base de
 données**.
 
 Actions de cycle de vie :
@@ -674,7 +676,9 @@ rhorizon cluster rotate-cert --all   # / rotate-ca / ca-bundle
 
 L'UI Web sous **Cluster -> HA** combine membership, topologie locale des
 workers, locks cluster, cycle des certificats et preuves Database HA
-normalisées. Ses points suivent le même contrat que le CLI.
+normalisées. Son preflight utilise le même contrat que le CLI et affiche une
+correction pour chaque contrôle en échec. Le bouton mTLS actif traverse
+réellement le frontend HTTPS ; le dashboard ne remplace pas K7.
 
 ---
 

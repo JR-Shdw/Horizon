@@ -15,8 +15,10 @@ driver_pkg() {
     export PKG_PATH
     # libffi: cffi (a cryptography build dep) needs ffi.h + libffi.pc. It used to
     # arrive via py3-cryptography; we build cryptography from source, so add it.
+    # OpenBSD base already provides /usr/bin/pkg-config; there is no pkgconf--
+    # package in the 7.8 repository.
     run pkg_add -I rust libsodium-- libffi openldap-client-- cyrus-sasl-- \
-        gmake-- pkgconf-- git-- curl-- postgresql-server-- postgresql-client-- \
+        gmake-- git-- curl-- postgresql-server-- postgresql-client-- \
         nginx-- libev--
     # openssl port: 7.9 = %3.5 (eopenssl35), 7.8 = %3.6. Try newest-supported first.
     run sh -c 'pkg_add -I openssl%3.5 || pkg_add -I openssl%3.6 || pkg_add -I openssl' || true
@@ -112,9 +114,32 @@ EOF"
     run chmod +x "$_wd/run-app.sh"
     RH_RUN="$_wd/run-app.sh"; export RH_RUN
     [ "${RH_MODE:-system}" = user ] && return 0
+    # Deliberately NOT dropping privilege here yet.
+    #
+    # OpenBSD's rc.subr runs a non-root daemon through `su -l -c <class>`, and
+    # a login class applies its own resource limits from login.conf. That means
+    # the memlock budget cannot be carried in from an earlier `ulimit` the way
+    # it can on FreeBSD and NetBSD -- it would have to come from a `rhorizon`
+    # login class this installer does not manage. Guessing at that file on a
+    # vault host, untested, risks either a service that will not start or one
+    # whose secrets are quietly swappable.
+    #
+    # Running as root keeps the property that matters against an agent: the
+    # credentials stay root-owned and unreadable by an ordinary login. What it
+    # does not buy is blast-radius reduction if Horizon itself is compromised.
+    # Say so rather than let the summary imply otherwise.
+    _duser=""
+    if [ "${RH_ACCOUNT_READY:-0}" = 1 ]; then
+        warn "OpenBSD: the vault will run as root, not $RH_SERVICE_USER."
+        warn "  The memlock budget comes from a login class here, which this"
+        warn "  installer does not configure; dropping privilege without it"
+        warn "  would leave secrets swappable. Credentials stay root-owned"
+        warn "  either way, so an unprivileged agent still cannot read them."
+    fi
     run sh -c "cat > /etc/rc.d/rhorizon <<EOF
 #!/bin/ksh
 daemon='$_wd/run-app.sh'
+$_duser
 . /etc/rc.d/rc.subr
 rc_bg=YES
 rc_reload=NO
@@ -166,12 +191,12 @@ EOF"
 
 driver_start_nginx() {
     if [ "${RH_MODE:-system}" = user ]; then run sh -c "$RH_NGINX_CMD"
-    else run rcctl -f start rhorizon_nginx || run rcctl restart rhorizon_nginx; fi
+    else run rcctl restart rhorizon_nginx || run rcctl -f start rhorizon_nginx; fi
 }
 
 driver_start() {
     if [ "${RH_MODE:-system}" = user ]; then run sh -c "nohup '$RH_RUN' >/dev/null 2>&1 &"
-    else run rcctl -f start rhorizon || run rcctl restart rhorizon; fi
+    else run rcctl restart rhorizon || run rcctl -f start rhorizon; fi
 }
 
 # driver_uninstall -- reverse driver_service_install (rc.d + rcctl). Idempotent.

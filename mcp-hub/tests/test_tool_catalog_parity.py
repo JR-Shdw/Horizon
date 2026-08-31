@@ -4,7 +4,7 @@
 
 Regression coverage for a real divergence: `mcp/rhorizon_mcp/server.py` and
 `mcp-hub/rhorizon_mcp_hub/gateway.py` each carried their own hand-maintained
-copy of the same six vault tools, and they drifted -- different descriptions,
+copy of the same vault tools, and they drifted -- different descriptions,
 and the hub's `vault_get_secret` had lost the `default: "default"` on its
 `namespace` property.
 
@@ -37,12 +37,16 @@ EXPECTED_TOOLS = [
     "vault_list_namespaces",
     "vault_list_secrets",
     "vault_get_secret",
+    # Added deliberately: the credential proxy. Refuses every call on both
+    # paths until an operator writes a [proxy] binding.
+    "vault_call_api",
     "vault_audit_tail",
     # Added deliberately: read-only cluster/PG HA health, so an operator can
     # ask an agent "is my cluster healthy?" without holding admin. Gated on
     # the `cluster:r` scope and served as a summary projection (states and
     # reasons only, no member names or lag figures).
     "vault_cluster_health",
+    "vault_cluster_preflight",
 ]
 
 
@@ -85,7 +89,7 @@ def test_both_modules_load_the_same_catalog():
 
 
 def test_catalog_shape_is_intact():
-    """Guard the surface itself: read-only, six tools, valid MCP schemas."""
+    """Guard the surface itself: read-only, reviewed tools, valid schemas."""
     tools = json.loads(CANONICAL.read_text(encoding="utf-8"))["tools"]
     names = [t["name"] for t in tools]
 

@@ -44,7 +44,7 @@ and no Consul, etcd, or Raft dependency.
 
     ---
 
-    11 resources, NetworkPolicy egress lockdown, optional managed PG :
+    12 resources, NetworkPolicy egress lockdown, optional managed PG :
 
     ```bash
     helm install vault ./helm/rhorizon \
@@ -77,6 +77,6 @@ and no Consul, etcd, or Raft dependency.
 |---|---|
 | Validation | Python and Rust tests, lint, dependency audit, image scan, and OS release lanes |
 | Platforms | Linux and BSD; see the [compatibility matrix](https://github.com/JR-Shdw/Horizon/blob/main/docs/COMPATIBILITY.md) for current evidence |
-| Latest pre-release | `v0.9.2-beta` |
+| Latest pre-release | `v0.9.4-beta` |
 | License | AGPL-3.0-or-later |
 | Maintainer | [shdw](mailto:horizon@resurgamus.com) |

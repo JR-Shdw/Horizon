@@ -124,12 +124,22 @@ def test_memory_lock_mode_rejects_unknown_value():
         Settings(memory_lock_mode="silent")
 
 
-def test_cluster_failover_defaults_are_multi_zone_safe():
+def test_cluster_failover_defaults_are_same_site_safe():
     settings = Settings()
     assert settings.cluster_heartbeat_interval_secs == 3
     assert settings.cluster_state_machine_interval_secs == 2
     assert settings.cluster_primary_lease_ttl_secs == 20
+    assert settings.cluster_frozen_max_secs == 30
     assert settings.cluster_auto_promote_cooldown_secs == 20
+
+
+@pytest.mark.parametrize("grace", [20, 30, 45, 60, 90, 120])
+def test_cluster_frozen_profiles_are_accepted(grace):
+    assert Settings(cluster_frozen_max_secs=grace).cluster_frozen_max_secs == grace
+
+
+def test_cluster_frozen_profile_has_a_strict_floor():
+    assert Settings(cluster_frozen_max_secs=1).cluster_frozen_max_secs == 20
 
 
 def test_primary_lease_allows_two_missed_heartbeats():

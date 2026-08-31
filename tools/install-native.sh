@@ -141,7 +141,7 @@ while [ $# -gt 0 ]; do
         --master-password) MASTER_PW=$2; MASTER_PW_FROM_ARGV=1; shift ;;
         --master-password-file) MASTER_PW_FILE=$2; shift ;;
         --external-db) EXTERNAL_DB=$2; shift ;;
-        --memory-lock-mode) MEMORY_LOCK_MODE=$2; shift ;;
+        --memory-lock-mode) MEMORY_LOCK_MODE=$2; MEMLOCK_MODE_EXPLICIT=1; shift ;;
         --no-service) WANT_SERVICE=0 ;;
         -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
         *) printf 'unknown arg: %s\n' "$1" >&2; exit 1 ;;
@@ -306,18 +306,23 @@ fi
 # home that SELinux rhorizon_t cannot read, and may be removed after install.
 # User mode keeps referencing the checkout (updated via git pull + re-run).
 if [ "$RH_MODE" = system ]; then
+    # The account has to exist before the code below is grouped to it.
+    rh_require_service_account
     # Copy the app package into the confined tree with a PORTABLE cp (BSD tar
     # has no --exclude). Only api/app is needed at runtime (--app-dir=api imports
     # app.main); the rust build tree + deps live in the venv, not here.
     run sh -c "rm -rf '$WORK_DIR/api'; mkdir -p '$WORK_DIR/api'; cp -R '$ROOT_DIR/api/app' '$WORK_DIR/api/app'; find '$WORK_DIR/api' -name __pycache__ -exec rm -rf {} + 2>/dev/null || true"
     run cp -f "$ROOT_DIR/schema.sql" "$WORK_DIR/schema.sql"
     run cp -f "$ROOT_DIR/dynamic-engines.ini" "$WORK_DIR/dynamic-engines.ini"
-    # Own the relocated code as root so the confined service reads it via the
-    # OWNER bit (it runs as root but is NOT granted dac_read_search, so it can
-    # not override a file owned by the build-checkout's uid). Numeric 0:0 --
-    # BSD's root group is "wheel", not "root". Guarantee OWNER read/traverse
-    # only; never widen group/other (do not loosen a vault's files).
-    run sh -c "chown -R 0:0 '$WORK_DIR/api' '$WORK_DIR/schema.sql' '$WORK_DIR/dynamic-engines.ini'; chmod -R u+rX '$WORK_DIR/api'; chmod u+r '$WORK_DIR/schema.sql' '$WORK_DIR/dynamic-engines.ini'"
+    # The relocated code stays ROOT-OWNED so the daemon cannot rewrite its own
+    # program, and is read through the GROUP bit once the daemon is no longer
+    # root -- owner-only would leave the service unable to import the very
+    # package it is asked to run. Group is the service group when there is one,
+    # else numeric 0 (BSD's root group is "wheel", not "root"). Never widen to
+    # other: this is a vault's tree.
+    _codegrp=0
+    [ "${RH_ACCOUNT_READY:-0}" = 1 ] && _codegrp="$RH_SERVICE_GROUP"
+    run sh -c "find '$WORK_DIR/api' -type d -exec chown 0:$_codegrp {} +; find '$WORK_DIR/api' -type f -exec chown 0:$_codegrp {} +; find '$WORK_DIR/api' -type d -exec chmod 0750 {} +; find '$WORK_DIR/api' -type f -exec chmod 0640 {} +; chown 0:$_codegrp '$WORK_DIR/schema.sql' '$WORK_DIR/dynamic-engines.ini'; chmod 0640 '$WORK_DIR/schema.sql' '$WORK_DIR/dynamic-engines.ini'"
     APP_DIR="$WORK_DIR/api"; SCHEMA_FILE="$WORK_DIR/schema.sql"
     DYNAMIC_MODULES_FILE="$WORK_DIR/dynamic-engines.ini"
 else
@@ -380,7 +385,7 @@ if [ -n "${MASTER_PW_FILE:-}" ]; then
     # python reads the bytes and removes at most ONE trailing newline, so
     # `printf secret >f` and `echo secret >f` still agree, and a password whose
     # last byte really is a newline survives.
-    python3 - "$MASTER_PW_FILE" "$PW_STAGE" <<'PY' || exit 1
+    "$PYBIN" - "$MASTER_PW_FILE" "$PW_STAGE" <<'PY' || exit 1
 import sys
 data = open(sys.argv[1], "rb").read()
 if data.endswith(b"\n"):
@@ -438,6 +443,44 @@ ROOT_TOKEN=""
 [ -z "$ROOT_TOKEN" ] && [ -f "$SECRET_FILE" ] && ROOT_TOKEN=$(sed -n 's/^ROOT_TOKEN=//p' "$SECRET_FILE" 2>/dev/null || true)
 run mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUNTIME_DIR" "$AUDIT_DIR"
 run chmod 700 "$CONFIG_DIR" "$STATE_DIR" "$RUNTIME_DIR" "$AUDIT_DIR"
+
+# System mode runs the daemon under its own account. Installation is privileged;
+# the vault afterwards must not be. A compromise of a root-run vault is a
+# compromise of the host, which is hard to justify for software whose whole job
+# is least privilege.
+#
+# User mode keeps the invoking user: there is no second identity to drop to, and
+# pretending otherwise would be the silent-success failure this avoids.
+if [ "$RH_MODE" = system ]; then
+    _preexisting_install=0
+    [ -f "$CONFIG_DIR/rhorizon.env" ] && _preexisting_install=1
+    rh_ensure_service_account
+    if [ "$RH_ACCOUNT_READY" = 1 ]; then
+        log "service account: $RH_SERVICE_USER:$RH_SERVICE_GROUP (daemon drops to it)"
+        # Under a dedicated account the unit grants the exact computed budget
+        # and the process cannot raise it. Silently sliding to "swappable" is
+        # the outcome that limit exists to prevent, so make the failure loud
+        # rather than discoverable later in /status. An explicit
+        # --memory-lock-mode still wins: the operator may know their host.
+        # Only where the service manager provably grants the budget to the
+        # dropped identity -- that is systemd's LimitMEMLOCK. On the BSDs the
+        # limit is raised by the rc script before the drop, which is correct in
+        # principle but unverified on real hardware; promoting to `required`
+        # there would turn an unproven mechanism into a refusal to boot, since
+        # swap_protection() reports "unknown" off Linux and `required` +
+        # "unknown" is fatal by design.
+        if [ "$RH_OS" = linux ] \
+           && [ -z "${MEMLOCK_MODE_EXPLICIT:-}" ] \
+           && [ "$MEMORY_LOCK_MODE" = best-effort ]; then
+            MEMORY_LOCK_MODE=required
+            log "memory lock: required (the unit grants ${RH_MEM_MB}MB; a failure to lock now stops startup)"
+        fi
+    else
+        # The only way here is the explicit fallback accepted by
+        # rh_require_service_account() before application code was installed.
+        log "service account: explicit root fallback"
+    fi
+fi
 
 # TLS is mandatory. The native path has no nginx -- that layer is container-only
 # -- so uvicorn terminates TLS itself and the certificate goes straight to the
@@ -613,8 +656,18 @@ fi
 # every legitimate caller. Narrowed to our own proxy rather than the default
 # all-RFC1918 list; this setting never authorizes identity headers.
 XFF_LINE=""
+HA_LINES="RH_CLUSTER_IDENTITY_PERSISTENT=true
+RH_CLUSTER_SERVER_CERT_MANAGED=false
+RH_HA_SERVER_CA_FILE=$TLS_CERT"
 if [ "$USE_NGINX" = 1 ]; then
     XFF_LINE="RH_XFF_TRUSTED_IPS=127.0.0.1/32,::1/128"
+    if [ "${RH_NGINX_CLUSTER_MTLS:-0}" = 1 ]; then
+        HA_LINES="RH_CLUSTER_IDENTITY_PERSISTENT=true
+RH_CLUSTER_SERVER_CERT_MANAGED=false
+RH_HA_SERVER_CA_FILE=$TLS_CERT
+RH_CLUSTER_HA_ENABLED=true
+RH_PROXY_TRUSTED_IPS=127.0.0.1/32,::1/128"
+    fi
 fi
 
 run sh -c "cat > '$ENVFILE' <<EOF
@@ -622,6 +675,7 @@ RHORIZON_DATABASE_URL=$DB_URL
 RHORIZON_DATABASE_SSL=disable
 RHORIZON_TLS_ENABLED=true
 ${XFF_LINE}
+${HA_LINES}
 RHORIZON_RUNTIME_DIR=$RUNTIME_DIR
 RHORIZON_AUDIT_DIR=$AUDIT_DIR
 RHORIZON_SCHEMA_PATH=$SCHEMA_FILE
@@ -634,6 +688,30 @@ RH_MEMORY_LOCK_MODE=$MEMORY_LOCK_MODE
 ${SWAP_PROTECTION:+RH_SWAP_PROTECTION=$SWAP_PROTECTION}
 EOF"
 run chmod 600 "$ENVFILE"
+
+# Hand the daemon exactly what it needs at runtime, one path at a time.
+# Everything omitted here stays root-owned by construction -- in particular
+# $SECRET_DIR, which holds the master password and the root token. The vault
+# does not re-read those while running, so the service account has no business
+# being able to.
+if [ "$RH_ACCOUNT_READY" = 1 ]; then
+    if [ "${_preexisting_install:-0}" = 1 ]; then
+        log "existing system install detected: migrating runtime paths to $RH_SERVICE_USER"
+        log "  (recovery material in $SECRET_DIR/ stays root-owned and is NOT migrated)"
+    fi
+    # Config is read, never written, by the daemon: root owns it, group reads it.
+    run chown "root:$RH_SERVICE_GROUP" "$CONFIG_DIR"
+    run chmod 0750 "$CONFIG_DIR"
+    [ -f "$ENVFILE" ] && { run chown "root:$RH_SERVICE_GROUP" "$ENVFILE"; run chmod 0640 "$ENVFILE"; }
+    # State, runtime and audit are written by the daemon.
+    rh_own_runtime_tree "$STATE_DIR" 0700 0600
+    rh_own_runtime_tree "$RUNTIME_DIR" 0700 0600
+    rh_own_runtime_tree "$AUDIT_DIR" 0700 0600
+    # The TLS key is runtime material: uvicorn reads it on every start.
+    [ -n "$TLS_KEY" ] && rh_own_runtime_path "$TLS_KEY" 0400
+    [ -n "$TLS_CERT" ] && rh_own_runtime_path "$TLS_CERT" 0444
+    # Explicitly NOT: $SECRET_DIR, $SECRET_FILE.
+fi
 
 RUNCMD="$VENV/bin/python -m uvicorn app.main:app --app-dir $APP_DIR --host $UVICORN_HOST --port $UVICORN_PORT --workers $WORKERS"
 if [ "$USE_NGINX" = 0 ]; then
@@ -687,11 +765,18 @@ else
     [ "$DRY_RUN" = 1 ] || { umask 077
         run mkdir -p "$SECRET_DIR"
         run chmod 700 "$SECRET_DIR"
+        # BSD filesystems inherit the parent directory's group. CONFIG_DIR is
+        # root:rhorizon so the daemon can read rhorizon.env, but recovery
+        # material is a separate root-only boundary. Enforce it numerically;
+        # the privileged group is wheel, not root, on the BSDs.
+        [ "$RH_MODE" != system ] || run chown 0:0 "$SECRET_DIR"
         cat "$PW_STAGE" > "$SECRET_DIR/master-password"
         chmod 0400 "$SECRET_DIR/master-password"
+        [ "$RH_MODE" != system ] || run chown 0:0 "$SECRET_DIR/master-password"
         if [ -n "$ROOT_TOKEN" ]; then
             printf '%s' "$ROOT_TOKEN" > "$SECRET_DIR/root-token"
             chmod 0400 "$SECRET_DIR/root-token"
+            [ "$RH_MODE" != system ] || run chown 0:0 "$SECRET_DIR/root-token"
         fi
         # Refresh the legacy KEY=VALUE mirror only when the password is
         # representable in it. A newline in the value would end the line, so the

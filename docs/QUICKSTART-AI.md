@@ -185,8 +185,10 @@ conversation, ask :
 
 > *"What can you do with rhorizon ?"*
 
-It should answer that it has six tools available, all read-only, and
-that nothing is whitelisted yet (which is the safe default).
+It should list the tools your policy allows and say that nothing is
+whitelisted yet (which is the safe default). The quickstart policy enables
+five; the full catalogue is nine, and the extra ones stay off until you
+add them.
 
 ---
 

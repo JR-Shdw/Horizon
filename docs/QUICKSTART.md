@@ -63,7 +63,7 @@ curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/health
 
 # Status (sealed by default)
 curl --cacert ~/rhorizon/certs/cert.pem https://127.0.0.1:8443/api/v1/vault/status
-# {"sealed": true, "version": "0.9.2-beta", ...}
+# {"sealed": true, "version": "0.9.4-beta", ...}
 ```
 
 ## 4. First unseal
@@ -88,7 +88,17 @@ password. The first unseal creates the master key from your password.
 >
 > The native installer (`tools/install-native.sh`) uses the same layout under
 > its own config directory, `~/.config/rhorizon/secrets/` in user mode, and
-> warns you about it at the end of the run.
+> `/etc/rhorizon/secrets/` in Linux system mode (`/usr/local/etc/rhorizon` on
+> FreeBSD, `/usr/pkg/etc/rhorizon` on NetBSD). It warns you about it at the end
+> of the run.
+>
+> A native **system** install runs the API as the dedicated, non-login
+> `rhorizon` account while keeping recovery files owned by root and unreadable
+> by that service. Account creation failure stops the install; running as root
+> requires the explicit `RH_ACCOUNT_FALLBACK_ROOT=1` override. OpenBSD is the
+> documented exception for now: its stock `daemon` login class allows only
+> 87381 KiB of locked memory, below the 622592 KiB home-tier budget, so the
+> service remains root-run rather than silently losing `mlock`.
 
 ```bash
 cd cli
@@ -151,7 +161,7 @@ rhorizon login 127.0.0.1:8443      # bare host defaults to https
 
 rhorizon status
 # Status:   UNSEALED
-# Version:  0.9.2-beta
+# Version:  0.9.4-beta
 ```
 
 ## 6. Store your first secret

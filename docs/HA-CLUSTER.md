@@ -22,12 +22,12 @@ Three independent roles span the process, application, and database layers:
 
 | Role | Scope | Responsibility |
 |---|---|---|
-| **Local crypto master** | one uvicorn worker inside each rhorizon container | holds that container's sub-keys; follower workers delegate crypto over a local Unix socket |
+| **Local custody leader** | one custody process per API host | holds that host's sub-keys; in embedded mode it is an API worker, in separated mode it belongs to the Rust/Python custodian pool |
 | **Application primary** | one rhorizon container in the application cluster | holds cross-cluster singleton locks: DEK rotation, audit compaction, password rotation |
 | **Database leader** | one PostgreSQL member selected by the Database HA provider | accepts writes through the stable database write endpoint/VIP and streams WAL to replicas |
 
 The roles never imply one another. Every application container normally has
-its own local crypto master, including an application secondary. The
+its own local custody leader, including an application secondary. The
 application primary does not have to run on the host that owns the database
 leader or write VIP. Process state lives in `vault_workers` (`worker_state`);
 application state lives in `vault_cluster_nodes` (`ha_state`). PostgreSQL is
@@ -37,11 +37,12 @@ database election and supervision (Patroni via its DCS, or `pgha` via its
 BSD-native quorum mechanism).
 
 In operator messages and incident reports, always qualify the role:
-**local crypto master**, **application primary**, or **database leader**.
+**local custody leader**, **application primary**, or **database leader**.
 Bare “master” and “primary” are ambiguous.
 
-**Process-worker replacement.** Local crypto-master election reacts on the
-short heartbeat timeout. Separately, the maintenance reaper removes a
+**Process-worker replacement.** In embedded mode, local custody-leader election
+reacts on the short heartbeat timeout. Separated custody uses its dedicated
+supervisor and spare-share replacement. Separately, the maintenance reaper removes a
 `vault_workers` row after five minutes without a heartbeat. If that process
 later resumes, its next heartbeat cannot update the removed row: it immediately
 closes its process-local crypto state and sends itself `SIGTERM`. The configured
@@ -88,8 +89,8 @@ flowchart TB
         pg["PostgreSQL database leader + replicas<br/>stable write endpoint / VIP"]
     end
     subgraph APP["App HA (rhorizon containers)"]
-        A["Container A - application primary<br/>1 local crypto master + N followers"]
-        B["Container B - application secondary<br/>1 local crypto master + N followers"]
+        A["Container A - application primary<br/>local custody quorum + API workers"]
+        B["Container B - application secondary<br/>local custody quorum + API workers"]
         A <-->|"HA coordination<br/>advisory locks + heartbeats"| B
     end
     A -->|RH_DATABASE_URL = write endpoint| pg
@@ -117,11 +118,62 @@ flowchart TB
 | `RH_TLS_ENABLED=true` | all nodes | required unless an external TLS proxy fronts the API |
 | `RH_HA_AUTO_JOIN=true` | joiners | auto-JOIN at container start |
 | `RH_HA_PRIMARY_URL` | all nodes | reachable member used for certificate refresh; the initializer may use its own URL |
+| `RH_HA_SERVER_CA_FILE` | all nodes using private HTTPS PKI | CA/leaf pin used to verify the primary URL; empty uses the platform public trust store |
+| `RH_CLUSTER_SERVER_CERT_MANAGED` | custom native deployments only | opt in only when the API owns writable HTTPS cert/key paths and a working nginx reload command; bundled Compose/Helm keep this false |
 | `RH_HA_PASSWORD_FILE` | joiners | path to the **raw 32-byte** ha_password (not base64) |
 | `RH_HA_BOOTSTRAP_VAULT_URL` | joiners | defaults to `RH_HA_PRIMARY_URL` |
 
 The cluster layer stays off until `ha_enabled=true` in `vault_cluster_config`
 (the migration default is off, so non-HA deployments are unaffected).
+
+### Supported deployment contracts
+
+HA is not enabled by merely increasing a replica count. Every node needs a
+stable address, persistent `/var/lib/rhorizon`, HTTPS, an explicit trusted
+proxy boundary and a unique node certificate.
+
+| Installation | What Horizon configures | What the operator supplies |
+|---|---|---|
+| Native installer with nginx | persistent identity, HTTPS listener, loopback-only forwarded-certificate trust | stable node address, shared database endpoint and HA bootstrap password |
+| Docker/Podman Compose | named identity volume, private bridge addresses, HTTPS/mTLS follows `RH_CLUSTER_HA_ENABLED` | stable host address, TLS files and the one-time JOIN overlay `tools/docker-compose.ha-join.yml` |
+| Helm | API StatefulSet, one PVC per Pod, Pod IP advertisement, HTTPS/mTLS listener and NetworkPolicy paths | TLS Secret, frontend Pod CIDR, stable HTTPS service URL and one-time HA password Secret |
+
+The application refuses to report a production-ready preflight when one of
+these properties is only assumed. `RH_CLUSTER_IDENTITY_PERSISTENT=true` is a
+deployment declaration; the real volume/PVC remains the operator's
+responsibility.
+
+Node mTLS certificates and the frontend HTTPS certificate have different
+owners. Horizon always issues and renews the per-node mTLS identity. Compose,
+Helm and the native installer keep their already-configured HTTPS certificate
+under deployment control, so a read-only Kubernetes Secret or host bind is
+never treated as writable. A custom native deployment may opt into Horizon
+server-certificate rotation only when it provides writable
+`RH_CLUSTER_SERVER_CERT_PATH`, `RH_CLUSTER_SERVER_CERT_KEY_PATH` and a tested
+`RH_CLUSTER_NGINX_RELOAD_CMD`.
+
+For a Docker/Podman installation created by `tools/install.sh`, edit its
+generated `.env` on every host:
+
+```ini
+RH_CLUSTER_HA_ENABLED=true
+RH_CLUSTER_ADVERTISE_IP=10.0.0.1
+RH_HA_PRIMARY_URL=https://vault.internal:8443
+RH_HA_SERVER_CA_FILE=/ha-server-certs/cert.pem
+```
+
+The primary starts normally and is initialized once. A secondary performs its
+first JOIN with the installed one-time overlay:
+
+```bash
+export RH_HA_PASSWORD_HOST_FILE=/run/secrets/rhorizon/ha-password
+docker compose -f docker-compose.yml -f docker-compose.ha-join.yml \
+  --env-file .env up -d
+```
+
+After its certificate is persisted, start it again without the overlay and
+securely remove the raw password file. The installer preserves the HA fields
+on upgrades; it never stores the bootstrap password in `.env`.
 
 ## Options
 
@@ -136,7 +188,31 @@ Runtime settings (`RH_` environment prefix; defaults shown):
 | `cluster_joining_orphan_ttl_secs` | 90 | delete rows stuck in `joining`; never below quarantine plus the slower state/reaper poll |
 | `cluster_drain_deadline_secs` | 30 (5-600) | grace before a draining node is evicted |
 | `cluster_primary_lease_ttl_secs` | 20 (5-3600) | autonomous-failover lease; must be at least 3x heartbeat |
+| `cluster_frozen_max_secs` | 30 (20-86400) | grace spent `FROZEN` and non-serving before sealing and dropping keys |
 | `cluster_auto_promote_cooldown_secs` | 20 | hold a just-demoted node out of the election pool for at least one lease; 0 disables |
+
+`FROZEN` is not a period in which the node continues serving. After the last
+PostgreSQL confirmation, the node rejects requests when the lease expires (20s
+by default), retains its keys for the configured grace, then seals. An isolated
+node therefore seals after approximately
+`cluster_primary_lease_ttl_secs + cluster_frozen_max_secs`.
+
+Recommended `RH_CLUSTER_FROZEN_MAX_SECS` profiles:
+
+| Deployment | FROZEN grace before seal |
+|---|---:|
+| same datacenter / same LAN | 20-30s (`30` default) |
+| multi-site, same region | 45-60s |
+| multi-region | 90-120s |
+
+Use the upper bound when measured PostgreSQL, VIP or routing failover already
+approaches the lower bound. mTLS peers that prove a shared database outage may
+extend key retention, but can never return the node to service, up to the
+bounded ceiling of three times this grace. Without peer evidence, the table
+value is the effective limit.
+
+Set `RH_CLUSTER_FROZEN_MAX_SECS` explicitly before a multi-site rollout. If it
+is unset, the 30s same-LAN default applies when the service starts.
 
 ## Commands
 
@@ -146,6 +222,7 @@ CLI:
 rhorizon cluster init --cluster-name <name> --save-ha-password ./ha_password.b64
 rhorizon cluster status                 # members, ha_state, heartbeats, cert expiry
 rhorizon cluster health                 # app + node + database + Database HA
+rhorizon cluster preflight              # configuration + health + live HTTPS/mTLS proof
 rhorizon cluster join --timeout 60      # poll a joiner until it has an ha_state
 ```
 
@@ -172,25 +249,28 @@ API (all under `/api/v1/vault/cluster/`):
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `init` | `admin:w` (once) | mint `cluster_id` + `ha_password` + cluster CA (atomic) |
+| POST | `init` | `cluster:w` (once) | mint `cluster_id` + `ha_password` + cluster CA (atomic) |
 | POST | `challenge` | rate-limited | JOIN step 1: server nonce bound to (node_uuid, source_ip), 30s TTL |
 | POST | `join` | HMAC (first) / mTLS (rejoin) | JOIN step 2: proof + per-node cert mint |
-| GET | `ha` | `admin:r` | members, `ha_state`, quarantine timers, heartbeats, conflicts |
+| GET | `ha` | `cluster:r` | members, `ha_state`, quarantine timers, heartbeats, conflicts |
 | GET | `ha/self` | any bearer | a joiner polls its own state transition |
-| POST | `promote/{uuid}` | `admin:w` | force `secondary -> primary` |
-| POST | `demote/{uuid}` | `admin:w` | force application `primary -> secondary` (do this before drain/evict of an application primary) |
-| POST | `drain/{uuid}` | `admin:w` | graceful removal (finish in-flight, then evict) |
-| POST | `evict/{uuid}` | `admin:w` | immediate removal + revoke `node_uuid` |
-| POST | `unrevoke/{uuid}` | `admin:w` | undo an eviction's revoke (does not re-add the node) |
+| POST | `promote/{uuid}` | `cluster:w` | force `secondary -> primary` |
+| POST | `demote/{uuid}` | `cluster:w` | force application `primary -> secondary` (do this before drain/evict of an application primary) |
+| POST | `drain/{uuid}` | `cluster:w` | graceful removal (finish in-flight, then evict) |
+| POST | `evict/{uuid}` | `cluster:w` | immediate removal + revoke `node_uuid` |
+| POST | `unrevoke/{uuid}` | `cluster:w` | undo an eviction's revoke (does not re-add the node) |
 | POST | `rotate-ha-password/{stage,confirm,cancel}` | `admin:w` | rotate the bootstrap secret (certs untouched) |
 | POST | `refresh-cert` | mTLS | node self-renews **its own** cert (cert CN is the sole target) |
 | POST | `rotate-cert/{node_uuid\|all}` | `admin:w` | operator force-renew: flips `force_renew_at`, the node's renewal loop then calls `refresh-cert` |
-| GET | `ca-bundle` | `admin:r` | cluster CA cert PEM + SHA-256 fingerprint (public material only) |
+| GET | `ca-bundle` | `cluster:r` | cluster CA cert PEM + SHA-256 fingerprint (public material only) |
 | POST | `rotate-ca` | `admin:w` | mint a fresh cluster CA, previous kept for a grace window |
 | POST | `issue-server-cert` | `admin:w` | mint a CA-signed nginx server cert |
-| GET | `ha/membership/{node_uuid}` | `admin:r` | single-node membership lookup |
-| GET | `health` | `admin:r` | end-to-end readiness (app + node + database + Database HA) |
-| POST | `repair` | `admin:w` | operator repair path for inconsistent cluster state |
+| GET | `ha/membership/{node_uuid}` | none | minimal public lookup used only to resolve JOIN retries |
+| GET | `health` | `cluster:r` | end-to-end readiness (app + node + database + Database HA) |
+| GET | `preflight?live=false` | `cluster:r` | bounded readiness checklist with stable IDs, reasons and remediations |
+| GET | `preflight?live=true` | `cluster:r` | the same checklist plus a real node-cert -> HTTPS frontend -> API mTLS probe |
+| GET | `mtls-self` | mTLS | minimal identity endpoint used only by the live probe |
+| POST | `repair` | `cluster:w` | operator repair path for inconsistent cluster state |
 
 Metrics: `rhorizon_cluster_state_transitions_total`,
 `rhorizon_cluster_join_attempts_total{outcome}`,
@@ -227,6 +307,16 @@ Metrics: `rhorizon_cluster_state_transitions_total`,
 5. **Hygiene**: remove the `ha_password` secret once joiners hold their certs
    (steady-state mTLS does not use it), save the `ca_fingerprint` somewhere
    operators can compare, and run one rotation drill before production traffic.
+
+6. **Prove the deployment**, do not infer it from green containers:
+
+   ```bash
+   rhorizon cluster preflight
+   ```
+
+   The command exits `2` while a blocking check fails. The Web UI shows the
+   same check IDs and remediations. MCP receives the bounded, topology-free
+   projection and never triggers the live network probe.
 
 ## Troubleshooting
 

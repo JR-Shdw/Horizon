@@ -31,7 +31,7 @@ inside the token's trust boundary.
    ```
    `setup.sh` auto-installs it this way if `pipx` is available. Or set
    `RH_MCP_BIN` to any `rhorizon-mcp-server` binary. See
-   `../server/README.md`.
+   `README.md`.
 2. **An admin token** with `tokens:rw` over the namespaces you want to expose
    (used *only* by `setup.sh` to mint the scoped read-only token; never stored).
 
@@ -71,6 +71,11 @@ codex mcp add rhorizon-vault \
 ```
 
 Restart Codex after adding the server so its tools are loaded into the session.
+
+With a token carrying `cluster:r`, the policy may also allow
+`vault_cluster_health` and `vault_cluster_preflight`. The latter returns stable
+HA check IDs, reasons and remediations without topology and always uses
+`live=false`. Run `rhorizon cluster preflight` for an active HTTPS/mTLS proof.
 
 **opencode**: merge `opencode.json`'s `mcp` block into
 `~/.config/opencode/opencode.json`, replacing `/home/YOU/...` with absolute

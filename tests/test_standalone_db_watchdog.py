@@ -175,14 +175,16 @@ async def test_past_the_seal_point_a_node_cannot_serve_even_with_no_loop(monkeyp
 
 
 def test_ha_and_standalone_thresholds_are_tuned_opposite_ways():
-    """HA biases availability, standalone biases data protection.
+    """Standalone freezes first; redundant HA can seal an isolated node first.
 
-    Not cosmetic: they encode different evidence. If standalone ever seals
-    later than HA does, the reasoning has been inverted somewhere.
+    Standalone treats loss of its local database as stronger evidence, but its
+    only recovery path is local and deserves enough grace for a service
+    restart. HA has serving peers, so retaining keys on an isolated node for
+    longer does not buy availability.
     """
     s = Settings()
     assert s.standalone_db_freeze_secs < s.cluster_primary_lease_ttl_secs
-    assert s.standalone_db_seal_secs < s.cluster_frozen_max_secs
+    assert s.cluster_frozen_max_secs < s.standalone_db_seal_secs
 
 
 @pytest.mark.asyncio

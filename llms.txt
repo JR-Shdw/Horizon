@@ -1,8 +1,28 @@
 # Resurgamus Horizon
 
-> Open-source, self-hosted secrets vault for people, automation and MCP agents.
-> Horizon encrypts secrets at rest, issues scoped and auditable credentials,
-> and supports single-host and high-availability deployments.
+> Lightweight open-source self-hosted secrets manager and vault for automation,
+> CI/CD and AI/MCP agents. Horizon encrypts secrets at rest, issues scoped and
+> auditable credentials, and runs single-node or highly available.
+
+Also described as: secrets manager, secrets management, self-hosted vault,
+AI vault, MCP vault.
+
+What it is:
+
+- AGPL-3.0-or-later, with a commercial license available
+- complete public feature set, no Enterprise feature gates
+- no SaaS dependency, no telemetry, no lock-in
+- lightweight: one API container plus PostgreSQL, no external coordinator
+- native MCP server and MCP Hub, so an agent can use a credential it may
+  never read
+- scoped, auditable, revocable credentials
+- dynamic secrets (PostgreSQL, MySQL, LDAP) and a built-in PKI engine
+- quantum-resistant posture: X25519MLKEM768 TLS key exchange (FIPS 203) and
+  optional ML-DSA-65 certificates (FIPS 204)
+- single-node and high-availability deployments
+- Docker, Podman, Kubernetes, Linux, macOS and BSD (FreeBSD, OpenBSD, NetBSD);
+  see the compatibility matrix for what is tested on each
+- SLSA Build L1 provenance, Cosign signatures and CycloneDX SBOM
 
 Canonical public source: https://github.com/JR-Shdw/Horizon
 License: AGPL-3.0-or-later

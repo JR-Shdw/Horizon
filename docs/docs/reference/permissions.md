@@ -42,7 +42,8 @@ grants `r` everywhere (a read-only operator, useful for monitoring), and
 automation.** Use a narrow scope per service.
 
 `cluster` exists so that checking HA health does not require `admin`. A
-`{"cluster": "r"}` token reads `/cluster`, `/cluster/health`, `/cluster/ha`
+`{"cluster": "r"}` token reads `/cluster`, `/cluster/health`,
+`/cluster/preflight`, `/cluster/ha`
 and the CA bundle - enough for a dashboard, an on-call human, or an LLM agent
 - and can do nothing else. `cluster:w` adds node lifecycle operations.
 

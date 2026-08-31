@@ -483,59 +483,19 @@ window._deleteSsoMapping = async function (key) {
 // Two parallel concerns surfaced under the same tab :
 //
 // - (cluster_id / primary_uuid / per-node certs), multi-host
-//     membership of the cluster CA. Source : GET /cluster/ha (admin:r).
+//     membership of the cluster CA. Source : GET /cluster/ha (cluster:r).
 //     Operator action : POST /cluster/rotate-cert/{node_uuid|all}.
 //
 // - (workers grouped by host + advisory locks), intra-host
 //     master/follower topology of the rhorizon API processes. Source :
-//     GET /cluster (admin:r). Pre-existing.
+//     GET /cluster (cluster:r). Pre-existing.
 //
 // GET /cluster/health adds the provider-neutral database HA and replication
-// view (Patroni on Linux, pgha on BSD). All three are admin:r ; each section
-// gracefully degrades if its call fails. Auto-refresh every 5s while the HA
-// tab is active.
-
-async function _renderHaTab() {
-  // Fetch all endpoints in parallel ; failures are tolerated per-section
-  // so a non-initialised cluster still renders.
-  const [haRes, topoRes, healthRes] = await Promise.allSettled([
-    api('GET', '/cluster/ha'),
-    api('GET', '/cluster'),
-    api('GET', '/cluster/health'),
-  ]);
-
-  if (window._clusterTopologyTimer) clearInterval(window._clusterTopologyTimer);
-  window._clusterTopologyTimer = setInterval(async () => {
-    const slot = document.getElementById('cluster-ha-section');
-    if (!slot || _clusterTab !== 'ha') {
-      clearInterval(window._clusterTopologyTimer);
-      window._clusterTopologyTimer = null;
-      return;
-    }
-    try {
-      const [ha2, topo2, health2] = await Promise.allSettled([
-        api('GET', '/cluster/ha'),
-        api('GET', '/cluster'),
-        api('GET', '/cluster/health'),
-      ]);
-      // outerHTML detaches `slot`, so re-query to restore onto the new nodes.
-      const scroll = captureTableScroll(slot);
-      slot.outerHTML = renderHaDashboard(ha2, topo2, health2);
-      restoreTableScroll(document.getElementById('cluster-ha-section'), scroll);
-    } catch (_) { /* keep last successful render */ }
-  }, 5000);
-
-  return renderHaDashboard(haRes, topoRes, healthRes);
-}
-
-function renderHaDashboard(haRes, topoRes, healthRes) {
-  let h = '<div id="cluster-ha-section">';
-  h += renderMembershipSection(haRes);
-  h += renderDatabaseHaSection(healthRes);
-  h += renderTopologySection(topoRes);
-  h += '</div>';
-  return h;
-}
+// view (Patroni on Linux, pgha on BSD). All reads require cluster:r (admin:r
+// also covers it); each section gracefully degrades if its call fails.
+// Auto-refresh every 5s while the HA
+// tab is active. The request/refresh lifecycle and production preflight live
+// in cluster-ha.js; this file keeps the cohesive HA renderers and actions.
 
 // ----------------------------------------------------------------------------
 // cluster identity + per-node cert lifecycle + force-rotate
@@ -547,7 +507,7 @@ function renderMembershipSection(haRes) {
   if (haRes.status === 'rejected') {
     const err = haRes.reason || {};
     if (err.status === 403) {
-      return h + '<div class="empty small">Cluster membership requires <code>admin:r</code> on your token.</div>';
+      return h + '<div class="empty small">Cluster membership requires <code>cluster:r</code> (or <code>admin:r</code>) on your token.</div>';
     }
     if (err.status === 409) {
       // cluster_not_initialised, has not been bootstrapped yet.
@@ -709,7 +669,7 @@ function renderDatabaseHaSection(healthRes) {
   if (healthRes.status === 'rejected') {
     const err = healthRes.reason || {};
     if (err.status === 403) {
-      return h + '<div class="empty small">Database HA health requires <code>admin:r</code> on your token.</div>';
+      return h + '<div class="empty small">Database HA health requires <code>cluster:r</code> (or <code>admin:r</code>) on your token.</div>';
     }
     return h + `<div class="error small">${esc(err.message || 'Failed to load /cluster/health')}</div>`;
   }
@@ -848,16 +808,16 @@ function _renderReplicaTable(dbha) {
 }
 
 // ----------------------------------------------------------------------------
-// worker topology grouped by host + advisory locks
+// worker/custodian topology grouped by host + advisory locks
 // ----------------------------------------------------------------------------
 
 function renderTopologySection(topoRes) {
-  let h = '<h4 class="section-subtitle">Worker Topology &amp; Local Crypto Masters</h4>';
+  let h = '<h4 class="section-subtitle">Worker Topology &amp; Local Custody Leaders</h4>';
 
   if (topoRes.status === 'rejected') {
     const err = topoRes.reason || {};
     if (err.status === 403) {
-      return h + '<div class="empty small">Worker topology requires <code>admin:r</code> on your token.</div>';
+      return h + '<div class="empty small">Worker topology requires <code>cluster:r</code> (or <code>admin:r</code>) on your token.</div>';
     }
     return h + `<div class="error small">${esc(err.message || 'Failed to load /cluster')}</div>`;
   }
@@ -882,16 +842,16 @@ function renderTopologySection(topoRes) {
         </div>
         <div class="cluster-host-master">
           ${host.master
-            ? `<span class="tag ${isMasterStale ? 'tag-warn bad' : 'tag-ok good'}">LOCAL CRYPTO MASTER</span>
+            ? `<span class="tag ${isMasterStale ? 'tag-warn bad' : 'tag-ok good'}">LOCAL CUSTODY LEADER</span>
                <span class="muted">pid ${host.master.pid} · heartbeat ${masterAge}s ago</span>`
-            : '<span class="tag tag-warn bad">NO LOCAL CRYPTO MASTER</span>'}
+            : '<span class="tag tag-warn bad">NO LOCAL CUSTODY LEADER</span>'}
         </div>
         <div class="cluster-host-followers">`;
       for (const f of (host.followers || [])) {
         const ageStale = f.age_sec > 5;
         h += `<div class="cluster-follower">
-          <span class="tag tag-muted">${esc(f.role)}</span>
-          <span class="muted">pid ${f.pid} · ${esc(f.status)} · ${ageStale ? '<span class="warn">' : ''}${f.age_sec.toFixed(1)}s${ageStale ? '</span>' : ''}</span>
+          <span class="tag tag-muted">${esc(f.process_role || 'worker')}</span>
+          <span class="muted">pid ${f.pid} · ${esc(f.worker_state || 'unknown')} · ${ageStale ? '<span class="warn">' : ''}${f.age_sec.toFixed(1)}s${ageStale ? '</span>' : ''}</span>
         </div>`;
       }
       if (!(host.followers || []).length) {

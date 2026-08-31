@@ -34,7 +34,7 @@ Dependencies are minimal: `typer` (commands), `httpx` (HTTP client),
 
 ```bash
 rhorizon login http://10.0.0.20:8200
-# Connected to rhorizon 0.9.2-beta (sealed=False)
+# Connected to rhorizon 0.9.4-beta (sealed=False)
 # Token (rh_...): ********
 # Token saved.
 ```
@@ -68,7 +68,7 @@ Environment overrides (useful for CI / scripts):
 ```bash
 rhorizon status
 # Status:   UNSEALED
-# Version:  0.9.2-beta
+# Version:  0.9.4-beta
 # Uptime:   10h27m
 # 2FA:      none
 
@@ -641,13 +641,15 @@ ordinary operation to resume.
 
 For HA deployments. `rhorizon cluster status` is the read-only state
 view - a debug utility, not a control panel - showing membership and
-certificate lifecycle (`admin:r`).
+certificate lifecycle (`cluster:r`, or `admin:r`).
 
 ```bash
 rhorizon cluster status          # compact table (see below)
 rhorizon cluster status --json   # full /cluster/ha payload
 rhorizon cluster health          # live end-to-end component health
 rhorizon cluster health --json   # provider, leader, replicas, lag and evidence
+rhorizon cluster preflight       # HA checks plus active HTTPS/mTLS path
+rhorizon cluster preflight --no-live --json  # passive structured observation
 ```
 
 ```text
@@ -681,7 +683,7 @@ the provider-specific evidence: leader count/identity where available,
 members, streaming state, replica lag, and timelines. Patroni supplies the
 verified leader count but not its member identity; `pgha` also supplies leader
 identity, agent freshness, quorum, and write-VIP ownership. The three distinct
-terms are **local crypto master**, **application primary**, and **database
+terms are **local custody leader**, **application primary**, and **database
 leader**.
 
 Lifecycle verbs (operator actions, not inspection):
@@ -696,6 +698,8 @@ rhorizon cluster rotate-cert --all   # / rotate-ca / ca-bundle
 The Web UI under **Cluster -> HA** combines that membership view with local
 worker topology, held cluster locks, certificate lifecycle, and the normalized
 Database HA evidence. Its dots use the same state contract as the CLI.
+The preflight view also gives one remediation per failed check. Its live mTLS
+button traverses the real HTTPS frontend; the dashboard does not replace K7.
 
 ---
 

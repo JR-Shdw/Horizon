@@ -1,4 +1,4 @@
-.PHONY: help up down build restart logs ps lint lint-fix test test-cov db-shell db-dump db-restore secrets laptop laptop-native rust-check rust-check-fast rust-test rust-wheel-install fuzz-smoke fuzz-list gf-ct-check arm64-native-check deps deps-lock deps-audit watch verify-local test-matrix k8s-test native-smoke custody-smoke k8s-e2e retest lab-cleanup chaos-k7-init chaos-k7-check chaos-k7-preflight chaos-k7-24h chaos-k7-24h-detached chaos-k7-24h-high chaos-k7-24h-high-detached chaos-k7-status
+.PHONY: help up down build restart logs ps lint lint-fix test test-cov db-shell db-dump db-restore secrets laptop laptop-native rust-check rust-check-fast rust-test rust-wheel-install fuzz-smoke fuzz-list gf-ct-check arm64-native-check deps deps-lock deps-audit watch verify-local test-matrix test-native-install-matrix test-native-install-migration k8s-test native-smoke custody-smoke k8s-e2e k8s-ha-e2e retest lab-cleanup chaos-k7-init chaos-k7-check chaos-k7-preflight chaos-k7-24h chaos-k7-24h-detached chaos-k7-24h-high chaos-k7-24h-high-detached chaos-k7-status mcp-proxy-e2e mcp-proxy-e2e-init mcp-proxy-e2e-check
 
 # Test-PG host port. 5434 collides with forgejo's PG on some dev hosts, so the
 # local test DB defaults to 55434. docker-compose.test.yml reads the same var.
@@ -10,6 +10,7 @@ export RH_TEST_PG_PORT
 PYTEST ?= $(if $(wildcard .venv/bin/pytest),.venv/bin/pytest,pytest)
 
 CHAOS_K7_ENV ?= tools/chaos/k7.env
+MCP_E2E_ENV ?= mcp-lab/proxy-e2e.env
 CHAOS_K7_PROFILE ?= medium
 
 # Aide
@@ -100,7 +101,8 @@ rust-test: ## Tests Rust uniquement (`cargo test` direct marche aussi ; le flag 
 	cd api/rust && cargo test --release --locked --no-default-features
 
 rust-test-asan: ## Rust tests sous AddressSanitizer (nightly) -- couvre les paths FFI/socket que miri ne peut PAS atteindre (#[cfg_attr(miri, ignore)])
-	cd api/rust && ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 RUSTFLAGS="-Zsanitizer=address" \
+	cd api/rust && ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+		RUSTFLAGS="-Zsanitizer=address -C llvm-args=-asan-force-dynamic-shadow" \
 		cargo +nightly test --release --no-default-features --target x86_64-unknown-linux-gnu -- --test-threads=1
 
 rust-wheel-install: ## Installe le wheel rhorizon_crypto pre-build dans .venv (skip maturin / rustup)
@@ -163,15 +165,56 @@ custody-smoke: ## e2e: fixed custodian quorum survives disposable API worker rep
 k8s-e2e: ## e2e: build+load images -> helm install -> unseal -> assert cluster on k3d (RH_E2E_DB=inchart|patroni)
 	tools/k8s-e2e.sh
 
-retest: ## Post-major-change e2e suite (native smoke + k8s deploy e2e). CI calls this. Exit-2 tiers skip cleanly.
-	@$(MAKE) native-smoke || { rc=$$?; [ $$rc -eq 2 ] && echo "[retest] native smoke skipped (no container runtime)" || exit $$rc; }
-	@$(MAKE) custody-smoke || { rc=$$?; [ $$rc -eq 2 ] && echo "[retest] custody smoke skipped (no container runtime)" || exit $$rc; }
-	@$(MAKE) k8s-e2e      || { rc=$$?; [ $$rc -eq 2 ] && echo "[retest] k8s e2e skipped (no Docker API)"        || exit $$rc; }
+k8s-ha-e2e: ## e2e HA Kubernetes: bootstrap, JOIN 3 Pods, mTLS, restart and failover
+	RH_E2E_HA=1 RH_E2E_CLUSTER=rh-ha-e2e tools/k8s-e2e.sh
+
+mcp-proxy-e2e-init: ## Create mcp-lab/proxy-e2e.env from the example template
+	@test -f "$(MCP_E2E_ENV)" && { echo "[mcp-e2e] $(MCP_E2E_ENV) already exists"; exit 0; } || true
+	@cp mcp-lab/proxy-e2e.env.example "$(MCP_E2E_ENV)"
+	@chmod 600 "$(MCP_E2E_ENV)"
+	@echo "[mcp-e2e] wrote $(MCP_E2E_ENV) -- set RH_URL and RH_TOKEN_FILE, then: make mcp-proxy-e2e"
+
+mcp-proxy-e2e-check: ## Validate the credential-proxy e2e config without running it
+	@test -f "$(MCP_E2E_ENV)" || { echo "[mcp-e2e] missing $(MCP_E2E_ENV); run: make mcp-proxy-e2e-init"; exit 2; }
+	@bash -lc 'set -a; source "$(MCP_E2E_ENV)"; set +a; \
+	  missing=0; \
+	  [[ -n "$${RH_URL:-}" ]] || { echo "[mcp-e2e] missing RH_URL"; missing=1; }; \
+	  if [[ -z "$${RH_TOKEN_FILE:-}" && -z "$${RH_TOKEN:-}" ]]; then \
+	    echo "[mcp-e2e] missing RH_TOKEN_FILE or RH_TOKEN"; missing=1; \
+	  fi; \
+	  if [[ -n "$${RH_TOKEN_FILE:-}" ]]; then \
+	    f=$$(eval echo "$${RH_TOKEN_FILE}"); \
+	    [[ -r "$$f" ]] || { echo "[mcp-e2e] unreadable RH_TOKEN_FILE=$$f"; missing=1; }; \
+	  fi; \
+	  if [[ -n "$${RH_CA_FILE:-}" ]]; then \
+	    f=$$(eval echo "$${RH_CA_FILE}"); \
+	    [[ -r "$$f" ]] || { echo "[mcp-e2e] unreadable RH_CA_FILE=$$f"; missing=1; }; \
+	  fi; \
+	  exit $$missing'
+	@echo "[mcp-e2e] check passed"
+
+mcp-proxy-e2e: mcp-proxy-e2e-check ## e2e: agent -> hub daemon -> sidecar -> vault -> API, credential never disclosed. Standalone or HA (RH_E2E_NODE_URLS). Exit 2 = not configured.
+	@cd agent/rust && cargo build --quiet --bin rh-mcp-gateway
+	@bash -lc 'set -a; source "$(MCP_E2E_ENV)"; set +a; \
+	  export RH_MCP_GATEWAY_BIN="$${RH_MCP_GATEWAY_BIN:-$(CURDIR)/agent/rust/target/debug/rh-mcp-gateway}"; \
+	  export RH_TOKEN_FILE=$$(eval echo "$${RH_TOKEN_FILE:-}"); \
+	  export RH_CA_FILE=$$(eval echo "$${RH_CA_FILE:-}"); \
+	  exec python3 mcp-lab/tests/proxy_e2e.py'
+
+retest: ## Local post-major-change e2e suite; unavailable runtimes skip cleanly
+	@tools/native-cluster-smoke.sh || { rc=$$?; [ $$rc -eq 2 ] && echo "[retest] native smoke skipped (no container runtime)" || exit $$rc; }
+	@tools/custody-smoke.sh || { rc=$$?; [ $$rc -eq 2 ] && echo "[retest] custody smoke skipped (no container runtime)" || exit $$rc; }
+	@tools/k8s-e2e.sh || { rc=$$?; [ $$rc -eq 2 ] && echo "[retest] k8s e2e skipped (no Docker API)" || exit $$rc; }
+	@if [ ! -f "$(MCP_E2E_ENV)" ]; then \
+	  echo "[retest] mcp proxy e2e skipped (no target configured)"; \
+	  else $(MAKE) mcp-proxy-e2e; fi
 
 lab-cleanup: ## Remove stray LOCAL test artifacts (test PG containers, k3d clusters, smoke/VM work dirs). Run when no test is in flight.
 	-docker rm -f rhorizon-test-pg rhorizon-smoke-pg 2>/dev/null
 	-docker compose -f docker-compose.test.yml down -v 2>/dev/null
 	-if command -v k3d >/dev/null 2>&1; then k3d cluster delete rh-e2e rh-test 2>/dev/null; fi
+	-pkill -f 'rh-mcp-gateway' 2>/dev/null
+	-pkill -f 'rhorizon_mcp_hub/hub.py --daemon' 2>/dev/null
 	-rm -rf /tmp/rh-native-smoke.* /tmp/rh-custody-smoke.* /tmp/rhorizon-vmtest-* 2>/dev/null
 	@echo "[lab-cleanup] removed test PG containers, k3d clusters (rh-e2e/rh-test), smoke/VM work dirs"
 	@echo "[lab-cleanup] proxmox VMs + the rhorizon_ha lab are managed separately (tofu / rhorizon_ha repo)"
@@ -185,10 +228,29 @@ test-matrix: ## T2 (slow): OS VM matrix (8 OSes incl. NetBSD) + native + k8s dep
 	  w=0; while ss -ltn 2>/dev/null | grep -qE ":$$sp |:$$pp " && [ $$w -lt 30 ]; do echo "[matrix] waiting for ports $$sp/$$pp to free..."; sleep 2; w=$$((w+2)); done; \
 	  if SSH_PORT=$$sp PG_PORT=$$pp tools/test-vm.sh $$os; then echo "[matrix] $$os PASS"; rm -rf /tmp/rhorizon-vmtest-$$os; else echo "[matrix] $$os FAIL (logs: /tmp/rhorizon-vmtest-$$os)"; fail="$$fail $$os"; fi; \
 	done; \
+	if $(MAKE) test-native-install-matrix SSH_PORT=$$((sshb+20)) PG_PORT=$$((pgb+20)); then echo "[matrix] native-install PASS"; else echo "[matrix] native-install FAIL"; fail="$$fail native-install"; fi; \
 	if $(MAKE) retest; then echo "[matrix] cluster-e2e PASS"; else echo "[matrix] cluster-e2e FAIL"; fail="$$fail cluster-e2e"; fi; \
 	echo "[matrix] cluster logic also in make test ; full multi-node HA = rhorizon_ha (make reverify)"; \
 	if [ -n "$$fail" ]; then echo "[matrix] FAILED:$$fail"; exit 1; fi; \
-	echo "[matrix] ALL GREEN (8 OSes + cluster e2e)"
+	echo "[matrix] ALL GREEN (8 OSes + native installer + cluster e2e)"
+
+test-native-install-matrix: ## Native system installer: Debian + FreeBSD + NetBSD + OpenBSD identity/memlock assertions.
+	@sshb=$${SSH_PORT:-2260}; pgb=$${PG_PORT:-55660}; i=0; fail=""; \
+	for os in debian freebsd netbsd openbsd; do \
+	  i=$$((i+1)); sp=$$((sshb+i)); pp=$$((pgb+i)); \
+	  echo "=== native system $$os (ssh $$sp / pg $$pp) ==="; \
+	  if RH_NATIVE=1 RH_INSTALL_MODE=system SSH_PORT=$$sp PG_PORT=$$pp tools/test-vm.sh $$os; then \
+	    echo "[native-install] $$os PASS"; \
+	  else \
+	    echo "[native-install] $$os FAIL (logs: /tmp/rhorizon-vmtest-$$os)"; fail="$$fail $$os"; \
+	  fi; \
+	done; \
+	if [ -n "$$fail" ]; then echo "[native-install] FAILED:$$fail"; exit 1; fi; \
+	echo "[native-install] ALL GREEN"
+
+test-native-install-migration: ## Upgrade the last root-service native install to the dedicated service identity.
+	@RH_NATIVE=1 RH_INSTALL_MODE=system RH_NATIVE_MIGRATION=1 \
+	  SSH_PORT=$${SSH_PORT:-2270} PG_PORT=$${PG_PORT:-55670} tools/test-vm.sh debian
 
 # HA chaos lab. These targets intentionally require an operator-provided env
 # file: tokens, node maps, and PVE/docker controls are lab-specific secrets.

@@ -1,0 +1,18 @@
+# One-time JOIN overlay for a Compose HA secondary.
+#
+# RH_HA_PASSWORD_HOST_FILE must point to the raw 32-byte bootstrap password
+# on the host. Remove this overlay and securely delete the file after the node
+# has persisted its mTLS certificate in node_uuid_data.
+services:
+  api:
+    environment:
+      RH_CLUSTER_HA_ENABLED: "true"
+      RH_TLS_ENABLED: "true"
+      RH_HA_AUTO_JOIN: "true"
+      RH_HA_PASSWORD_FILE: /run/secrets/rhorizon/ha-password
+    volumes:
+      - ${RH_HA_PASSWORD_HOST_FILE:?Set RH_HA_PASSWORD_HOST_FILE to the raw HA password file}:/run/secrets/rhorizon/ha-password:ro
+  frontend:
+    environment:
+      TLS_ENABLED: "true"
+      RH_CLUSTER_MTLS: "true"

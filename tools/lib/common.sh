@@ -13,6 +13,198 @@ run() {
     "$@"
 }
 
+# --- service account -----------------------------------------------------
+# The vault must not run as root once it is installed. Installation is
+# privileged by nature; the daemon afterwards is not, and a compromise of a
+# root-run vault is a compromise of the host.
+#
+# Two properties this must NOT break:
+#   * the agent boundary. Recovery material stays root-owned, so an agent under
+#     an ordinary login cannot read it. Handing the whole tree to the service
+#     account would give the daemon its own recovery keys and widen, not narrow.
+#   * an existing install. Adding User= to a unit that has been running as root
+#     leaves files the service can no longer read. Migration is therefore
+#     explicit and SELECTIVE -- never a recursive chown.
+
+RH_SERVICE_USER="${RH_SERVICE_USER:-rhorizon}"
+RH_SERVICE_GROUP="${RH_SERVICE_GROUP:-rhorizon}"
+
+# rh_account_exists NAME : is there such a user?
+rh_account_exists() {
+    if command -v getent >/dev/null 2>&1; then
+        getent passwd "$1" >/dev/null 2>&1
+    else
+        id "$1" >/dev/null 2>&1   # BSDs without getent
+    fi
+}
+
+rh_group_exists() {
+    if command -v getent >/dev/null 2>&1; then
+        getent group "$1" >/dev/null 2>&1
+    else
+        # OpenBSD/NetBSD: no getent(1); the group file is the source of truth.
+        grep -q "^$1:" /etc/group 2>/dev/null
+    fi
+}
+
+# rh_create_service_account : create RH_SERVICE_GROUP + RH_SERVICE_USER as a
+# system account with no login shell and no home. Sets RH_ACCOUNT_READY=1 on
+# success, 0 otherwise -- the caller decides what to do about it, because
+# silently continuing as root while reporting success is the failure mode this
+# whole change exists to remove.
+rh_create_service_account() {
+    RH_ACCOUNT_READY=0
+    _nologin=/usr/sbin/nologin
+    [ -x "$_nologin" ] || _nologin=/sbin/nologin
+    [ -x "$_nologin" ] || _nologin=/bin/false
+
+    if ! rh_group_exists "$RH_SERVICE_GROUP"; then
+        case "$RH_OS" in
+            linux)   run groupadd --system "$RH_SERVICE_GROUP" || return 0 ;;
+            freebsd) run pw groupadd "$RH_SERVICE_GROUP" || return 0 ;;
+            openbsd|netbsd) run groupadd "$RH_SERVICE_GROUP" || return 0 ;;
+            darwin)  rh_darwin_create_group || return 0 ;;
+            *) warn "no account recipe for $RH_OS"; return 0 ;;
+        esac
+    fi
+
+    if ! rh_account_exists "$RH_SERVICE_USER"; then
+        case "$RH_OS" in
+            linux)
+                run useradd --system --gid "$RH_SERVICE_GROUP" \
+                    --home-dir /nonexistent --no-create-home \
+                    --shell "$_nologin" "$RH_SERVICE_USER" || return 0 ;;
+            freebsd)
+                run pw useradd "$RH_SERVICE_USER" -g "$RH_SERVICE_GROUP" \
+                    -d /nonexistent -s "$_nologin" -c "Resurgamus Horizon" || return 0 ;;
+            openbsd)
+                run useradd -g "$RH_SERVICE_GROUP" -d /nonexistent \
+                    -s "$_nologin" -c "Resurgamus Horizon" "$RH_SERVICE_USER" || return 0 ;;
+            netbsd)
+                run useradd -g "$RH_SERVICE_GROUP" -d /nonexistent \
+                    -s "$_nologin" -c "Resurgamus Horizon" "$RH_SERVICE_USER" || return 0 ;;
+            darwin)
+                rh_darwin_create_user "$_nologin" || return 0 ;;
+        esac
+    fi
+
+    if rh_account_exists "$RH_SERVICE_USER"; then
+        RH_ACCOUNT_READY=1
+    elif [ "${DRY_RUN:-0}" = 1 ]; then
+        RH_ACCOUNT_READY=1   # nothing was actually created; report the plan
+    fi
+    return 0
+}
+
+# macOS has no useradd; dscl needs an explicitly chosen id in the service range.
+rh_darwin_create_group() {
+    _gid=$(rh_darwin_free_id _dscl_group)
+    [ -n "$_gid" ] || { warn "no free system gid for $RH_SERVICE_GROUP"; return 1; }
+    run dscl . -create "/Groups/$RH_SERVICE_GROUP" || return 1
+    run dscl . -create "/Groups/$RH_SERVICE_GROUP" PrimaryGroupID "$_gid" || return 1
+    return 0
+}
+
+rh_darwin_create_user() {
+    _shell=$1
+    _uid=$(rh_darwin_free_id _dscl_user)
+    _gid=$(dscl . -read "/Groups/$RH_SERVICE_GROUP" PrimaryGroupID 2>/dev/null | awk '{print $2}')
+    [ -n "$_uid" ] && [ -n "$_gid" ] || { warn "no free system uid/gid on darwin"; return 1; }
+    run dscl . -create "/Users/$RH_SERVICE_USER" || return 1
+    run dscl . -create "/Users/$RH_SERVICE_USER" UserShell "$_shell"
+    run dscl . -create "/Users/$RH_SERVICE_USER" RealName "Resurgamus Horizon"
+    run dscl . -create "/Users/$RH_SERVICE_USER" UniqueID "$_uid"
+    run dscl . -create "/Users/$RH_SERVICE_USER" PrimaryGroupID "$_gid"
+    run dscl . -create "/Users/$RH_SERVICE_USER" NFSHomeDirectory /var/empty
+    run dscl . -create "/Users/$RH_SERVICE_USER" IsHidden 1
+    return 0
+}
+
+# Lowest unused id in the 200-400 system range (Apple reserves <500 for system
+# accounts and ships up to ~99 itself).
+rh_darwin_free_id() {
+    _kind=$1
+    case "$_kind" in
+        _dscl_group) _list=$(dscl . -list /Groups PrimaryGroupID 2>/dev/null | awk '{print $2}') ;;
+        *)           _list=$(dscl . -list /Users UniqueID 2>/dev/null | awk '{print $2}') ;;
+    esac
+    _i=200
+    while [ "$_i" -lt 400 ]; do
+        printf '%s\n' "$_list" | grep -qx "$_i" || { printf '%s' "$_i"; return 0; }
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
+# rh_ensure_service_account : rh_create_service_account, at most once.
+# Called from two places (before the code is grouped to it, and before the
+# runtime paths are handed over) so neither has to assume the other ran.
+RH_ACCOUNT_READY=0
+rh_ensure_service_account() {
+    [ "${_rh_account_attempted:-0}" = 1 ] && return 0
+    _rh_account_attempted=1
+    rh_create_service_account
+}
+
+# rh_require_service_account : make the fallback decision at the first point
+# where a system install needs the account. Waiting until service generation
+# would let most of the install continue under the old root assumptions before
+# finally failing, which hides account-creation errors in a long build log.
+rh_require_service_account() {
+    rh_ensure_service_account
+    [ "${RH_ACCOUNT_READY:-0}" = 1 ] && return 0
+
+    warn "Unable to configure the dedicated $RH_SERVICE_USER service account."
+    warn "  Horizon would keep running as root. That still keeps its"
+    warn "  credentials away from an unprivileged agent, but a compromise of"
+    warn "  the vault would then be a compromise of this host."
+    if [ "${RH_ACCOUNT_FALLBACK_ROOT:-}" = 1 ]; then
+        warn "  RH_ACCOUNT_FALLBACK_ROOT=1 -- continuing as root."
+        return 0
+    fi
+    die "Refusing to continue silently. Create the account by hand, or re-run with RH_ACCOUNT_FALLBACK_ROOT=1 to accept running as root."
+}
+
+# rh_own_runtime_path PATH [MODE] : hand ONE path to the service account.
+# Deliberately not recursive and deliberately per-path: the caller names each
+# thing the daemon needs at runtime, so nothing it does not need can be swept
+# in. Recovery material is never passed here.
+rh_own_runtime_path() {
+    [ "${RH_ACCOUNT_READY:-0}" = 1 ] || return 0
+    if [ "${DRY_RUN:-0}" = 1 ] && [ ! -e "$1" ]; then
+        # The path is created by an earlier run() that a dry run skipped. Report
+        # the intent rather than silently omitting it: a dry run of a privileged
+        # change is the operator's review, so it must not under-report.
+        printf '   [dry-run] chown %s:%s %s%s\n' \
+            "$RH_SERVICE_USER" "$RH_SERVICE_GROUP" "$1" \
+            "${2:+ && chmod $2}"
+        return 0
+    fi
+    [ -e "$1" ] || return 0
+    run chown "$RH_SERVICE_USER:$RH_SERVICE_GROUP" "$1"
+    [ -n "${2:-}" ] && run chmod "$2" "$1"
+    return 0
+}
+
+# rh_own_runtime_tree DIR MODE FILEMODE : the directory itself and its direct
+# file children, one level. Used for state/audit/run directories, whose contents
+# are all runtime artefacts. Still not `chown -R`: a nested secrets/ directory
+# must be passed explicitly or not at all.
+rh_own_runtime_tree() {
+    [ "${RH_ACCOUNT_READY:-0}" = 1 ] || return 0
+    if [ "${DRY_RUN:-0}" = 1 ] && [ ! -d "$1" ]; then
+        rh_own_runtime_path "$1" "$2"
+        return 0
+    fi
+    [ -d "$1" ] || return 0
+    rh_own_runtime_path "$1" "$2"
+    for _f in "$1"/*; do
+        [ -f "$_f" ] || continue
+        rh_own_runtime_path "$_f" "${3:-0600}"
+    done
+    return 0
+}
+
 # --- host detection ------------------------------------------------------
 # Sets RH_OS (linux|freebsd|netbsd|openbsd|darwin), RH_DISTRO (linux only),
 # RH_ARCH (x86_64|arm64|...). RH_DISTRO comes from /etc/os-release ID.
@@ -403,12 +595,13 @@ unseal_vault() {
     [ -f "$_pwf" ] || { warn "master password file not found: $_pwf" >&2; return 1; }
     # Argon2id (256MB, t=3) can exceed 20s on slow/loaded hosts -- give the client
     # room so the root token in the response is not lost to a premature cutoff.
-    # The password is serialised by python3's json module and reaches curl on
+    # The password is serialised by the driver's resolved Python json module
+    # and reaches curl on
     # stdin, so it never lands in argv (/proc, ps) or in the environment.
     # Interpolating it -- -d "{\"password\":\"$_pw\"}" -- produced invalid or
     # silently altered JSON for any password containing a double quote, a
     # backslash or a newline. A vault master password has to be opaque input.
-    _resp=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' < "$_pwf" \
+    _resp=$("${PYBIN:-python3}" -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' < "$_pwf" \
         | _curl_ca "$_ca" -s -m 120 -X POST "$_url/api/v1/vault/unseal" \
             -H 'Content-Type: application/json' --data-binary @-)
     if printf '%s' "$_resp" | grep -q unsealed; then log "vault unsealed" >&2

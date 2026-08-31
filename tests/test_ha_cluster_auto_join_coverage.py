@@ -471,6 +471,7 @@ async def test_attempt_join_happy_path_persists_server_cert_and_reloads_nginx(
     both files, and triggers nginx reload. Cleanup is also fired
     when ``ha_password_storage == 'age_vault'``."""
     monkeypatch.setattr(settings, "ha_password_storage", "age_vault")
+    monkeypatch.setattr(settings, "cluster_server_cert_managed", True)
     monkeypatch.setattr(settings, "ha_primary_url", "https://primary.invalid")
     monkeypatch.setattr(settings, "ha_cluster_id", "")  # use wire value
 
@@ -550,6 +551,55 @@ async def test_attempt_join_happy_path_persists_server_cert_and_reloads_nginx(
     assert len(save_node) == 1 and len(save_server) == 1
     assert reload_calls == ["/bin/true"]
     assert cleanup_calls == [None]  # age_vault cleanup fired
+
+
+@pytest.mark.asyncio
+async def test_attempt_join_skips_deployment_managed_https_key(monkeypatch, tmp_path):
+    """A standard install persists node mTLS only, even if JOIN ships HTTPS."""
+    monkeypatch.setattr(settings, "ha_password_storage", "file")
+    monkeypatch.setattr(settings, "ha_primary_url", "https://primary.invalid")
+    monkeypatch.setattr(settings, "ha_cluster_id", "test-cluster-id")
+    monkeypatch.setattr(settings, "cluster_server_cert_managed", False)
+    password = tmp_path / "ha-password"
+    password.write_bytes(b"k" * 32)
+    monkeypatch.setattr(settings, "ha_password_file", str(password))
+    monkeypatch.setattr(settings, "cluster_cert_path", str(tmp_path / "node.pem"))
+    monkeypatch.setattr(settings, "cluster_cert_key_path", str(tmp_path / "node.key"))
+
+    async def _fake_post(self, url, json=None):
+        if "/challenge" in url:
+            return _Resp(200, payload=_challenge_payload())
+        return _Resp(
+            200,
+            payload={
+                "node_cert_pem": "stub-node-cert",
+                "node_cert_key_wrapped_hex": "ab" * 16,
+                "server_cert_pem": "stub-server-cert",
+                "server_cert_key_wrapped_hex": "cd" * 16,
+                "ha_state": "secondary",
+                "primary_uuid": "primary" * 4,
+            },
+        )
+
+    monkeypatch.setattr(
+        ha_password, "unwrap_node_key_for_joiner", lambda *_: b"stub-node-key"
+    )
+    monkeypatch.setattr(cluster_cert, "save_cluster_cert", lambda *args: None)
+    unwrap_server = patch.object(ha_password, "unwrap_server_key_for_joiner")
+    save_server = patch.object(nginx_reload, "save_server_cert")
+    reload_nginx = patch.object(nginx_reload, "reload_nginx")
+    with (
+        patch("httpx.AsyncClient.post", _fake_post),
+        unwrap_server as unwrap_mock,
+        save_server as save_mock,
+        reload_nginx as reload_mock,
+    ):
+        ok = await cluster_auto_join._attempt_join_once("uuid" * 8)
+
+    assert ok is True
+    unwrap_mock.assert_not_called()
+    save_mock.assert_not_called()
+    reload_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

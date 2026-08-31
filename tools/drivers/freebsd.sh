@@ -49,13 +49,38 @@ driver_pg_setup() {
 # system -> /usr/local/etc/rc.d rc.d + sysrc enable ; user -> nohup wrapper.
 driver_service_install() {
     _wd=$1; _env=$3; _run=$4
+    _launch="exec $_run"
+    if [ "${RH_MODE:-system}" = system ] && [ "${RH_ACCOUNT_READY:-0}" = 1 ]; then
+        # FreeBSD daemon(8) -u does more than setuid(2): it reapplies the
+        # account's login class and replaces the RLIMIT_MEMLOCK raised by the
+        # rc.d prestart hook. Drop with direct syscalls after ulimit instead,
+        # then replace this short root-owned launcher with the API process.
+        run sh -c "cat > '$_wd/drop-service-identity.py' <<'PY'
+import os
+import pwd
+import sys
+
+if len(sys.argv) < 3:
+    raise SystemExit('usage: drop-service-identity.py USER PROGRAM [ARG ...]')
+
+account = pwd.getpwnam(sys.argv[1])
+os.setgroups([])
+os.setgid(account.pw_gid)
+os.setuid(account.pw_uid)
+program = sys.argv[2:]
+os.execv(program[0], program)
+PY"
+        run chown 0:0 "$_wd/drop-service-identity.py"
+        run chmod 0500 "$_wd/drop-service-identity.py"
+        _launch="exec '$_wd/.venv/bin/python' '$_wd/drop-service-identity.py' '$RH_SERVICE_USER' $_run"
+    fi
     run sh -c "cat > '$_wd/run-app.sh' <<EOF
 #!/bin/sh
 ulimit -l $RH_MEMLOCK_KB 2>/dev/null || true   # mlockall budget (workers*160+256+192 MB)
 set -a; . '$_env'; set +a
 [ -n "\${RHORIZON_RUNTIME_DIR:-}" ] && mkdir -p "\$RHORIZON_RUNTIME_DIR" && chmod 700 "\$RHORIZON_RUNTIME_DIR"
 [ -n "\${RHORIZON_AUDIT_DIR:-}" ] && mkdir -p "\$RHORIZON_AUDIT_DIR" && chmod 700 "\$RHORIZON_AUDIT_DIR"
-exec $_run
+$_launch
 EOF"
     run chmod +x "$_wd/run-app.sh"
     RH_RUN="$_wd/run-app.sh"; export RH_RUN
@@ -71,6 +96,11 @@ rcvar=rhorizon_enable
 command=/usr/sbin/daemon
 pidfile=${RH_NATIVE_RUNTIME_DIR:-/var/run/rhorizon}/rhorizon.pid
 command_args=\"-f -p \\\${pidfile} $_wd/run-app.sh\"
+start_precmd=rhorizon_prestart
+# Raise the hard limit while rc.d is still privileged. run-app.sh inherits it,
+# then performs the direct identity drop above; unlike daemon(8) -u, that path
+# does not replace the limit with the account's login-class defaults.
+rhorizon_prestart() { ulimit -l $RH_MEMLOCK_KB 2>/dev/null || true; }
 load_rc_config \\\$name
 : \\\${rhorizon_enable:=NO}
 run_rc_command \\\$1
@@ -123,12 +153,12 @@ EOF"
 
 driver_start_nginx() {
     if [ "${RH_MODE:-system}" = user ]; then run sh -c "$RH_NGINX_CMD"
-    else run service rhorizon_nginx onestart || run service rhorizon_nginx onerestart; fi
+    else run service rhorizon_nginx onerestart || run service rhorizon_nginx onestart; fi
 }
 
 driver_start() {
     if [ "${RH_MODE:-system}" = user ]; then run sh -c "nohup '$RH_RUN' >/dev/null 2>&1 &"
-    else run service rhorizon onestart || run service rhorizon onerestart; fi
+    else run service rhorizon onerestart || run service rhorizon onestart; fi
 }
 
 # driver_uninstall -- reverse driver_service_install (rc.d + sysrc). Idempotent.

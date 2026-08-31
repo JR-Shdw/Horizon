@@ -1,5 +1,23 @@
+{{- if and .Values.api.clusterEnabled (not .Values.api.persistence.enabled) -}}
+{{- fail "api.clusterEnabled=true requires api.persistence.enabled=true so node identity survives Pod replacement" -}}
+{{- end -}}
+{{- if and (gt (int .Values.api.replicas) 1) (not .Values.api.clusterEnabled) -}}
+{{- fail "api.replicas>1 requires api.clusterEnabled=true; replica count alone is not application HA" -}}
+{{- end -}}
+{{- if and .Values.api.clusterEnabled (not .Values.frontend.enabled) -}}
+{{- fail "api.clusterEnabled=true requires frontend.enabled=true: HA JOIN, certificate renewal and the live preflight all traverse the frontend's HTTPS/mTLS listener, and RH_TLS_ENABLED would otherwise declare a TLS terminator that is not deployed" -}}
+{{- end -}}
+{{- if and .Values.api.clusterEnabled (not .Values.api.proxyTrustedIps) -}}
+{{- fail "api.clusterEnabled=true requires api.proxyTrustedIps set to the frontend Pod CIDR(s)" -}}
+{{- end -}}
+{{- if and .Values.api.haAutoJoin (not .Values.api.haPrimaryUrl) -}}
+{{- fail "api.haAutoJoin=true requires api.haPrimaryUrl" -}}
+{{- end -}}
+{{- if and .Values.api.haAutoJoin (not .Values.api.haPasswordSecretName) -}}
+{{- fail "api.haAutoJoin=true requires api.haPasswordSecretName" -}}
+{{- end -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ printf "%s-api" (include "rhorizon.fullname" .) }}
   namespace: {{ .Release.Namespace }}
@@ -7,7 +25,11 @@ metadata:
     {{- include "rhorizon.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
+  serviceName: {{ printf "%s-api-headless" (include "rhorizon.fullname" .) }}
+  podManagementPolicy: Parallel
   replicas: {{ .Values.api.replicas }}
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       {{- include "rhorizon.selectorLabels" . | nindent 6 }}
@@ -47,22 +69,62 @@ spec:
             # external (Patroni/managed) PG typically requires it.
             - name: RH_DATABASE_SSL
               value: {{ if .Values.postgres.external.enabled }}{{ .Values.postgres.external.sslMode | default "require" | quote }}{{ else }}"disable"{{ end }}
+            {{- if .Values.postgres.external.haProvider }}
+            - name: RH_DATABASE_HA_PROVIDER
+              value: {{ .Values.postgres.external.haProvider | quote }}
+            {{- end }}
+            {{- if .Values.postgres.external.patroniRestUrls }}
+            - name: RH_PATRONI_REST_URLS
+              value: {{ .Values.postgres.external.patroniRestUrls | quote }}
+            {{- end }}
+            - name: RH_CLUSTER_HA_ENABLED
+              value: {{ .Values.api.clusterEnabled | quote }}
+            - name: RH_TLS_ENABLED
+              value: {{ (or .Values.api.clusterEnabled (and .Values.frontend.enabled .Values.frontend.tls.enabled)) | quote }}
+            - name: RH_CLUSTER_IDENTITY_PERSISTENT
+              value: {{ .Values.api.persistence.enabled | quote }}
+            - name: RH_CLUSTER_SERVER_CERT_MANAGED
+              value: "false"
+            - name: RH_PROXY_TRUSTED_IPS
+              value: {{ .Values.api.proxyTrustedIps | quote }}
+            {{- if .Values.api.clusterEnabled }}
+            - name: RH_CLUSTER_ADVERTISE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- end }}
+            - name: RH_HA_AUTO_JOIN
+              value: {{ .Values.api.haAutoJoin | quote }}
+            {{- if .Values.api.haPrimaryUrl }}
+            - name: RH_HA_PRIMARY_URL
+              value: {{ .Values.api.haPrimaryUrl | quote }}
+            {{- end }}
+            {{- if .Values.api.haServerCaSecretName }}
+            - name: RH_HA_SERVER_CA_FILE
+              value: /etc/rhorizon/ha-ca/ca.crt
+            {{- end }}
+            {{- if .Values.api.haPasswordSecretName }}
+            - name: RH_HA_PASSWORD_FILE
+              value: /run/secrets/rhorizon/ha-password
+            {{- end }}
             - name: RH_WORKERS
               value: {{ .Values.api.workers | quote }}
             - name: RH_CUSTODY_MODE
               value: {{ .Values.api.custodyMode | quote }}
             - name: RH_CUSTODIAN_WORKERS
               value: {{ .Values.api.custodianWorkers | quote }}
+            - name: RH_MAX_CONCURRENT_REQUESTS
+              value: {{ .Values.api.maxConcurrentRequests | quote }}
             - name: RH_MEMORY_LOCK_MODE
               value: {{ .Values.api.memoryLockMode | quote }}
             - name: RH_SWAP_PROTECTION
               value: {{ .Values.api.swapProtection | quote }}
             - name: RH_PROXY_AUTH_ENABLED
               value: {{ .Values.api.proxyAuthEnabled | quote }}
-            - name: RH_PROXY_TRUSTED_IPS
-              value: {{ .Values.api.proxyTrustedIps | quote }}
             - name: RH_DYNAMIC_MODULES_FILE
               value: /app/dynamic-engines.ini
+          startupProbe:
+            {{- toYaml .Values.api.startupProbe | nindent 12 }}
           livenessProbe:
             {{- toYaml .Values.api.livenessProbe | nindent 12 }}
           readinessProbe:
@@ -86,6 +148,16 @@ spec:
               mountPath: /var/log/rhorizon
             - name: rhorizon-data
               mountPath: /var/lib/rhorizon
+            {{- if .Values.api.haPasswordSecretName }}
+            - name: ha-password
+              mountPath: /run/secrets/rhorizon
+              readOnly: true
+            {{- end }}
+            {{- if .Values.api.haServerCaSecretName }}
+            - name: ha-server-ca
+              mountPath: /etc/rhorizon/ha-ca
+              readOnly: true
+            {{- end }}
             - name: dynamic-engines
               mountPath: /app/dynamic-engines.ini
               subPath: dynamic-engines.ini
@@ -106,12 +178,30 @@ spec:
         - name: audit-logs
           emptyDir:
             sizeLimit: 100Mi
-        # node-uuid + cluster cert/key live here; readOnlyRootFilesystem makes
-        # the image path unwritable otherwise. emptyDir -> identity regenerates
-        # on restart; use a PVC for a stable cluster identity across restarts.
+        {{- if not .Values.api.persistence.enabled }}
+        # Development-only. HA rendering refuses ephemeral node identity.
         - name: rhorizon-data
           emptyDir:
             sizeLimit: 64Mi
+        {{- end }}
+        {{- if .Values.api.haPasswordSecretName }}
+        - name: ha-password
+          secret:
+            secretName: {{ .Values.api.haPasswordSecretName | quote }}
+            items:
+              - key: {{ .Values.api.haPasswordSecretKey | quote }}
+                path: ha-password
+                mode: 0400
+        {{- end }}
+        {{- if .Values.api.haServerCaSecretName }}
+        - name: ha-server-ca
+          secret:
+            secretName: {{ .Values.api.haServerCaSecretName | quote }}
+            items:
+              - key: {{ .Values.api.haServerCaSecretKey | quote }}
+                path: ca.crt
+                mode: 0444
+        {{- end }}
         - name: dynamic-engines
           configMap:
             name: {{ printf "%s-dynamic-engines" (include "rhorizon.fullname" .) }}
@@ -124,3 +214,16 @@ spec:
       {{- with .Values.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if .Values.api.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: rhorizon-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.api.persistence.storageClass }}
+        storageClassName: {{ .Values.api.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.api.persistence.size | quote }}
+  {{- end }}

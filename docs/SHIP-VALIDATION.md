@@ -13,15 +13,6 @@ gate validates the same code path on every Linux distro it ships an installer
 for. macOS native and Windows stay out of scope and keep their Planned /
 Supported labels.
 
-## Re-baseline note
-
-The pre-ship cleanup that preceded this run changed only comments, docstrings,
-and documentation, it was verified to leave the executable token stream of
-every source file byte-identical (no logic, identifier, or control-flow change).
-So functional revalidation is a re-run of the existing suite on the ship commit,
-not a behavioural re-test. The matrix work below proves the *deployment and
-integration* surface on top of that.
-
 ## Pass-gate per item
 
 Each item lists: how it is validated, the environment class, and the gate that
@@ -122,35 +113,6 @@ been downgraded with a note.
 | 4 | Prometheus / Grafana | **green** | `/metrics` scraped; dashboards captured against a live instance |
 | 5 | YubiKey | **green** | real YK5 NFC: hardware HMAC-SHA1 response verified by `crypto.verify_yubikey_response()`, negative control rejected (node-5 local, 2026-06-19) |
 | 5 | WebAuthn | pending (browser) | needs a browser touch-to-auth (UI register + unseal) |
-
-## Findings & fixes - 2026-06-19 ship run (node-5, local KVM)
-
-Running the OS lanes for real surfaced a chain of genuine bugs - almost all
-harness/infra, one real deployment bug. All resolved:
-
-| Area | Symptom | Root cause | Fix |
-|---|---|---|---|
-| **FreeBSD: vault can't unseal** (real deploy bug) | 22 failed / 189 errors, all `WrapKey()/...: mlock failed` | Rust crypto mlocks key material; the non-root user's hard `RLIMIT_MEMLOCK` is capped by `login.conf` (`ulimit -l` can't raise it; `unprivileged_mlock` already 1). | `install-freebsd.sh`: add an `rhorizon-vault` login class (`memorylocked=unlimited`, `cap_mkdb`). Re-run **1753 passed**. Linux gets this via the unit's `LimitMEMLOCK`. |
-| **NetBSD: chain of 4 harness bugs** | rsync-not-found -> no deps -> "no pkg found" -> mirror 000 | golden has no rsync; pinned pkgsrc versions go stale (mirror keeps latest only); scripts used `https` on an HTTP-only CDN; then **cdn.netbsd.org was down**. | `test-vm.sh` tar-over-ssh push; **unpin** deps; `http://`; swap `PKG_PATH` to **`ftp.fr.netbsd.org`**. Re-run **1752 passed**. No source compile needed. |
-| **OpenBSD: golden build hangs** | qemu never exits, VM at `login:` | Autoinstall reboots into the installed disk instead of halting. | `openbsd-bootstrap.sh`: qemu **`-no-reboot`**. |
-| **OpenBSD: HA cluster mTLS fails** | 5 failed: `ssl.SSLError: UNKNOWN_CERTIFICATE_TYPE` | Base **LibreSSL**'s CPython `ssl` can't load the **Ed25519** TLS certs the cluster CA mints. | `install-openbsd.sh`: **build CPython 3.12 from source against the OpenSSL port** (eopenssl36, via aliased pkg-config) + cryptography against the same OpenSSL. Ed25519 kept. (Plus a test-only `CA:TRUE` fix for one db-ssl fixture LibreSSL's `openssl` CLI didn't flag.) |
-| **OpenBSD: pkg_add truncates mid-batch** (recurring, 2026-06-24) | `Premature end of archive` on a cdn tarball -> batch aborts, postgresql uninstalled -> cryptic `install: unknown group _postgresql` (the old `pkg_add ... \|\| true` masked it). | `install-openbsd.sh`: **retry the batch 3x + hard-verify the `_postgresql` group**, fail loud + specific. Bypass: `export PKG_PATH` to a healthier mirror. Same family as the NetBSD rsync `\|\| true` bug - a transient must be retried+verified in-script, not re-run by hand. |
-
-`tools/install-macos.sh` was an untested skeleton at the time of this run --
-node-5 has no Apple hardware. It **has since been validated on `macos-latest`**
-(`.github/workflows/macos-native.yml`), which runs it end to end in user mode:
-Homebrew deps, PostgreSQL, venv, the Rust extension (built, imported, and AEAD
-round-tripped -- a wheel that links but computes wrongly on another arch is
-worse than one that fails to load), the LaunchAgent, and first unseal.
-
-Apple Silicon only. Intel darwin stays unmeasured: GitHub retired the
-`macos-13` image and a job pinned to it now queues indefinitely rather than
-failing, so there is no free x86_64 lane to move to.
-
-Gotchas for re-runs on node-5: ports `2222` (forgejo) / `5433` are taken - pass
-`SSH_PORT=`/`PG_PORT=`. `/tmp` is RAM-backed tmpfs (clean workdirs as you go).
-`VM_RAM=8G VM_CPUS=8` to run lanes in parallel. OpenBSD's small `/` and `/tmp`
-partitions need build scratch routed to `/home`.
 
 ## Ship criteria
 

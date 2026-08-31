@@ -34,7 +34,7 @@ flowchart TB
 | Client endpoint | 1 | stable hostname and certificate identity |
 | Edge | 2 | separate failure domains |
 | API | 3 | separate hosts; persistent `/var/lib/rhorizon` per node |
-| Workers | 5 per reference Linux API | one local crypto master plus four followers |
+| Custody | 5 embedded workers or a separated custodian pool per API host | one local custody leader; separated mode keeps HTTP workers disposable |
 | PostgreSQL | 3 | separate storage/host failure domains |
 | Database supervision | odd quorum | Patroni+DCS on Linux/Kubernetes; `pgha` on BSD |
 | Backup | off-host | encrypted backup, WAL archive, tested restore |
@@ -82,8 +82,8 @@ proxy or nginx connection limits change.
 | gateway 502/504 from a backend | eject immediately |
 
 After unseal, wait for both readiness and worker convergence. The management
-topology must show one local crypto master, the configured number of workers,
-all other workers as fresh followers, and application state `primary` or
+topology must show one local custody leader, the configured API/custodian
+processes as fresh, and application state `primary` or
 `secondary`. Do not replace this gate with a fixed sleep.
 
 ### Retries and errors
@@ -229,7 +229,8 @@ Until then, keep the structured uncertain response and reconcile the operation.
 ## Go-live checks
 
 - [ ] One client URL, two healthy edges, three ready API nodes.
-- [ ] One local crypto master and all configured followers on every API host.
+- [ ] `rhorizon cluster preflight` passes, including its live HTTPS/mTLS check.
+- [ ] One local custody leader and all configured API/custodian processes on every API host.
 - [ ] One application primary and two secondaries with fresh heartbeats.
 - [ ] Three supervised PostgreSQL members and one stable write endpoint.
 - [ ] Connection reserve, replication, WAL/archive, disk and restore checks pass.
@@ -238,7 +239,8 @@ Until then, keep the structured uncertain response and reconcile the operation.
 - [ ] Database-leader loss produces one successor and correct endpoint movement.
 - [ ] `RH_MAX_CONCURRENT_REQUESTS` set to a non-zero, calibrated cap (it is `0`/disabled by default).
 - [ ] Capacity pressure returns structured 429, not raw 502/503.
-- [ ] Full asynchronous audit verification passes before and after fault tests.
+- [ ] Full asynchronous audit verification passes before and after fault tests;
+      its latest signed anchor is fresh in the preflight.
 - [ ] No HA component is orange, red or grey.
 
 Run a long soak only after these bounded checks pass.
@@ -288,8 +290,8 @@ Upgrade application secondaries first and the application primary last:
 2. Stop gracefully; preserve `/var/lib/rhorizon` and `node_uuid`.
 3. Deploy the pinned artifact and start the service.
 4. Unseal using the approved 2FA/Shamir procedure.
-5. Wait for stable readiness, `secondary` membership, one local crypto master
-   and all followers.
+5. Wait for stable readiness, `secondary` membership, one local custody leader
+   and full API/custodian convergence.
 6. Re-enable it, run read/write canaries and observe a stability interval.
 7. Repeat for the other secondary.
 8. Hand the application-primary role to an upgraded secondary, verify its

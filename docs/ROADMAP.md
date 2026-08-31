@@ -59,9 +59,8 @@ read path for existing rows and backups.
 | Coordination | Cross-container layer: cluster/node identity, HMAC bootstrap join, quarantine state machine, drain/evict/promote |
 | Key sharing | Shamir-distributed master key shares, role-based master/follower workers, automatic failover reconstruction |
 | Authority model | Two independent deadlines, not one: **DB-authority freshness** (every node -- a secondary that cannot read canonical state cannot prove it is still a secondary) and the **primary lease** (the singleton write claim, primary only). Both evaluated against PostgreSQL's `clock_timestamp()`, never a host wall clock |
-| FROZEN state | Losing database authority suspends serving without dropping keys. Expressed as a deadline recomputed on read, so a dead refresher loop fails closed instead of leaving a node serving. A hard fence seals at `lease_ttl + frozen_max`, bounding how long a possibly-stale node sits on key material. That fence runs in its own loop, reading only a monotonic clock: evaluated at the end of a database tick it was never *reached* when the query hung, and a hung loop is not a dead one, so supervision did not catch it. Peers may buy a frozen node time, never the right to serve |
+| FROZEN state | Losing database authority suspends serving without dropping keys. A monotonic hard fence seals at `lease_ttl + frozen_max`. Peer mTLS observations can retain keys for a bounded shared outage; a newer primary term or key epoch seals a stale node early. Peers never restore authority or return a frozen node to service. |
 | Transport | Cluster CA with per-node mTLS; `/internal/ha/status` answers with PostgreSQL unreachable (no I/O, no auth -- an endpoint that needs the authority cannot report on losing it) |
-| Planned | Peer-aware classification: today a node cannot distinguish a **shared** database outage from its **own** isolation, which warrant opposite reactions (hold vs seal). Peers contribute observations, never authority |
 
 ### Memory and audit hardening
 | Area | What |
@@ -81,7 +80,9 @@ canonical number, not this page.
 ## Near-release hardening
 
 Memory and audit hardening is complete. Near-release work is limited to
-platform and release validation:
+platform and release validation. Kubernetes application HA validation is
+complete: the release lane covers bootstrap, three-Pod mTLS JOIN, temporary
+Secret removal, secondary restart, FROZEN primary failover and recovery.
 
 | Item | Scope | Priority |
 |---|---|---|

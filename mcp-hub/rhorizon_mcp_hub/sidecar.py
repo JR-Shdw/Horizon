@@ -5,7 +5,10 @@
 The sidecar (agent/rust rh-mcp-gateway) is the only leg that speaks HTTP/2 + PQ
 TLS 1.3 to the vault. Line-JSON protocol: send
 ``{"bearer","method","path","body"?}`` -> receive ``{"status","body"}`` or
-``{"error"}``. One short-lived connection per call keeps this thread-safe and
+``{"error"}``. A second kind, ``{"kind":"proxy",...}``, has the sidecar call a
+third-party API with a credential it reads itself (see
+:meth:`SidecarClient.proxy`). One short-lived connection per call keeps this
+thread-safe and
 simple; the sidecar owns the persistent vault connection pool. Zero third-party
 deps (only used in the OPTIONAL hub daemon mode).
 """
@@ -51,6 +54,48 @@ class SidecarClient:
             req["body"] = body
         if client_ip:
             req["client_ip"] = client_ip
+        resp = self._send(req)
+        return int(resp.get("status", 0)), resp.get("body")
+
+    def proxy(
+        self,
+        bearer: str,
+        *,
+        namespace: str,
+        credential: str,
+        url: str,
+        method: str = "GET",
+        inject: dict | None = None,
+        max_response_bytes: int | None = None,
+        client_ip: str | None = None,
+    ) -> dict:
+        """Have the sidecar call a third-party API with a stored credential.
+
+        The plaintext never crosses back over this socket: the sidecar reads it
+        from the vault with ``bearer``, attaches it, and returns only the
+        upstream reply.
+
+        Returns ``{"status", "body", "truncated"}``. Raises
+        :class:`SidecarError` for a refusal or a transport failure; the sidecar
+        applies its own destination allow-list on top of the hub's binding.
+        """
+        req: dict = {
+            "kind": "proxy",
+            "bearer": bearer,
+            "namespace": namespace,
+            "credential": credential,
+            "url": url,
+            "method": method,
+        }
+        if inject:
+            req["inject"] = inject
+        if max_response_bytes:
+            req["max_response_bytes"] = max_response_bytes
+        if client_ip:
+            req["client_ip"] = client_ip
+        return self._send(req)
+
+    def _send(self, req: dict) -> dict:
         line = (json.dumps(req) + "\n").encode()
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -72,4 +117,4 @@ class SidecarClient:
             raise SidecarError("sidecar returned non-JSON") from None
         if "error" in resp:
             raise SidecarError(str(resp["error"]))
-        return int(resp.get("status", 0)), resp.get("body")
+        return resp
