@@ -177,10 +177,12 @@ machine :
 - **Fais tourner le vault sous un compte que l'agent n'est pas.** `--mode
   system` installe en root : ses credentials vivent sous `/etc/rhorizon`,
   possédés par root, et un agent sous ton login ne peut pas les lire quel que
-  soit le mode du fichier. C'est la frontière qui compte ici. (Le service
-  lui-même tourne encore en root plutôt que sous un utilisateur `rhorizon`
-  dédié ; ça limite une compromission de Horizon, pas l'agent, et c'est suivi
-  séparément.) Une install en mode user ne donne aucune frontière de ce type :
+  soit le mode du fichier. C'est la frontière qui compte ici. L'installation est
+  privilégiée ; le vault ensuite ne l'est pas : le daemon descend vers un compte
+  `rhorizon` dédié. Si ce compte ne peut pas être créé, l'installation s'arrête
+  au lieu de laisser discrètement le service en root ; continuer ainsi demande
+  un `RH_ACCOUNT_FALLBACK_ROOT=1` explicite. Une install en mode user ne donne
+  aucune frontière de ce type :
   ses credentials appartiennent au compte sous lequel l'agent tourne.
 - **Ne laisse pas de credentials dans un répertoire vers lequel un agent est
   pointé.** Mets-les dans un gestionnaire de mots de passe et supprime les
@@ -204,7 +206,7 @@ machine :
 - [`docs/fr/QUICKSTART-AI.md`](QUICKSTART-AI.md) - setup MCP local pour un accès IA limité et audité
 - [`docs/fr/AI-PROMPTS.md`](AI-PROMPTS.md) - prompts relus pour l'accès, la révocation, le diagnostic, la rotation et la sauvegarde
 - [`docs/fr/QUICKSTART.md`](QUICKSTART.md) - booter le stack et stocker votre premier secret en 5 minutes
-- [`docs/fr/AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) - instructions contraintes d'installation locale pour un assistant IA
+- [`docs/fr/AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) - installation guidée et parcours Linux séparant l'identité de l'agent du matériel de récupération
 - [`docs/fr/USE-CASES.md`](USE-CASES.md) - Ansible, CI/CD, Kubernetes, agents IA - patterns copiables-collables
 
 ### Déployer
@@ -303,6 +305,6 @@ développement via la licence.
 
 > **Licence et marque**
 >
-> - Sous licence **AGPL-3.0-or-later** ([LICENSE](../../LICENSE)). Source-available ; les modifications doivent rester AGPL.
+> - Sous licence **AGPL-3.0-or-later** ([LICENSE](../../LICENSE)). Les modifications doivent rester AGPL.
 > - **Relicensing closed-source interdit.** Une licence commerciale est disponible - voir [LICENSE-COMMERCIAL.md](../../LICENSE-COMMERCIAL.md).
 > - **"Resurgamus Horizon"** est un nom de projet ; l'AGPL n'accorde aucun droit de marque.

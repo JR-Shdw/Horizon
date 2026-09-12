@@ -32,7 +32,7 @@ Si tu n'as pas Docker :
 | Ton OS | Installer Docker |
 |---|---|
 | macOS | Installe Docker Desktop : https://www.docker.com/products/docker-desktop/ - ouvre-le une fois, accepte les prompts. |
-| Linux (Debian, Ubuntu, Fedora, Arch, ...) | Utilise le gestionnaire de paquets de ta distribution. Le plus rapide : `curl -fsSL https://get.docker.com \| sh` puis `sudo usermod -aG docker $USER` et déconnecte / reconnecte ta session. |
+| Linux (Debian, Ubuntu, Fedora, Arch, ...) | Utilise le paquet Docker ou Podman rootless de ta distribution et sa documentation officielle. N'ajoute pas un compte exécutant un agent IA au groupe `docker` : l'accès à la socket Docker équivaut généralement à root. |
 | Windows | Installe **WSL2** (cherche "WSL" dans Windows Update / PowerShell : `wsl --install`), puis installe Ubuntu depuis le Microsoft Store, puis suis la ligne Linux ci-dessus **dans le terminal Ubuntu**. |
 
 Il te faut aussi un **assistant IA de bureau compatible MCP** (l'app
@@ -42,14 +42,16 @@ fonctionnent avec le même setup.
 
 ---
 
-## Deux options : container ou natif
+## Choisir un parcours
 
-Deux installs supportées, même résultat. Choisis celle qui te va :
+Les deux premiers parcours privilégient la simplicité. Le troisième ajoute une
+séparation d'identité système vis-à-vis des logiciels exécutés sous ton compte.
 
 | Option | Ce qui tourne | Pour qui |
 |---|---|---|
 | **Container** (défaut, recommandé) | Un petit PostgreSQL + API + frontend dans des conteneurs **Docker**. | Quiconque a déjà Docker (Mac, Windows, Linux). Mise à jour via `docker compose pull`. |
 | **Natif** | PostgreSQL + venv Python + uvicorn directement sur l'hôte - pas de Docker, pas de conteneurs. | Empreinte plus légère. WSL2 sans Docker Desktop. Linux laptops où tu préfères utiliser le PostgreSQL système. |
+| **Système sécurisé pour IA** | Services natifs sous un compte dédié ; matériel de récupération réservé à root. | Hôtes Linux où le processus IA local ne doit pas hériter de l'autorité de récupération. |
 
 Dans le doute, prends le path container - c'est celui qu'on teste en CI.
 
@@ -99,6 +101,15 @@ L'install native supporte : Debian, Ubuntu, Arch, Manjaro, Fedora,
 Rocky, AlmaLinux, openSUSE - et n'importe laquelle de ces distros
 sous WSL2. Sur macOS, l'install native n'est pas encore supportée -
 prends le path container.
+
+### Parcours système sécurisé pour IA (Linux)
+
+Utilise-le lorsque l'outil IA ne doit pas partager le compte capable de lire le
+mot de passe maître et le token administrateur. Il exige une release relue dans
+un répertoire source appartenant à root et refuse, pour le compte cible, l'accès
+Docker équivalent à root ou sudo sans mot de passe. Suis
+[`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) sans remplacer son script par le
+parcours utilisateur.
 
 L'install native utilisateur suit le layout XDG normal :
 
@@ -156,9 +167,10 @@ Quand le script termine, il imprime un bloc qui ressemble à ça :
     "rhorizon": {
       "command": "/home/toi/.local/share/rhorizon-mcp/.venv/bin/rhorizon-mcp-server",
       "env": {
-        "RH_VAULT_URL": "http://127.0.0.1:8200",
+        "RH_VAULT_URL": "https://127.0.0.1:8200",
+        "RH_VAULT_CAFILE": "/home/toi/.config/rhorizon/ca.pem",
         "RH_TOKEN_FILE": "/home/toi/.config/rhorizon/mcp.token",
-        "RH_MCP_POLICY": "/home/toi/.config/rhorizon-mcp/policy.toml"
+        "RHORIZON_MCP_POLICY": "/home/toi/.config/rhorizon-mcp/policy.toml"
       }
     }
   }
@@ -209,9 +221,10 @@ Le setup crée les frontières de confiance locales suivantes :
 |---|---|---|
 | Base du coffre-fort | Enregistrements de secrets chiffrés | La base seule ne suffit pas à les déchiffrer. |
 | `~/rhorizon/secrets/master-password` (container) ou `~/.config/rhorizon/secrets/master-password` (natif) | Mot de passe principal en clair | Ton compte et root sur l'hôte. Le mode `0400` bloque les autres utilisateurs non privilégiés, pas root ni la compromission de ton compte. |
-| `~/rhorizon/secrets/root-token` (container) ou `~/.config/rhorizon/secrets/root-token` (natif) | Token admin du coffre-fort | Ton compte et root sur l'hôte. |
-| `~/.config/rhorizon/mcp.token` | Token vault en lecture seule de l'assistant | Le serveur MCP, ton compte et root. Il est distinct du token admin. |
-| `~/.config/rhorizon-mcp/policy.toml` | La liste des secrets que ton assistant IA a le droit de lire | Actuellement **vide**. L'assistant ne peut rien lire tant que tu n'as pas ajouté à cette liste. |
+| Le token admin | Ouvre toutes les sections, crée et révoque les clés | Personne, une fois l'installation finie : il est affiché une fois puis retiré du disque, parce qu'aucune autorisation côté coffre-fort ne le borne. Garde-le dans ton gestionnaire de mots de passe. |
+| `~/.config/rhorizon/mcp.token` | Clé vault en lecture seule de l'assistant | Le serveur MCP, ton compte et root. Elle est distincte du token admin. |
+| `~/.config/rhorizon-mcp/policy.toml` | Lesquels de ses secrets l'assistant se voit montrer | Ton compte, et tout ce qui tourne en tant que toi. Un rétrécissement, pas une frontière : voir plus bas. |
+| Dans le coffre-fort : la section `mcp` | Dans quelle section la clé de l'assistant peut entrer | Seul un admin peut le changer. C'est ça, la frontière, et elle est vérifiée à chaque requête. |
 
 Le quickstart laptop stocke le mot de passe principal près du stack
 local pour simplifier l'usage. Active le chiffrement complet du disque
@@ -220,14 +233,30 @@ la compromission de ton compte peut exposer la base chiffrée et son
 matériel de recovery. Garde le matériel de recovery hors hôte
 séparément, selon [`DISASTER-RECOVERY.md`](DISASTER-RECOVERY.md).
 
-Deux propriétés restent garanties :
+Deux propriétés que cette installation te donne :
 
-1. **Tu peux donner un secret à ton assistant IA sans lui donner
-   *tous* les secrets.** Chaque secret stocké dans le coffre-fort
-   reste inaccessible à l'IA tant que tu n'ajoutes pas explicitement
-   son nom au fichier de policy. Ajouter les secrets d'un deuxième
-   client l'an prochain n'ouvre pas l'accès aux secrets du
-   premier.
+1. **Ton assistant IA atteint une section du coffre-fort, et rien
+   d'autre.** L'installation lui donne sa propre clé, et n'accorde à cette
+   clé l'entrée que d'une seule section. Tout ce que tu gardes en dehors de
+   cette section est hors d'atteinte avec elle. Ajouter les secrets d'un
+   deuxième client l'an prochain n'ouvre pas ceux du premier, et ranger
+   quelque chose hors de la section de l'assistant le met hors de portée.
+
+   Celle-là tient même si ton assistant est malin. L'autorisation vit dans le
+   coffre-fort, qui la revérifie à chaque requête : elle s'applique que
+   l'assistant passe par les outils listés plus haut, qu'il réécrive son
+   propre fichier de policy, ou qu'il ignore tout ça et parle directement au
+   coffre-fort avec sa clé. Aucune de ces voies ne l'élargit. Retirer l'accès
+   marche pareil : dès que tu retires la clé de la section, la requête
+   suivante échoue. Rien à réémettre.
+
+   Le fichier de policy est une seconde couche, plus souple, à l'intérieur de
+   cette section : il décide lesquels de ses secrets l'assistant se voit
+   montrer. Un assistant capable de lancer des commandes sur ta machine
+   (Claude Code, Codex, Cline, Cursor en mode agent) peut réécrire ce
+   fichier : considère-le comme une protection contre les erreurs, pas contre
+   les intentions. C'est l'autorisation côté coffre-fort qui tient dans les
+   deux cas.
 
 2. **Chaque lecture est consignée.** Quand ton assistant ouvre un secret, le
    vault enregistre qui a demandé, quel secret, et quand, dans un journal
@@ -258,7 +287,7 @@ relecture avant d'approuver commandes ou changements de configuration.
 | Symptôme | Première chose à tenter |
 |---|---|
 | `docker: command not found` | Installer Docker d'abord (voir haut de page). |
-| `permission denied` sur Docker | Sur Linux, il faut être dans le groupe `docker` : `sudo usermod -aG docker $USER` puis déconnecter / reconnecter. |
+| `permission denied` sur Docker | Utilise le mode rootless documenté par la distribution ou choisis le parcours natif. N'accorde pas l'accès à la socket Docker à un compte d'agent IA pour contourner l'erreur. |
 | Le script a tourné mais ton assistant ne voit pas "rhorizon" | As-tu **complètement quitté** l'app et l'as relancée ? Fermer la fenêtre ne suffit pas - quitter via l'icône barre de menus / zone de notification. |
 | Ton assistant dit "je vois rhorizon mais aucun outil" | Le fichier de policy est vide (défaut sécurisé). Ouvre `AI-PROMPTS.md` et copie le prompt "donner accès à un secret". |
 | `port already in use` | Un autre programme utilise le port 8200. Relance avec un autre port : `RH_API_PORT=8210 bash tools/quickstart-laptop.sh`. |

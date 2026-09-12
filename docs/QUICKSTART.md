@@ -41,7 +41,7 @@ docker compose -f tools/docker-compose.quickstart.yml up -d
 | File | Publishes on | Use it for |
 |---|---|---|
 | `tools/docker-compose.quickstart.yml` | `127.0.0.1` - API `:8200`, UI `:8080` (HTTP) and `:8443` (TLS) | Laptops, single hosts, evaluation |
-| `docker-compose.yml` (root) | `${WG_IP:-10.0.0.1}` and `10.0.1.1` - API `:8200`, UI `:8201` | The operator/VPN stack |
+| `docker-compose.yml` (root) | `${WG_IP:-10.0.0.20}` and `10.1.0.1` - API `:8200`, UI `:8201` | The operator/VPN stack |
 
 The root file hardcodes VPN addresses, so on a host without them Docker
 refuses to start the stack (*"Couldn't listen on requested ports"*). Override

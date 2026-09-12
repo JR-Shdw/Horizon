@@ -55,7 +55,7 @@ Full knob table: [env-vars reference](../reference/env-vars.md#sizing-set-by-tie
 bash tools/install.sh \
   --tier smb \
   --dir /opt/rhorizon \
-  --bind 10.0.0.1 \
+  --bind 10.0.0.20 \
   --api-port 8200 \
   --frontend-port 8443 \
   --master-password 'your-passphrase' \

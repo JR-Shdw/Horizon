@@ -123,7 +123,7 @@ async def test_init_inserts_primary_membership_row(admin_token, client):
 
 @pytest.mark.asyncio
 async def test_init_uses_configured_advertised_ip(admin_token, client, monkeypatch):
-    monkeypatch.setattr(settings, "cluster_advertise_ip", "10.0.0.1")
+    monkeypatch.setattr(settings, "cluster_advertise_ip", "10.0.0.93")
     payload = await _init_cluster(client, admin_token)
     async with async_session() as db:
         source_ip = await db.scalar(
@@ -132,7 +132,7 @@ async def test_init_uses_configured_advertised_ip(admin_token, client, monkeypat
             ),
             {"u": payload["primary_uuid"]},
         )
-    assert source_ip == "10.0.0.1"
+    assert source_ip == "10.0.0.93"
 
 
 # --- /cluster/ha auth + state gating -------------------------------------
@@ -180,7 +180,7 @@ async def test_cluster_ha_lists_primary_and_joining_filters_evicted(
                 "    cluster_version, cert_fingerprint, cert_not_after,"
                 "    last_heartbeat"
                 ") VALUES ("
-                "    'joiner-uuid-aaaa', CAST('10.0.0.1' AS INET), 'joining',"
+                "    'joiner-uuid-aaaa', CAST('10.0.0.51' AS INET), 'joining',"
                 "    NOW() + INTERVAL '15 seconds',"
                 "    '1.0.0-beta', 'fpr-joiner', NOW() + INTERVAL '30 days',"
                 "    NOW() - INTERVAL '1 second'"
@@ -194,7 +194,7 @@ async def test_cluster_ha_lists_primary_and_joining_filters_evicted(
                 "    cluster_version, cert_fingerprint, cert_not_after,"
                 "    last_heartbeat"
                 ") VALUES ("
-                "    'evicted-uuid-bbbb', CAST('10.0.0.1' AS INET), 'evicted',"
+                "    'evicted-uuid-bbbb', CAST('10.0.0.52' AS INET), 'evicted',"
                 "    NULL, '1.0.0-beta', 'fpr-evicted',"
                 "    NOW() + INTERVAL '30 days', NULL"
                 ")"
@@ -220,7 +220,7 @@ async def test_cluster_ha_lists_primary_and_joining_filters_evicted(
     assert joining["ha_state"] == "joining"
     assert joining["quarantine_until"] is not None
     assert joining["last_heartbeat"] is not None
-    assert joining["source_ip"] == "10.0.0.1"
+    assert joining["source_ip"] == "10.0.0.51"
 
 
 @pytest.mark.asyncio
@@ -341,7 +341,7 @@ async def test_membership_hides_evicted_as_404(admin_token, client):
                 "    cluster_version, cert_fingerprint, cert_not_after,"
                 "    last_heartbeat"
                 ") VALUES ("
-                "    'evicted-bugC-cccc', CAST('10.0.0.1' AS INET),"
+                "    'evicted-bugC-cccc', CAST('10.0.0.99' AS INET),"
                 "    'evicted', NULL, '1.0.0-beta',"
                 "    'fpr-evicted-bugC', NOW() + INTERVAL '30 days', NULL"
                 ")"

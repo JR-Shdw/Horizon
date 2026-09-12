@@ -141,3 +141,29 @@ def test_ha_refuses_to_render_without_the_tls_terminator_it_declares():
         "or .Values.api.clusterEnabled "
         "(and .Values.frontend.enabled .Values.frontend.tls.enabled)" in api
     )
+
+
+def test_k8s_ha_audit_gate_uses_the_persistent_api_pod_transport():
+    source = (Path(__file__).parents[1] / "tools" / "k8s-e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    block = source.split('say "create and verify a signed audit anchor"', 1)[1]
+    block = block.split('say "run the live HTTPS/mTLS preflight"', 1)[0]
+
+    assert "audit_preflight_request" in block
+    assert "api_exec_request GET" in block
+    assert "/api/v1/vault/audit/verify/jobs/$audit_job_id" in block
+    assert "audit_preflight_envelope" in block
+    assert "audit_job_envelope" in block
+    assert "kexec" not in block
+
+
+def test_k8s_ha_rollout_unseals_existing_api_pods_without_helper_pods():
+    source = (Path(__file__).parents[1] / "tools" / "k8s-e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    unseal = source.split("unseal_pod() {", 1)[1].split("\n}\n\n", 1)[0]
+
+    assert 'pod_exec_request "$pod" POST /api/v1/vault/unseal' in unseal
+    assert "kexec" not in unseal
+    assert ".status // 0" in unseal

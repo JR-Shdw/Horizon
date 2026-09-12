@@ -195,15 +195,15 @@ def test_is_trusted_proxy_default_is_fail_closed():
 
 
 def test_is_trusted_proxy_external_ip(monkeypatch):
-    monkeypatch.setattr(settings, "proxy_trusted_ips", "10.0.0.1/24")
-    assert cluster_mtls._is_trusted_proxy("10.0.0.1") is True
+    monkeypatch.setattr(settings, "proxy_trusted_ips", "10.0.0.0/24")
+    assert cluster_mtls._is_trusted_proxy("10.0.0.5") is True
     assert cluster_mtls._is_trusted_proxy("192.0.2.1") is False
 
 
 def test_is_trusted_proxy_empty_list_rejects_everything(monkeypatch):
     monkeypatch.setattr(settings, "proxy_trusted_ips", "")
     assert cluster_mtls._is_trusted_proxy("127.0.0.1") is False
-    assert cluster_mtls._is_trusted_proxy("10.0.0.1") is False
+    assert cluster_mtls._is_trusted_proxy("10.0.0.5") is False
 
 
 def test_is_trusted_proxy_invalid_ip_returns_false():

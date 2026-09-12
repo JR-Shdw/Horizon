@@ -293,6 +293,42 @@ credential : la trace montre qu'il a été utilisé, pas où il est parti ; la
 destination n'apparaît que dans le stderr du serveur. Utiliser le hub si la
 destination doit figurer sur la chaîne.
 
+### Ce qu'une ligne d'audit MCP prouve, et ce qu'elle ne prouve pas
+
+Deux classes de champs, et la distinction décide de ce que vaut une ligne comme
+preuve :
+
+| Champ | Origine |
+|---|---|
+| `agent_token_id`, `actor` | Dérivés du bearer authentifié. Infalsifiables par l'appelant. |
+| `ip_address` | Observée par le vault sur la socket. |
+| `hub`, `backend`, `tool`, `target`, `decision`, `detail` | **Déclarés par l'appelant.** Enregistrés tels quels, vérifiés par rien. |
+
+`hub` est donc une étiquette, pas une origine. N'importe quel porteur d'un token
+valide peut poster une ligne nommant n'importe quel hub, et le vault n'a aucun
+moyen de distinguer un appel réellement passé par le hub d'un appel direct. **Ne
+pas lire une ligne comme « cet accès est passé par le hub ».** Ce qu'elle
+soutient, c'est « le porteur de ce token a déclaré faire ceci », dont seule la
+moitié « identité » est authentifiée.
+
+La signature de chaîne est une preuve d'inaltération de ce qui a été écrit. Elle
+dit que l'entrée n'a pas été modifiée depuis ; elle ne dit rien sur l'honnêteté
+de celui qui l'a écrite.
+
+Rien de tout cela n'affaiblit le contrôle d'accès, qui n'en a jamais dépendu :
+l'autorité d'un appel, c'est l'ACL de son token, que le vault applique à
+l'identique que l'appel arrive par le hub ou directement en `curl`. C'est
+précisément l'intérêt de poser la frontière sur le token plutôt que sur le
+chemin.
+
+L'attribution authentifiée par chemin ne devient nécessaire que si tu veux des
+règles qui *dépendent* du chemin (token direct interdit, hub autorisé), ou un
+credential utilisable seulement depuis le hub. Il faut alors une vraie identité
+de workload pour le hub (certificat client dédié ou credential propre au hub),
+pour que le vault enregistre un workload authentifié au lieu de faire confiance
+à une déclaration. Ça n'existe pas aujourd'hui : le sidecar se connecte sans
+authentification client.
+
 ---
 
 ## 5. Setup - stdio local (Cursor, Cline, opencode, Claude Desktop, Claude Code)

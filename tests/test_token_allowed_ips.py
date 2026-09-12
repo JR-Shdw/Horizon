@@ -85,7 +85,7 @@ async def test_set_allowed_ips_chained_audit(client, master_password, admin_toke
     r = await client.post(
         f"/api/v1/vault/tokens/{row['id']}/allowed-ips",
         headers=headers,
-        json={"allowed_ips": "10.0.0.1/24"},
+        json={"allowed_ips": "10.0.0.0/24"},
     )
     assert r.status_code == 200, r.text
 
@@ -199,7 +199,7 @@ async def test_namespace_subadmin_set_ips_pola(client, master_password, admin_to
     out_row = await _row(client, admin_h, "ip-prod-token")
     root_row = await _row(client, admin_h, "ip-root-token")
 
-    body = {"allowed_ips": "10.0.0.1/24"}
+    body = {"allowed_ips": "10.0.0.0/24"}
     # Allowed: same namespace.
     r = await client.post(
         f"/api/v1/vault/tokens/{in_row['id']}/allowed-ips", headers=sub_h, json=body

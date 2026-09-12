@@ -37,7 +37,7 @@ _OTHER_NODE_UUID = "ffffeeeeddddccccbbbbaaaa99998888"
 async def _insert_node(
     *,
     node_uuid: str,
-    source_ip: str = "10.0.0.1",
+    source_ip: str = "10.0.0.50",
     ha_state: str = "secondary",
     quarantine_secs: int = -60,  # already elapsed by default
     joined_offset_secs: int = 0,
@@ -353,7 +353,7 @@ async def test_auto_promote_demotes_previous_primary_in_same_transaction(fresh):
     await _insert_node(node_uuid=self_uuid, ha_state="secondary")
     await _insert_node(
         node_uuid=_OTHER_NODE_UUID,
-        source_ip="10.0.0.1",
+        source_ip="10.0.0.51",
         ha_state="primary",
     )
     await _set_config("primary_uuid", _OTHER_NODE_UUID)
@@ -513,7 +513,7 @@ async def test_state_machine_combines_join_flip_and_auto_promote(fresh):
         ha_state="joining",
         quarantine_secs=-10,
         heartbeat_offset_secs=1,
-        source_ip="10.0.0.1",
+        source_ip="10.0.0.51",
     )
     await _set_config("primary_uuid", "0" * 32)  # phantom primary, no row
     await _seed_stale_lease()

@@ -23,7 +23,7 @@ spec:
     # Resurgamus Horizon API (ajuster l'IP/CIDR selon le deploiement)
     - to:
         - ipBlock:
-            cidr: 10.0.0.1/32    # node-1 WG
+            cidr: 10.0.0.20/32    # node-1 WG
       ports:
         - protocol: TCP
           port: 8200

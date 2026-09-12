@@ -221,25 +221,32 @@ async def create_token(
 
         expires = _dt.fromisoformat(body.expires_at)
 
-    await db.execute(
-        text("""
+    # RETURNING id: the caller needs the UUID to bind the token to anything
+    # keyed on it -- a `token` principal in vault_group_members, say. Without
+    # it the only way back to the row it just created is a lookup by name,
+    # which is a second round-trip resting on the active-name uniqueness index.
+    created = (
+        await db.execute(
+            text("""
             INSERT INTO vault_tokens
                 (name, token_hash, permissions, created_by,
                  expires_at, allowed_ips, is_honey)
             VALUES
                 (:name, :hash, CAST(:perms AS jsonb), :actor,
                  :expires, :ips, :is_honey)
+            RETURNING id
         """),
-        {
-            "name": body.name,
-            "hash": token_hash,
-            "perms": json.dumps(body.permissions),
-            "actor": token_info["name"],
-            "expires": expires,
-            "ips": allowed_ips,
-            "is_honey": body.is_honey,
-        },
-    )
+            {
+                "name": body.name,
+                "hash": token_hash,
+                "perms": json.dumps(body.permissions),
+                "actor": token_info["name"],
+                "expires": expires,
+                "ips": allowed_ips,
+                "is_honey": body.is_honey,
+            },
+        )
+    ).fetchone()
 
     await log_action(
         db,
@@ -254,7 +261,12 @@ async def create_token(
 
     _m.tokens_created.labels(kind="standard").inc()
 
-    return {"token": raw_token, "name": body.name, "allowed_ips": allowed_ips}
+    return {
+        "id": str(created.id),
+        "token": raw_token,
+        "name": body.name,
+        "allowed_ips": allowed_ips,
+    }
 
 
 # POST /ephemeral, short-lived scoped token for agents/automation

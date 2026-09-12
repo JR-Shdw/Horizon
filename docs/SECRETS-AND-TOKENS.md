@@ -206,7 +206,7 @@ curl -X POST https://vault.example/api/v1/vault/tokens/ \
   -d '{
     "name": "ansible-prod",
     "permissions": {"secrets": "r", "namespaces": ["prod"]},
-    "allowed_ips": "10.0.0.1/32, 10.0.0.1/32"
+    "allowed_ips": "10.0.0.21/32, 10.0.0.22/32"
   }'
 ```
 
@@ -215,10 +215,10 @@ curl -X POST https://vault.example/api/v1/vault/tokens/ \
 | Form | Meaning |
 |---|---|
 | `null` / absent / `""` | No restriction. Backwards-compatible default. |
-| `"10.0.0.1"` | A single host. Bare IP -> stored as `/32` (v4) or `/128` (v6). |
-| `"10.0.0.1, 10.0.0.1, 10.0.0.1"` | **Lists are supported** - comma-separated. Mix individual IPs and CIDRs freely. |
+| `"10.0.0.21"` | A single host. Bare IP -> stored as `/32` (v4) or `/128` (v6). |
+| `"10.0.0.21, 10.0.0.22, 10.0.0.23"` | **Lists are supported** - comma-separated. Mix individual IPs and CIDRs freely. |
 | `"10.89.0.0/16"` | A CIDR block - every host in the subnet is allowed. |
-| `"10.0.0.1/24, 2001:db8::/64"` | IPv4 and IPv6 in the same allowlist. |
+| `"10.0.0.0/24, 2001:db8::/64"` | IPv4 and IPv6 in the same allowlist. |
 | `"not-a-cidr"` | Rejected at creation with `400 Invalid allowed_ips entry`. |
 
 Whitespace around entries is tolerated. The stored value is canonicalized
@@ -232,7 +232,7 @@ Scope (`secrets:r`) limits **what** the token can do. Namespace limits
 can be replayed from** if it leaks.
 
 Without it, a long-lived token sitting in an Ansible config on host
-`10.0.0.1` is just as valid from any other host on the VPN mesh
+`10.0.0.21` is just as valid from any other host on the VPN mesh
 or the Docker bridge. With it, a compromise of an unrelated workload on
 the same private network does not yield a usable vault credential.
 
@@ -240,9 +240,9 @@ The narrower, the safer:
 
 | Allowlist | Replay surface if leaked |
 |---|---|
-| `"10.0.0.1/32"` | One host. Compromise of any other LAN host won't replay it. |
-| `"10.0.0.1, 10.0.0.1"` | Two hosts. Explicit list - surgical. |
-| `"10.0.0.1/24"` | A whole subnet. OK for a tight VPN segment. |
+| `"10.0.0.21/32"` | One host. Compromise of any other LAN host won't replay it. |
+| `"10.0.0.21, 10.0.0.22"` | Two hosts. Explicit list - surgical. |
+| `"10.0.0.0/24"` | A whole subnet. OK for a tight VPN segment. |
 | `"10.0.0.0/8"` | All of RFC 1918 / 10. Effectively useless for lateral-movement defense. |
 | `null` (default) | Anywhere on whatever network reaches the vault. |
 
@@ -255,7 +255,7 @@ The narrower, the safer:
 | `10.89.0.0/16` | Podman default bridge `podman` |
 | `172.17.0.0/16` | Docker default bridge `docker0` |
 | `172.16.0.0/12` | Covers `docker0` plus user-defined Docker bridges (allocated from this pool) |
-| your VPN subnet | VPN mesh - whatever you assigned (e.g. `10.0.0.1/24`) |
+| your VPN subnet | VPN mesh - whatever you assigned (e.g. `10.0.0.0/24`) |
 
 These are documented for sizing, not as recommended values. A VPN
 mesh is often the loosest you should go; a single-host `/32` is what you
@@ -295,7 +295,7 @@ curl -X POST https://vault.example/api/v1/vault/tokens/ephemeral \
   -d '{
     "permissions": {"secrets": "r", "namespaces": ["ci/frontend"]},
     "ttl_seconds": 900,
-    "allowed_ips": "10.0.0.1/32"
+    "allowed_ips": "10.0.0.42/32"
   }'
 ```
 

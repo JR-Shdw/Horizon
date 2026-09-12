@@ -249,13 +249,13 @@ function showCreateToken() {
       <div class="muted small help-block">Least privilege by default. Click "Available Permissions" below for upgrade patterns (rw, namespaces, admin, IP allowlist).</div></div>
       <div class="form-group">
         <label>IP allowlist <span class="muted small">(comma-separated CIDRs / IPs, empty = any)</span></label>
-        <input type="text" id="ct-ips" placeholder="10.0.0.1, 10.0.0.1, 10.89.0.0/16">
+        <input type="text" id="ct-ips" placeholder="10.0.0.21, 10.0.0.22, 10.89.0.0/16">
         <div class="muted small help-block">
           Restricts where this token may be used. The vault checks the request's client IP against this list and rejects it with <code>403 Token not allowed from this IP</code> if not matched. Bare IPs are treated as <code>/32</code> (v4) / <code>/128</code> (v6).
           <br><br>
-          <strong>Lists are supported</strong>, comma-separated, mix of single IPs and CIDRs, IPv4 + IPv6. Example: <code>10.0.0.1, 10.0.0.1, 2001:db8::/64</code>.
+          <strong>Lists are supported</strong>, comma-separated, mix of single IPs and CIDRs, IPv4 + IPv6. Example: <code>10.0.0.21, 10.0.0.22, 2001:db8::/64</code>.
           <br><br>
-          <strong>Lateral-movement attacks: narrower = safer.</strong> If a token is leaked, the allowlist limits where it can be replayed from. An explicit list of caller IPs (<code>10.0.0.1, 10.0.0.1</code>) or a tight CIDR (<code>/24</code>, <code>/27</code>) means a compromised host elsewhere on the LAN can't reuse the token. Wide ranges like <code>10.0.0.0/8</code> or full RFC 1918 effectively disable the protection.
+          <strong>Lateral-movement attacks: narrower = safer.</strong> If a token is leaked, the allowlist limits where it can be replayed from. An explicit list of caller IPs (<code>10.0.0.21, 10.0.0.22</code>) or a tight CIDR (<code>/24</code>, <code>/27</code>) means a compromised host elsewhere on the LAN can't reuse the token. Wide ranges like <code>10.0.0.0/8</code> or full RFC 1918 effectively disable the protection.
           <br><br>
           <strong>Reference ranges</strong> (use as ceilings, not as defaults):
           <ul class="help-list">
@@ -263,7 +263,7 @@ function showCreateToken() {
             <li>IPv6 ULA: <code>fc00::/7</code></li>
             <li>Podman default bridge <code>podman</code>: <code>10.89.0.0/16</code></li>
             <li>Docker default bridge <code>docker0</code>: <code>172.17.0.0/16</code> (user-defined bridges allocate other /16s from <code>172.16.0.0/12</code>)</li>
-            <li>VPN: whatever subnet you assigned (e.g. <code>10.0.0.1/24</code>)</li>
+            <li>VPN: whatever subnet you assigned (e.g. <code>10.0.0.0/24</code>)</li>
           </ul>
         </div>
       </div>

@@ -157,7 +157,7 @@ generated `.env` on every host:
 
 ```ini
 RH_CLUSTER_HA_ENABLED=true
-RH_CLUSTER_ADVERTISE_IP=10.0.0.1
+RH_CLUSTER_ADVERTISE_IP=10.0.0.21
 RH_HA_PRIMARY_URL=https://vault.internal:8443
 RH_HA_SERVER_CA_FILE=/ha-server-certs/cert.pem
 ```

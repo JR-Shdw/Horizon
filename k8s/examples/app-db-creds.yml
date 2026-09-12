@@ -11,7 +11,7 @@
 # fait un rollout restart periodique pour re-fetch les secrets
 #
 # Secrets requis dans rhorizon :
-#   - db/url       (ex: postgresql://user:pass@10.0.0.1:5432/mydb)
+#   - db/url       (ex: postgresql://user:pass@10.0.0.20:5432/mydb)
 #
 # kubectl apply -f namespace.yml
 # kubectl apply -f examples/app-db-creds.yml

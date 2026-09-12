@@ -667,6 +667,36 @@ if [[ -n "${RH_NATIVE:-}" ]]; then
                 ;;
         esac
 
+        # The cloud account has passwordless sudo, so use a separate
+        # unprivileged account and root-owned source for this test.
+        if [ "${RH_AI_SYSTEM:-0}" = 1 ]; then
+            case "$OS:$RH_MODE_ARG" in
+                debian:system|ubuntu:system|rocky:system|opensuse:system|arch:system|fedora:system)
+                    echo ">> AI-secure system onboarding assertions:"
+                    ${SSH} "sudo useradd -m -s /bin/sh rhorizon-agent 2>/dev/null || true
+                        sudo install -d -o root -g root -m 0755 /usr/local/src/rhorizon-ai
+                        sudo cp -a rhorizon/. /usr/local/src/rhorizon-ai/
+                        sudo chown -R root:root /usr/local/src/rhorizon-ai
+                        sudo chmod -R go-w /usr/local/src/rhorizon-ai
+                        sudo /usr/local/src/rhorizon-ai/tools/quickstart-ai-system.sh --user rhorizon-agent"
+                    ${SSH} "sudo -u rhorizon-agent test ! -r /etc/rhorizon/secrets/master-password
+                        sudo -u rhorizon-agent test ! -r /etc/rhorizon/secrets/root-token
+                        sudo -u rhorizon test ! -r /etc/rhorizon/secrets/master-password
+                        sudo -u rhorizon test ! -r /etc/rhorizon/secrets/root-token
+                        sudo -u rhorizon-agent test ! -r /opt/rhorizon/app/main.py
+                        sudo -u rhorizon-agent test -r /home/rhorizon-agent/.config/rhorizon/mcp.token
+                        sudo -u rhorizon-agent test -r /home/rhorizon-agent/.config/rhorizon/ca.pem
+                        test \"\$(sudo stat -c %a /home/rhorizon-agent/.config/rhorizon/mcp.token)\" = 400
+                        test \"\$(sudo stat -c %a /etc/rhorizon/secrets/root-token)\" = 400"
+                    echo ">> PASS: AI account has the scoped token but neither recovery credential"
+                    ;;
+                *)
+                    echo ">> FAIL: RH_AI_SYSTEM is currently a Linux system-mode test" >&2
+                    exit 1
+                    ;;
+            esac
+        fi
+
         # Record the TLS posture ON THE WIRE, not from the installer's own
         # decision line. Which group nginx was configured with and which one a
         # client actually negotiates are different claims, and the VM is

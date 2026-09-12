@@ -82,7 +82,7 @@ curl -X POST "$VAULT_URL/api/v1/vault/tokens/" \
   -d '{
     "name":"alert-host-bootstrap",
     "permissions":{"secrets":"r","namespaces":["alerts"]},
-    "allowed_ips":"10.0.0.1/32"
+    "allowed_ips":"10.0.0.21/32"
   }'
 ```
 

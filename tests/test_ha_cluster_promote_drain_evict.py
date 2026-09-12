@@ -242,7 +242,7 @@ async def test_read_revoked_corrupt_row_fails_closed():
 async def test_promote_secondary_to_primary(admin_token, client):
     init = await _init_cluster(client, admin_token)
     primary_uuid = init["primary_uuid"]
-    await _insert_secondary("node-bbbb", "10.0.0.1")
+    await _insert_secondary("node-bbbb", "10.0.0.51")
     transitions_before = _transition_count("secondary", "primary")
     demotes_before = _transition_count("primary", "secondary")
 
@@ -292,7 +292,7 @@ async def test_promote_409_already_primary(admin_token, client):
 @pytest.mark.asyncio
 async def test_promote_409_target_in_joining_state(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_node_in_state("node-joiner", "10.0.0.1", "joining")
+    await _insert_node_in_state("node-joiner", "10.0.0.55", "joining")
     r = await client.post(
         "/api/v1/vault/cluster/promote/node-joiner",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -321,7 +321,7 @@ async def test_promote_409_version_below_floor(admin_token, client):
 
     await _init_cluster(client, admin_token)
     # Insert a secondary whose cluster_version sits below the configured floor.
-    await _insert_secondary("node-old", "10.0.0.1", version=below)
+    await _insert_secondary("node-old", "10.0.0.56", version=below)
     r = await client.post(
         "/api/v1/vault/cluster/promote/node-old",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -365,7 +365,7 @@ async def test_demote_404_unknown_uuid(admin_token, client):
 @pytest.mark.asyncio
 async def test_demote_409_not_primary(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_secondary("node-bbbb", "10.0.0.1")
+    await _insert_secondary("node-bbbb", "10.0.0.51")
     r = await client.post(
         "/api/v1/vault/cluster/demote/node-bbbb",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -380,7 +380,7 @@ async def test_demote_409_not_primary(admin_token, client):
 @pytest.mark.asyncio
 async def test_drain_secondary_returns_202_and_sets_deadline(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_secondary("node-bbbb", "10.0.0.1")
+    await _insert_secondary("node-bbbb", "10.0.0.51")
     transitions_before = _transition_count("secondary", "draining")
 
     r = await client.post(
@@ -416,7 +416,7 @@ async def test_drain_primary_refused_demote_first(admin_token, client):
 @pytest.mark.asyncio
 async def test_drain_joining_refused_evict_instead(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_node_in_state("node-joiner", "10.0.0.1", "joining")
+    await _insert_node_in_state("node-joiner", "10.0.0.55", "joining")
     r = await client.post(
         "/api/v1/vault/cluster/drain/node-joiner",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -430,7 +430,7 @@ async def test_drain_already_draining_409(admin_token, client):
     await _init_cluster(client, admin_token)
     await _insert_node_in_state(
         "node-bbbb",
-        "10.0.0.1",
+        "10.0.0.51",
         "draining",
         drain_deadline_at_sql="NOW() + INTERVAL '30 seconds'",
     )
@@ -447,7 +447,7 @@ async def test_drain_already_draining_409(admin_token, client):
 @pytest.mark.asyncio
 async def test_evict_secondary_marks_evicted_and_revokes(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_secondary("node-bbbb", "10.0.0.1")
+    await _insert_secondary("node-bbbb", "10.0.0.51")
     revoked_before = await _read_revoked()
     assert "node-bbbb" not in revoked_before
 
@@ -482,7 +482,7 @@ async def test_evict_primary_refused_demote_first(admin_token, client):
 @pytest.mark.asyncio
 async def test_evict_joining_node_directly(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_node_in_state("node-joiner", "10.0.0.1", "joining")
+    await _insert_node_in_state("node-joiner", "10.0.0.55", "joining")
     r = await client.post(
         "/api/v1/vault/cluster/evict/node-joiner",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -495,7 +495,7 @@ async def test_evict_joining_node_directly(admin_token, client):
 @pytest.mark.asyncio
 async def test_evict_already_evicted_409(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_node_in_state("node-gone", "10.0.0.1", "evicted")
+    await _insert_node_in_state("node-gone", "10.0.0.56", "evicted")
     r = await client.post(
         "/api/v1/vault/cluster/evict/node-gone",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -509,7 +509,7 @@ async def test_evict_already_evicted_409(admin_token, client):
 @pytest.mark.asyncio
 async def test_unrevoke_happy_path(admin_token, client):
     await _init_cluster(client, admin_token)
-    await _insert_secondary("node-bbbb", "10.0.0.1")
+    await _insert_secondary("node-bbbb", "10.0.0.51")
     await client.post(
         "/api/v1/vault/cluster/evict/node-bbbb",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -547,7 +547,7 @@ async def test_cluster_join_rejected_when_uuid_revoked(admin_token, client):
     ha_password = base64.b64decode(init["ha_password"])
 
     # First, insert a secondary, evict it -> uuid lands in revoked list.
-    await _insert_secondary("revoked-uuid", "10.0.0.1")
+    await _insert_secondary("revoked-uuid", "10.0.0.61")
     er = await client.post(
         "/api/v1/vault/cluster/evict/revoked-uuid",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -604,7 +604,7 @@ async def test_reaper_basule_drained_past_deadline(admin_token, client):
     # Insert a node already draining with a deadline in the past.
     await _insert_node_in_state(
         "node-stale",
-        "10.0.0.1",
+        "10.0.0.62",
         "draining",
         drain_deadline_at_sql="NOW() - INTERVAL '1 second'",
     )
@@ -628,7 +628,7 @@ async def test_reaper_leaves_undeadlined_draining_alone(admin_token, client):
     await _init_cluster(client, admin_token)
     await _insert_node_in_state(
         "node-fresh",
-        "10.0.0.1",
+        "10.0.0.63",
         "draining",
         drain_deadline_at_sql="NOW() + INTERVAL '30 seconds'",
     )

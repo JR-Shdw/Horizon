@@ -51,7 +51,7 @@ def _load_key(pem: bytes) -> Ed25519PrivateKey:
 def test_sign_returns_pem_pair(ca_pem):
     ca_cert, ca_key = ca_pem
     cert_pem, key_pem = cluster_ca.sign_node_cert(
-        ca_cert, ca_key, node_uuid="node-uuid-abc", source_ip="10.0.0.1"
+        ca_cert, ca_key, node_uuid="node-uuid-abc", source_ip="10.0.0.10"
     )
     assert cert_pem.startswith(b"-----BEGIN CERTIFICATE-----")
     assert b"PRIVATE KEY-----" in key_pem
@@ -60,7 +60,7 @@ def test_sign_returns_pem_pair(ca_pem):
 def test_sign_cert_cn_matches_node_uuid(ca_pem):
     ca_cert, ca_key = ca_pem
     cert_pem, _ = cluster_ca.sign_node_cert(
-        ca_cert, ca_key, node_uuid="node-uuid-xyz", source_ip="10.0.0.1"
+        ca_cert, ca_key, node_uuid="node-uuid-xyz", source_ip="10.0.0.10"
     )
     cert = _load_cert(cert_pem)
     cns = [attr.value for attr in cert.subject if attr.oid == NameOID.COMMON_NAME]

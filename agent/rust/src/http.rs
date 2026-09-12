@@ -737,10 +737,10 @@ mod tests {
 
     #[test]
     fn urls_parse_scheme_host_port_and_path() {
-        let target = parse_url("https://10.0.0.1:8200/api/v1/vault/secrets/x").unwrap();
+        let target = parse_url("https://10.0.0.20:8200/api/v1/vault/secrets/x").unwrap();
         assert_eq!(
             (target.tls, target.host.as_str(), target.port),
-            (true, "10.0.0.1", 8200)
+            (true, "10.0.0.20", 8200)
         );
         assert_eq!(target.path, "/api/v1/vault/secrets/x");
 

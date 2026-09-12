@@ -296,6 +296,38 @@ by the vault as an ordinary read of the credential, so the trail shows that it
 was used but not where it went; the destination appears only in the server's
 stderr. Use the hub if you need the destination on the chain.
 
+### What an MCP audit row does and does not prove
+
+Two classes of field, and the distinction decides what a row is worth as
+evidence:
+
+| Field | Origin |
+|---|---|
+| `agent_token_id`, `actor` | Derived from the authenticated bearer. Unforgeable by the caller. |
+| `ip_address` | Observed by the vault on the socket. |
+| `hub`, `backend`, `tool`, `target`, `decision`, `detail` | **Caller-reported.** Recorded as stated, verified by nothing. |
+
+So `hub` is a label, not an origin. Any holder of a valid token can post a row
+naming any hub, and the vault has no way to tell a call that really traversed
+the hub from one that did not. **Do not read a row as "this access went through
+the hub."** What it supports is "the holder of this token reported doing this",
+with the identity half of that statement authenticated.
+
+The chain signature is tamper-evidence over what was written. It says the entry
+has not been altered since; it says nothing about whether the writer was honest.
+
+None of this weakens access control, because access control never depended on
+it: the authority of a call is the ACL on its token, which the vault enforces
+identically whether the call arrived through the hub or straight from `curl`.
+That is the point of putting the boundary on the token rather than on the path.
+
+Path-authenticated attribution becomes necessary only if you want rules that
+differ *by* path (direct token denied, hub allowed), or a credential usable only
+from the hub. That needs a real workload identity for the hub -- a dedicated
+client certificate or a hub-specific credential -- so the vault can record an
+authenticated workload rather than trusting a claim. It does not exist today:
+the sidecar connects with no client authentication.
+
 ---
 
 ## 5. Setup - local stdio (Cursor, Cline, opencode, Claude Desktop, Claude Code)

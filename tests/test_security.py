@@ -800,12 +800,12 @@ async def test_whitelist_cidr_matches_subnet(client):
 
     original = list(_WHITELIST_CIDRS)
     _WHITELIST_CIDRS.clear()
-    _WHITELIST_CIDRS.append(ipaddress.ip_network("10.0.0.1/24"))
+    _WHITELIST_CIDRS.append(ipaddress.ip_network("10.0.0.0/24"))
     try:
         assert _is_whitelisted("10.0.0.1") is True
-        assert _is_whitelisted("10.0.0.1") is True
-        assert _is_whitelisted("10.0.0.1") is True
-        assert _is_whitelisted("10.0.1.1") is False
+        assert _is_whitelisted("10.0.0.99") is True
+        assert _is_whitelisted("10.0.0.255") is True
+        assert _is_whitelisted("10.1.0.1") is False
         assert _is_whitelisted("172.16.0.1") is False
         assert _is_whitelisted("not-an-ip") is False
     finally:

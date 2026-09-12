@@ -1607,6 +1607,16 @@ async def ingest_mcp_audit(
     is that token's scope). ``actor`` and ``agent_token_id`` are derived from the
     AUTHENTICATED token, never from the body -- an agent cannot forge another's
     attribution. ``ip_address`` is the hub host as seen by the vault.
+
+    Every OTHER field is caller-reported. ``hub``, ``backend``, ``tool``,
+    ``target``, ``decision`` and ``detail`` are recorded as the client stated
+    them, and nothing here verifies any of it. In particular ``hub`` is a label,
+    not an origin: any holder of a valid token can post a row naming any hub,
+    so a row must not be read as evidence that the call traversed the hub.
+    Proving that needs a workload identity for the hub itself -- a client
+    certificate or a hub-specific credential -- which does not exist today
+    (the sidecar connects with no client auth). The chain signature covers
+    tamper-evidence of what was written, not the truthfulness of the writer.
     """
     if body.decision not in ("allowed", "policy_denied", "error"):
         raise HTTPException(400, "decision must be allowed|policy_denied|error")

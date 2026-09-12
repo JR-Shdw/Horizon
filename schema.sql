@@ -272,16 +272,32 @@ CREATE INDEX IF NOT EXISTS idx_vault_audit_verification_anchor_completed
 -- sealed and survives key rotation. Rows appear in the Jets "MCP" tab. This table
 -- stays empty unless a hub is deployed; it changes nothing about the standalone
 -- stdio mcp/ server.
+--
+-- TWO CLASSES OF FIELD, and the difference matters when reading a row as
+-- evidence. `agent_token_id`, `actor` and `ip_address` are derived server-side
+-- from the authenticated bearer and the socket; a caller cannot forge them.
+-- Everything else -- `hub`, `backend`, `tool`, `target`, `decision`, `detail` --
+-- is CALLER-REPORTED: the vault records what the client said it did. The row
+-- signature proves the entry has not been altered since it was written; it
+-- proves nothing about whether the client told the truth.
+--
+-- So `hub` is a label, not an origin. Any holder of a valid token can POST
+-- /audit/mcp claiming any hub name, and nothing here distinguishes a call that
+-- really traversed the hub from one that did not. Path-authenticated
+-- attribution needs a workload identity for the hub (client certificate or a
+-- hub-specific credential), which does not exist yet -- the sidecar connects
+-- with no client auth. Until then, do not read `hub` as "this access went
+-- through the hub".
 CREATE TABLE IF NOT EXISTS vault_audit_mcp (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp      TIMESTAMPTZ DEFAULT clock_timestamp(),
-    agent_token_id UUID,                     -- vault_tokens.id of the calling agent
+    agent_token_id UUID,                     -- vault_tokens.id of the calling agent (server-derived)
     actor          TEXT NOT NULL,            -- token username (from the bearer, not the body)
-    hub            TEXT,                     -- originating hub app name (self-declared label, signed)
-    backend        TEXT NOT NULL,            -- MCP backend prefix (e.g. rhorizon, docker)
-    tool           TEXT NOT NULL,            -- tool name
-    target         TEXT,                     -- secret/resource name (no value)
-    decision       TEXT NOT NULL,            -- allowed | policy_denied | error
+    hub            TEXT,                     -- caller-reported hub label. NOT proof of origin.
+    backend        TEXT NOT NULL,            -- caller-reported MCP backend prefix (e.g. rhorizon, docker)
+    tool           TEXT NOT NULL,            -- caller-reported tool name
+    target         TEXT,                     -- caller-reported secret/resource name (no value)
+    decision       TEXT NOT NULL,            -- caller-reported: allowed | policy_denied | error
     detail         JSONB DEFAULT '{}',
     ip_address     TEXT,                     -- the hub host as seen by the vault
     signature      TEXT NOT NULL,

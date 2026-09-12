@@ -266,7 +266,7 @@ async def test_inet_round_trip(setup_db):
                 "    node_uuid, source_ip, ha_state, cluster_version,"
                 "    cert_fingerprint, cert_not_after"
                 ") VALUES ("
-                "    'test-uuid-v4', CAST('10.0.0.1' AS INET),"
+                "    'test-uuid-v4', CAST('10.0.0.42' AS INET),"
                 "    'joining', '1.0.0', 'fpr1', NOW() + INTERVAL '30 days'"
                 "), ("
                 "    'test-uuid-v6', CAST('2001:db8::42' AS INET),"
@@ -284,7 +284,7 @@ async def test_inet_round_trip(setup_db):
         )
         rows = r.fetchall()
         assert len(rows) == 2
-        assert rows[0].ip == "10.0.0.1"
+        assert rows[0].ip == "10.0.0.42"
         assert rows[1].ip == "2001:db8::42"
         await db.execute(
             text(

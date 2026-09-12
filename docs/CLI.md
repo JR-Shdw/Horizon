@@ -349,7 +349,7 @@ subset of its own.
 ### `rhorizon token set-ip` - change the IP allowlist
 
 ```bash
-rhorizon token set-ip a1b2c3d4 "10.0.0.1,10.0.0.1"
+rhorizon token set-ip a1b2c3d4 "10.0.0.21,10.0.0.22"
 ```
 
 Updates `allowed_ips` on a live token without re-minting it. Narrow is safer:
@@ -659,8 +659,8 @@ ha_loaded:         true
 uuid_ip_conflicts: 0
 
   UUID           IP                 STATE        HEARTBEAT       CERT
-  a1b2c3d4       10.0.0.1         primary           3s ago     88d
-  e5f6a7b8       10.0.0.1         secondary         2s ago     88d
+  a1b2c3d4       10.0.0.21         primary           3s ago     88d
+  e5f6a7b8       10.0.0.22         secondary         2s ago     88d
 ```
 
 The columns: short node UUID, source IP, HA state, heartbeat age,

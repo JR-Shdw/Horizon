@@ -559,3 +559,155 @@ async def test_missing_namespace_mapping_fails_closed_on_all_secret_routes(
     )
     assert restored.status_code == 503, restored.text
     assert restored.json()["detail"] == "Secret namespace mapping unavailable"
+
+
+@pytest.mark.asyncio
+async def test_token_principal_membership_gates_reads_and_is_live(
+    client, master_password, admin_token
+):
+    """A `token` principal in the owner group is what actually gates a strict
+    namespace, and it is re-read on every request.
+
+    This is the property the AI quickstart leans on. An agent that ignores its
+    policy file, or skips the MCP server entirely and calls the vault with its
+    own bearer, is still bound by this: the check runs here, not in the caller.
+    Revocation therefore needs no token rotation - dropping the principal is
+    enough, and it takes effect on the next request.
+    """
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    r = await client.post(
+        "/api/v1/vault/groups/",
+        json={"name": "rbac-mcp-agents", "permissions": {"secrets": "r"}},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    gid = r.json()["id"]
+
+    r = await client.post(
+        "/api/v1/vault/namespaces/",
+        json={
+            "name": "rbac-ns-mcp",
+            "owner_group_id": gid,
+            "enforce_membership": True,
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.post(
+        "/api/v1/vault/secrets/",
+        json={"name": "rbac-mcp-secret", "value": "v1", "namespace": "rbac-ns-mcp"},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    # The agent's own token: read-only, and its `namespaces` claim names the
+    # namespace. Under agnostic mode that claim alone would be enough.
+    r = await client.post(
+        "/api/v1/vault/tokens/",
+        json={
+            "name": "rbac-mcp-agent",
+            "permissions": {"secrets": "r", "namespaces": ["rbac-ns-mcp"]},
+        },
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    minted = r.json()
+    agent_headers = {"Authorization": f"Bearer {minted['token']}"}
+    # The mint returns the UUID, which is what lets the caller bind the token
+    # it just created without a second lookup by name.
+    assert minted["id"]
+
+    read_url = "/api/v1/vault/secrets/rbac-mcp-secret?namespace=rbac-ns-mcp"
+
+    r = await client.get(read_url, headers=agent_headers)
+    assert r.status_code == 403, r.text
+
+    r = await client.post(
+        f"/api/v1/vault/groups/{gid}/members",
+        json={"principal_type": "token", "principal_id": minted["id"]},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    member_id = r.json()["member_id"]
+
+    r = await client.get(read_url, headers=agent_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["value"] == "v1"
+
+    r = await client.delete(
+        f"/api/v1/vault/groups/{gid}/members/{member_id}", headers=headers
+    )
+    assert r.status_code == 200, r.text
+
+    # Same bearer, same claim, next request: refused.
+    r = await client.get(read_url, headers=agent_headers)
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_auto_created_namespace_can_be_adopted_and_ratcheted(
+    client, master_password, admin_token
+):
+    """The quickstart's fallback path.
+
+    Writing a secret auto-registers its namespace under vault-admins in
+    agnostic mode, so on an install that has already been used, creating the
+    governed namespace answers 409. The recovery is to adopt the existing row:
+    PUT the owner group and the ratchet onto it. Without this the quickstart
+    would only ever work on a pristine vault.
+    """
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # A secret lands first, so the namespace exists, ungoverned.
+    r = await client.post(
+        "/api/v1/vault/secrets/",
+        json={"name": "rbac-adopt-secret", "value": "v1", "namespace": "rbac-ns-adopt"},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.post(
+        "/api/v1/vault/groups/",
+        json={"name": "rbac-adopt-group", "permissions": {"secrets": "r"}},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    gid = r.json()["id"]
+
+    # Creating it outright now collides.
+    r = await client.post(
+        "/api/v1/vault/namespaces/",
+        json={
+            "name": "rbac-ns-adopt",
+            "owner_group_id": gid,
+            "enforce_membership": True,
+        },
+        headers=headers,
+    )
+    assert r.status_code == 409, r.text
+
+    # Adopting it works, and the ratchet takes.
+    r = await client.put(
+        "/api/v1/vault/namespaces/rbac-ns-adopt",
+        json={"owner_group_id": gid, "enforce_membership": True},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+    r = await client.get("/api/v1/vault/namespaces/rbac-ns-adopt", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["enforce_membership"] is True
+    assert str(r.json()["owner_group_id"]) == gid
+
+    # And it is genuinely set-once from here.
+    r = await client.put(
+        "/api/v1/vault/namespaces/rbac-ns-adopt",
+        json={"enforce_membership": False},
+        headers=headers,
+    )
+    assert r.status_code == 423, r.text
+    assert "set-once" in r.json()["detail"]

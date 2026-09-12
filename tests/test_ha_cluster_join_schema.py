@@ -91,7 +91,7 @@ async def test_vault_challenges_insert_with_join_binding_columns(setup_db):
             {
                 "c": "test-nonce-6b-001",
                 "u": "node-uuid-abc",
-                "ip": "10.0.0.1",
+                "ip": "10.0.0.10",
             },
         )
         r = await db.execute(
@@ -103,7 +103,7 @@ async def test_vault_challenges_insert_with_join_binding_columns(setup_db):
         )
         row = r.fetchone()
         assert row.node_uuid == "node-uuid-abc"
-        assert row.source_ip == "10.0.0.1"
+        assert row.source_ip == "10.0.0.10"
         assert row.issued_at is not None  # DEFAULT NOW() filled it in
         assert row.purpose == "cluster_join"
         # Cleanup so reruns stay idempotent.

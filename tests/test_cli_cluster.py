@@ -133,7 +133,7 @@ async def _init_cluster(client, admin_token):
     return r.json()
 
 
-async def _insert_secondary(node_uuid: str, source_ip: str = "10.0.0.1"):
+async def _insert_secondary(node_uuid: str, source_ip: str = "10.0.0.21"):
     """Plant a secondary row + ha_state row directly via DB."""
     async with async_session() as db:
         await db.execute(
@@ -222,7 +222,7 @@ async def test_cluster_ha_self_null_pre_join(client, admin_token):
 async def test_cluster_promote_secondary(client, admin_token):
     init = await _init_cluster(client, admin_token)
     secondary_uuid = "f" * 32
-    await _insert_secondary(secondary_uuid, source_ip="10.0.0.1")
+    await _insert_secondary(secondary_uuid, source_ip="10.0.0.22")
     c = _make_client(client, admin_token)
     r = await c._arequest("POST", f"/api/v1/vault/cluster/promote/{secondary_uuid}")
     assert r["node_uuid"] == secondary_uuid

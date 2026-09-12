@@ -10,6 +10,7 @@ that covers the rest.
 | You want | Go to |
 |---|---|
 | One command on a laptop | [Quick install](#quick-install-one-command) |
+| Keep a local AI process away from recovery authority | [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) |
 | Choose runtime and size | [Full control](#full-control-power-user) |
 | Native, per-OS detail | [`INSTALL-NATIVE.md`](INSTALL-NATIVE.md) |
 | First secret, first unseal | [`QUICKSTART.md`](QUICKSTART.md) |
@@ -50,6 +51,12 @@ curl -fsSL https://raw.githubusercontent.com/JR-Shdw/Horizon/main/tools/quicksta
 The native path needs `sudo` (for system packages + PostgreSQL). It also turns
 on whole-process memory locking when the host has unencrypted swap; see
 [Memory protection and swap](DEPLOYMENT.md#36-memory-protection-and-swap).
+
+Both laptop quickstarts keep recovery material under the login account for
+convenience. On Linux, use the separate
+[`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) system path when the AI process
+must receive only its scoped MCP token while the master password and
+administrator token remain root-only.
 
 ## Full control (power user)
 

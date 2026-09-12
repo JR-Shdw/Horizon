@@ -110,7 +110,7 @@ function _pkiRenderManage(el, ca, namespaces) {
       <div class="card-title">Issue a certificate (namespace ${esc(ca.namespace)})</div>
       <label>Common name <input id="pki-issue-cn" placeholder="svc.internal" maxlength="253"></label>
       <label>SAN DNS (comma-separated) <input id="pki-issue-dns" placeholder="svc.internal,svc"></label>
-      <label>SAN IPs (comma-separated) <input id="pki-issue-ips" placeholder="10.0.0.1"></label>
+      <label>SAN IPs (comma-separated) <input id="pki-issue-ips" placeholder="10.0.0.7"></label>
       <label>TTL (days) <input id="pki-issue-ttl" type="number" value="30" min="1"></label>
       <div class="btn-group">
         <button class="btn primary small" data-action="pkiIssue">Issue</button>

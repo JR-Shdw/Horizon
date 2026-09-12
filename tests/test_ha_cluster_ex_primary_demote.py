@@ -36,7 +36,7 @@ _OTHER_NODE_UUID = "ffffeeeeddddccccbbbbaaaa99998888"
 async def _insert_node(
     *,
     node_uuid: str,
-    source_ip: str = "10.0.0.1",
+    source_ip: str = "10.0.0.50",
     ha_state: str = "secondary",
     quarantine_secs: int = -60,
     heartbeat_offset_secs: int | None = 1,

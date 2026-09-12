@@ -136,7 +136,7 @@ pdb:
 
 networkPolicy:
   ingressFrontendCidrs:
-    - 10.0.0.1/24       # VPN
+    - 10.0.0.0/24       # VPN
     - 192.168.10.0/24    # office VPN
 ```
 

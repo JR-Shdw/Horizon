@@ -18,7 +18,7 @@ def _make_request(host: str | None, headers: dict | None = None) -> Mock:
 def trusted(monkeypatch):
     """Override _TRUSTED_PROXIES to a known set for the test."""
     nets = [
-        ipaddress.ip_network("10.0.0.1/24"),
+        ipaddress.ip_network("10.0.0.0/24"),
         ipaddress.ip_network("172.16.0.1/24"),
     ]
     monkeypatch.setattr(ci, "_TRUSTED_PROXIES", nets)
@@ -58,8 +58,8 @@ def test_overly_broad_proxies_flags_wide_ranges(monkeypatch):
     nets = [
         ipaddress.ip_network("10.0.0.0/8"),  # wide v4
         ipaddress.ip_network("192.168.0.0/16"),  # wide v4
-        ipaddress.ip_network("10.0.0.1/32"),  # host, tight
-        ipaddress.ip_network("10.0.0.1/24"),  # boundary, tight
+        ipaddress.ip_network("10.0.0.21/32"),  # host, tight
+        ipaddress.ip_network("10.0.0.0/24"),  # boundary, tight
         ipaddress.ip_network("fc00::/7"),  # wide v6
     ]
     monkeypatch.setattr(ci, "_TRUSTED_PROXIES", nets)
@@ -72,14 +72,14 @@ def test_overly_broad_proxies_flags_wide_ranges(monkeypatch):
 
 def test_trusted_peer_returns_first_untrusted_xff_hop(trusted):
     r = _make_request(
-        "10.0.0.1", {"x-forwarded-for": "1.2.3.4, 10.0.0.1, 172.16.0.1"}
+        "10.0.0.20", {"x-forwarded-for": "1.2.3.4, 10.0.0.30, 172.16.0.1"}
     )
     assert ci.get_client_ip(r) == "1.2.3.4"
 
 
 def test_trusted_peer_no_xff_returns_direct(trusted):
-    r = _make_request("10.0.0.1", {})
-    assert ci.get_client_ip(r) == "10.0.0.1"
+    r = _make_request("10.0.0.20", {})
+    assert ci.get_client_ip(r) == "10.0.0.20"
 
 
 def test_unknown_when_request_client_missing(trusted):
@@ -90,13 +90,13 @@ def test_unknown_when_request_client_missing(trusted):
 def test_all_xff_trusted_returns_leftmost(trusted):
     """When every hop is trusted, return the leftmost (origin closest)."""
     r = _make_request(
-        "10.0.0.1", {"x-forwarded-for": "10.0.0.1, 10.0.0.1, 172.16.0.1"}
+        "10.0.0.20", {"x-forwarded-for": "10.0.0.5, 10.0.0.30, 172.16.0.1"}
     )
-    assert ci.get_client_ip(r) == "10.0.0.1"
+    assert ci.get_client_ip(r) == "10.0.0.5"
 
 
 def test_malformed_xff_hop_skipped(trusted):
     r = _make_request(
-        "10.0.0.1", {"x-forwarded-for": "not-an-ip, 1.2.3.4, 10.0.0.1"}
+        "10.0.0.20", {"x-forwarded-for": "not-an-ip, 1.2.3.4, 10.0.0.30"}
     )
     assert ci.get_client_ip(r) == "1.2.3.4"

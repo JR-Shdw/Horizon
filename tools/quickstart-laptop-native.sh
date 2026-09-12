@@ -46,7 +46,8 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 # deprecated RHORIZON_<X> alias so the reads below honor the canonical name.
 for _rn in DIR CONFIG_DIR STATE_DIR RUNTIME_DIR AUDIT_DIR API_PORT FRONTEND_PORT \
         FRONTEND_HTTP_PORT BIND API_BIND TIER PERSIST WORKERS MASTER_PASSWORD \
-        MCP_VENV MCP_TOKEN_FILE MCP_POLICY MCP_TOKEN_NAME TLS_CERT \
+        MCP_VENV MCP_TOKEN_FILE MCP_POLICY MCP_TOKEN_NAME MCP_NAMESPACE MCP_GROUP \
+        TLS_CERT \
         REPO_BASE REPO_RAW REPO_GIT; do
     eval "_rv=\${RH_${_rn}:-}"
     if [ -n "${_rv}" ]; then eval "RHORIZON_${_rn}=\${_rv}"; fi
@@ -74,6 +75,8 @@ MCP_VENV="${RHORIZON_MCP_VENV:-$XDG_DATA_HOME/rhorizon-mcp/.venv}"
 MCP_TOKEN_FILE="${RHORIZON_MCP_TOKEN_FILE:-$CONFIG_DIR/mcp.token}"
 MCP_POLICY_FILE="${RHORIZON_MCP_POLICY:-$XDG_CONFIG_HOME/rhorizon-mcp/policy.toml}"
 MCP_TOKEN_NAME="${RHORIZON_MCP_TOKEN_NAME:-mcp-agent}"
+MCP_NAMESPACE="${RHORIZON_MCP_NAMESPACE:-mcp}"
+MCP_GROUP_NAME="${RHORIZON_MCP_GROUP:-mcp-agents}"
 
 REPO_BASE="${RHORIZON_REPO_BASE:-https://github.com/JR-Shdw/Horizon}"
 case "$REPO_BASE" in
@@ -178,14 +181,16 @@ INSTALL_ARGS="--mode user --workers $WORKERS"
 # shellcheck disable=SC2086
 sh "$REPO_ROOT/tools/install-native.sh" $INSTALL_ARGS
 
-if [ -f "$ROOT_TOKEN_FILE" ]; then
+# A first run reads the token the trunk installer just wrote. A re-run will not
+# find it, because this script takes it off disk on the way out (see the end),
+# so the operator hands it back through the environment.
+ROOT_TOKEN="${RH_ROOT_TOKEN:-}"
+if [ -z "$ROOT_TOKEN" ] && [ -f "$ROOT_TOKEN_FILE" ]; then
     ROOT_TOKEN="$(cat "$ROOT_TOKEN_FILE")"
-elif [ -f "$SECRET_FILE" ]; then
+elif [ -z "$ROOT_TOKEN" ] && [ -f "$SECRET_FILE" ]; then
     ROOT_TOKEN="$(sed -n 's/^ROOT_TOKEN=//p' "$SECRET_FILE" 2>/dev/null || true)"
-else
-    ROOT_TOKEN=""
 fi
-[ -n "$ROOT_TOKEN" ] || die "No admin token at $ROOT_TOKEN_FILE (nor in $SECRET_FILE). A default install stays SEALED and writes no token: unseal it once, or re-run with RH_MASTER_PASSWORD set. If the vault was unsealed by an earlier install whose token was not saved, mint one with 'rhorizon tokens create' and re-run."
+[ -n "$ROOT_TOKEN" ] || die "No admin token at $ROOT_TOKEN_FILE (nor in $SECRET_FILE). A default install stays SEALED and writes no token: unseal it once, or re-run with RH_MASTER_PASSWORD set. If a previous run of this script removed the token from disk, pass the one you saved: RH_ROOT_TOKEN=rh_... bash tools/quickstart-laptop-native.sh"
 
 # Sanity: the trunk already unsealed and health-checked, but confirm reachable
 # before we mint the MCP key.
@@ -217,26 +222,106 @@ ok "MCP server : $MCP_VENV/bin/rhorizon-mcp-server"
 
 mkdir -p "$(dirname "$MCP_TOKEN_FILE")"
 chmod 0700 "$(dirname "$MCP_TOKEN_FILE")"
+
+# The boundary that actually holds lives in the vault, not in the policy file
+# written below: the namespace is owned by a group, the group lists the
+# assistant's key by UUID, and `enforce_membership` makes that list the gate
+# rather than the key's own claim. Re-read on every request, so an assistant
+# that rewrites its policy or skips the MCP server entirely is still bound by
+# it, and revoking is removing the principal -- no key rotation.
+# Set-once: the vault refuses to relax it later, so it is set here on a
+# namespace this script owns.
+# Sets RH_CODE and RH_BODY. Deliberately NOT called as $(rh_api ...): a command
+# substitution runs in a subshell, so the status code would never make it back
+# to the caller and every check below would fall through to its error branch.
+rh_api() {  # rh_api METHOD PATH [JSON_BODY]
+    local _method=$1 _path=$2 _body=${3:-} _out
+    if [ -n "$_body" ]; then
+        _out=$(curl -sS --cacert "$CA_FILE" -o - -w '\n%{http_code}' \
+            -X "$_method" "$BASE_URL$_path" \
+            -H "Authorization: Bearer $ROOT_TOKEN" \
+            -H 'Content-Type: application/json' -d "$_body" 2>&1)
+    else
+        _out=$(curl -sS --cacert "$CA_FILE" -o - -w '\n%{http_code}' \
+            -X "$_method" "$BASE_URL$_path" \
+            -H "Authorization: Bearer $ROOT_TOKEN" 2>&1)
+    fi
+    RH_CODE="${_out##*$'\n'}"
+    RH_BODY="${_out%$'\n'*}"
+}
+
+json_get() {  # json_get FIELD  (JSON on stdin)
+    python3 -c 'import sys, json
+try:
+    print(json.load(sys.stdin).get(sys.argv[1]) or "")
+except Exception:
+    print("")' "$1" 2>/dev/null
+}
+
+rh_api POST /api/v1/vault/groups/ \
+    "{\"name\":\"$MCP_GROUP_NAME\",\"permissions\":{\"secrets\":\"r\"}}"
+case "$RH_CODE" in
+    201) MCP_GROUP_ID=$(printf '%s' "$RH_BODY" | json_get id) ;;
+    409)
+        rh_api GET /api/v1/vault/groups/
+        MCP_GROUP_ID=$(printf '%s' "$RH_BODY" | python3 -c 'import sys, json
+rows = json.load(sys.stdin)["items"]
+print(next((str(g["id"]) for g in rows if g.get("name") == sys.argv[1]), ""))' "$MCP_GROUP_NAME")
+        ;;
+    *) die "Could not create the access group. Vault response : $RH_BODY" ;;
+esac
+[ -n "$MCP_GROUP_ID" ] || die "Could not determine the id of group '$MCP_GROUP_NAME'."
+
+# 409 here means a secret already registered the namespace, ungoverned and
+# owned by vault-admins. Adopt it rather than giving up.
+rh_api POST /api/v1/vault/namespaces/ \
+    "{\"name\":\"$MCP_NAMESPACE\",\"owner_group_id\":\"$MCP_GROUP_ID\",\"enforce_membership\":true}"
+case "$RH_CODE" in
+    201) ok "Vault section '$MCP_NAMESPACE' created and locked to the access group" ;;
+    409)
+        rh_api PUT "/api/v1/vault/namespaces/$MCP_NAMESPACE" \
+            "{\"owner_group_id\":\"$MCP_GROUP_ID\",\"enforce_membership\":true}"
+        [ "$RH_CODE" = 200 ] || die "Vault section '$MCP_NAMESPACE' exists but could not be locked to the access group. Vault response : $RH_BODY"
+        ok "Vault section '$MCP_NAMESPACE' adopted and locked to the access group"
+        ;;
+    *) die "Could not create the vault section '$MCP_NAMESPACE'. Vault response : $RH_BODY" ;;
+esac
+
 if [ -f "$MCP_TOKEN_FILE" ]; then
     ok "MCP access key already exists at $MCP_TOKEN_FILE - reusing"
+    rh_api GET /api/v1/vault/tokens/
+    MCP_TOKEN_ID=$(printf '%s' "$RH_BODY" | python3 -c 'import sys, json
+rows = json.load(sys.stdin)["items"]
+print(next((str(t["id"]) for t in rows if t.get("name") == sys.argv[1]), ""))' "$MCP_TOKEN_NAME")
 else
-    MINT_RESP=$(curl -fsS --cacert "$CA_FILE" -X POST "$BASE_URL/api/v1/vault/tokens/" \
-        -H "Authorization: Bearer $ROOT_TOKEN" \
-        -H 'Content-Type: application/json' \
-        -d "{\"name\":\"$MCP_TOKEN_NAME\",\"permissions\":{\"secrets\":\"r\",\"namespaces\":[\"mcp\"]}}" \
-        2>&1) || die "Could not create MCP token. Vault response : $MINT_RESP"
-    MCP_TOKEN=$(printf '%s' "$MINT_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token") or "")')
-    [ -n "$MCP_TOKEN" ] || die "Vault did not return a token. Response : $MINT_RESP"
+    rh_api POST /api/v1/vault/tokens/ \
+        "{\"name\":\"$MCP_TOKEN_NAME\",\"permissions\":{\"secrets\":\"r\",\"namespaces\":[\"$MCP_NAMESPACE\"]}}"
+    [ "$RH_CODE" = 201 ] || die "Could not create MCP token. Vault response : $RH_BODY"
+    MCP_TOKEN=$(printf '%s' "$RH_BODY" | json_get token)
+    MCP_TOKEN_ID=$(printf '%s' "$RH_BODY" | json_get id)
+    [ -n "$MCP_TOKEN" ] || die "Vault did not return a token. Response : $RH_BODY"
     umask 077 && printf '%s' "$MCP_TOKEN" > "$MCP_TOKEN_FILE"
     chmod 0400 "$MCP_TOKEN_FILE"
     ok "MCP access key : $MCP_TOKEN_FILE"
 fi
+[ -n "$MCP_TOKEN_ID" ] || die "Could not determine the id of the '$MCP_TOKEN_NAME' key, so it cannot be granted access to '$MCP_NAMESPACE'."
+
+rh_api POST "/api/v1/vault/groups/$MCP_GROUP_ID/members" \
+    "{\"principal_type\":\"token\",\"principal_id\":\"$MCP_TOKEN_ID\"}"
+[ "$RH_CODE" = 201 ] || die "Could not grant the access key entry to '$MCP_NAMESPACE'. Vault response : $RH_BODY"
+ok "Access key granted to '$MCP_NAMESPACE' (and to nothing else)"
 
 mkdir -p "$(dirname "$MCP_POLICY_FILE")"
 chmod 0700 "$(dirname "$MCP_POLICY_FILE")"
 if [ ! -f "$MCP_POLICY_FILE" ]; then
     cat > "$MCP_POLICY_FILE" <<'POLICY'
-# rhorizon-mcp policy - what your AI assistant is allowed to read.
+# rhorizon-mcp policy - which secrets your AI assistant is shown.
+#
+# This is a narrowing, not the boundary. The boundary is in the vault:
+# your assistant's key is granted entry to one section and nothing else,
+# and the vault re-checks that on every request. This file only trims
+# what the assistant sees inside that section, so it stops mistakes
+# rather than intent.
 [secrets]
 whitelist = []
 
@@ -339,6 +424,30 @@ else
 EOF
 fi
 
+# Every admin call this script makes is done by now, so the admin token has no
+# remaining job on this machine. It is the one credential the vault-side grants
+# do not bound -- it can read every section and mint keys -- so leaving it in a
+# file beside the stack would hand all of that to anything running as you,
+# which is precisely what the assistant's scoped key exists to prevent.
+# Removing it does not make the install agent-proof on its own: the master
+# password is still here, and it is enough to read secrets through /oneshot.
+# RH_KEEP_ROOT_TOKEN=1 keeps the old behaviour for anyone automating on top.
+ROOT_TOKEN_REMOVED=0
+if [ "${RH_KEEP_ROOT_TOKEN:-0}" != 1 ]; then
+    [ -f "$ROOT_TOKEN_FILE" ] && { rm -f "$ROOT_TOKEN_FILE"; ROOT_TOKEN_REMOVED=1; }
+    # Older installs kept a second copy in the KEY=VALUE mirror. Taking the
+    # token out of one file while it stays readable in the other would remove
+    # nothing, so strip it there too. The master password line is left alone:
+    # the vault needs it to reopen itself after a restart.
+    if [ -f "$SECRET_FILE" ] && grep -q '^ROOT_TOKEN=' "$SECRET_FILE" 2>/dev/null; then
+        _tmp=$(mktemp "${SECRET_FILE}.XXXXXX")
+        grep -v '^ROOT_TOKEN=' "$SECRET_FILE" > "$_tmp" && chmod 600 "$_tmp" \
+            && mv -f "$_tmp" "$SECRET_FILE"
+        rm -f "$_tmp"
+        ROOT_TOKEN_REMOVED=1
+    fi
+fi
+
 cat <<EOF
   3) RESTART YOUR AI ASSISTANT
 
@@ -352,7 +461,7 @@ cat <<EOF
   ALL YOUR FILES :
      Vault data           PostgreSQL on the host (system-managed)
      App/source           $REPO_ROOT
-     Vault secrets        $SECRET_FILE  (master password + admin token, mode 600)
+     Master password      $CONFIG_DIR/secrets/master-password
      API env file         $CONFIG_DIR/rhorizon.env
      TLS certificate      $CA_FILE  (export RH_CA_FILE=$CA_FILE for the CLI)
      Assistant access key $MCP_TOKEN_FILE
@@ -360,6 +469,26 @@ cat <<EOF
 
   CONTROLLING THE API :
 EOF
+
+if [ "$ROOT_TOKEN_REMOVED" = 1 ]; then
+    cat <<EOF
+
+  SAVE THIS NOW - it is no longer on disk :
+
+     Admin token   $ROOT_TOKEN
+
+     This one opens the whole vault: it can read every section, create
+     and revoke keys, and lock the vault. That is why the setup does not
+     leave it in a file next to the others, where anything running under
+     your account - including your AI assistant - could simply read it.
+
+     Put it in your password manager. You need it to re-run this script
+     or to administer the vault :
+
+       RH_ROOT_TOKEN='$ROOT_TOKEN' bash tools/quickstart-laptop-native.sh
+
+EOF
+fi
 
 if $USE_SYSTEMD; then
     cat <<'EOF'

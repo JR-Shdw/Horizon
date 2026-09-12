@@ -26,7 +26,7 @@ class TestParseTrustedNetworks:
 
     def test_single_ip(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
-            mock.proxy_trusted_ips = "10.0.0.1"
+            mock.proxy_trusted_ips = "10.0.0.20"
             nets = _parse_trusted_networks()
             assert len(nets) == 1
 
@@ -38,13 +38,13 @@ class TestParseTrustedNetworks:
 
     def test_multiple_entries(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
-            mock.proxy_trusted_ips = "10.0.0.1, 172.18.0.0/16, 192.168.1.1"
+            mock.proxy_trusted_ips = "10.0.0.20, 172.18.0.0/16, 192.168.1.1"
             nets = _parse_trusted_networks()
             assert len(nets) == 3
 
     def test_invalid_entry_skipped(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
-            mock.proxy_trusted_ips = "10.0.0.1, not-an-ip, 192.168.1.1"
+            mock.proxy_trusted_ips = "10.0.0.20, not-an-ip, 192.168.1.1"
             nets = _parse_trusted_networks()
             assert len(nets) == 2
 
@@ -60,13 +60,13 @@ def test_enabled_proxy_config_requires_trusted_ips():
 class TestIsTrusted:
     def test_trusted_exact_ip(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
-            mock.proxy_trusted_ips = "10.0.0.1"
-            assert _is_trusted("10.0.0.1") is True
+            mock.proxy_trusted_ips = "10.0.0.20"
+            assert _is_trusted("10.0.0.20") is True
 
     def test_untrusted_ip(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
-            mock.proxy_trusted_ips = "10.0.0.1"
-            assert _is_trusted("10.0.0.1") is False
+            mock.proxy_trusted_ips = "10.0.0.20"
+            assert _is_trusted("10.0.0.99") is False
 
     def test_trusted_cidr(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
@@ -76,11 +76,11 @@ class TestIsTrusted:
     def test_no_trusted_ips(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
             mock.proxy_trusted_ips = ""
-            assert _is_trusted("10.0.0.1") is False
+            assert _is_trusted("10.0.0.20") is False
 
     def test_invalid_client_ip(self):
         with patch("api.app.routes.auth_proxy.settings") as mock:
-            mock.proxy_trusted_ips = "10.0.0.1"
+            mock.proxy_trusted_ips = "10.0.0.20"
             assert _is_trusted("not-an-ip") is False
 
 
@@ -121,7 +121,7 @@ async def test_proxy_untrusted_ip(client, master_password):
         proxy_auth_enabled=True,
         proxy_user_header="Remote-User",
         proxy_groups_header="Remote-Groups",
-        proxy_trusted_ips="10.0.0.1",  # not testclient
+        proxy_trusted_ips="10.0.0.20",  # not testclient
         proxy_session_ttl_hours=8,
     ):
         r = await client.post(

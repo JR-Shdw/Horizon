@@ -97,11 +97,11 @@
   ];
 
   const tokens = [
-    { id: 'tk_ansible', name: 'ansible-deploy', permissions: { secrets: 'r', namespaces: ['prod'] }, allowed_ips: '10.0.0.1/24', created_at: ago(4300), expires_at: ahead(20000), last_used_at: ago(9), active: true },
+    { id: 'tk_ansible', name: 'ansible-deploy', permissions: { secrets: 'r', namespaces: ['prod'] }, allowed_ips: '10.0.0.0/24', created_at: ago(4300), expires_at: ahead(20000), last_used_at: ago(9), active: true },
     { id: 'tk_mcp', name: 'mcp-claude', permissions: { secrets: 'r', namespaces: ['mcp'] }, allowed_ips: '127.0.0.1/32', created_at: ago(1200), expires_at: null, last_used_at: ago(1), active: true },
     { id: 'tk_n8n', name: 'n8n-host', permissions: { secrets: 'r', namespaces: ['n8n'] }, allowed_ips: '10.89.0.0/16', created_at: ago(880), expires_at: null, last_used_at: ago(33), active: true },
     { id: 'tk_ci', name: 'ci-ephemeral', permissions: { secrets: 'r', namespaces: ['prod'] }, allowed_ips: '', created_at: ago(52), expires_at: ahead(8), last_used_at: ago(50), active: true },
-    { id: 'eph_1', name: 'ci-run-8f3a', is_ephemeral: true, parent: 'ci-ephemeral', permissions: { secrets: 'r', namespaces: ['prod'] }, allowed_ips: '10.0.0.1/24', created_at: ago(4), expires_at: ahead(52), last_used_at: ago(3), active: true },
+    { id: 'eph_1', name: 'ci-run-8f3a', is_ephemeral: true, parent: 'ci-ephemeral', permissions: { secrets: 'r', namespaces: ['prod'] }, allowed_ips: '10.0.0.0/24', created_at: ago(4), expires_at: ahead(52), last_used_at: ago(3), active: true },
     { id: 'eph_2', name: 'mcp-agent-1c9b', is_ephemeral: true, parent: 'mcp-claude', permissions: { secrets: 'r', namespaces: ['mcp'] }, allowed_ips: '127.0.0.1/32', created_at: ago(1), expires_at: ahead(58), last_used_at: ago(1), active: true },
   ];
 

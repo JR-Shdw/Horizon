@@ -132,7 +132,7 @@ async def test_put_proxy_config(client, master_password, admin_token):
             "enabled": True,
             "user_header": "Remote-User",
             "groups_header": "Remote-Groups",
-            "trusted_ips": "10.0.0.1/24",
+            "trusted_ips": "10.0.0.0/24",
             "session_ttl_hours": 12,
         },
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -141,14 +141,14 @@ async def test_put_proxy_config(client, master_password, admin_token):
     body = r.json()
     assert body["status"] == "configured"
     assert body["enabled"] is True
-    assert body["trusted_ips"] == "10.0.0.1/24"
+    assert body["trusted_ips"] == "10.0.0.0/24"
     assert body["restart_required"] is True
 
     invalid = await client.post(
         "/api/v1/vault/auth/proxy/config",
         json={
             "enabled": True,
-            "trusted_ips": "10.0.0.1/99",
+            "trusted_ips": "10.0.0.0/99",
             "session_ttl_hours": 12,
         },
         headers={"Authorization": f"Bearer {admin_token}"},

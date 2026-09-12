@@ -138,7 +138,7 @@ rhorizon pki ca --out rhorizon-ca.pem
 
 # 3. Issue a leaf for a service (server-side keygen)
 rhorizon pki issue svc.internal \
-  --dns svc.internal --ip 10.0.0.1 \
+  --dns svc.internal --ip 10.0.0.7 \
   --ttl-days 30 -n default \
   --cert-out svc.pem --key-out svc.key   # key file written mode 0600
 
@@ -185,7 +185,7 @@ curl -X POST https://vault/api/v1/vault/pki/init \
 curl -X POST https://vault/api/v1/vault/pki/issue \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"common_name":"svc.internal","san_dns":["svc.internal"],
-       "san_ips":["10.0.0.1"],"ttl_days":30,"namespace":"default"}'
+       "san_ips":["10.0.0.7"],"ttl_days":30,"namespace":"default"}'
 # -> { "serial", "certificate", "private_key", "ca_chain", "fingerprint",
 #      "algorithm", "not_after" }   (private_key shown only here)
 

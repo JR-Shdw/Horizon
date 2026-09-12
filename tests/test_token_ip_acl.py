@@ -66,20 +66,20 @@ def test_ip_in_allowlist_match_and_miss():
 
 def test_ip_in_allowlist_explicit_list_of_ips():
     """A list of bare IPs (no CIDRs) - common shape for service-account ACLs."""
-    allowlist = "10.0.0.1, 10.0.0.1, 127.0.0.1"
-    assert ip_in_allowlist("10.0.0.1", allowlist) is True
-    assert ip_in_allowlist("10.0.0.1", allowlist) is True
+    allowlist = "10.0.0.21, 10.0.0.22, 127.0.0.1"
+    assert ip_in_allowlist("10.0.0.21", allowlist) is True
+    assert ip_in_allowlist("10.0.0.22", allowlist) is True
     assert ip_in_allowlist("127.0.0.1", allowlist) is True
-    # Off-by-one: 10.0.0.1 is NOT in the list
-    assert ip_in_allowlist("10.0.0.1", allowlist) is False
+    # Off-by-one: 10.0.0.23 is NOT in the list
+    assert ip_in_allowlist("10.0.0.23", allowlist) is False
     # Different subnet
-    assert ip_in_allowlist("10.0.0.1", allowlist) is False
+    assert ip_in_allowlist("10.0.0.20", allowlist) is False
 
 
 def test_ip_in_allowlist_mixed_v4_v6_list():
     """IPv4 + IPv6 in the same allowlist resolve correctly per family."""
-    allowlist = "10.0.0.1/24, 2001:db8::/64, ::1"
-    assert ip_in_allowlist("10.0.0.1", allowlist) is True
+    allowlist = "10.0.0.0/24, 2001:db8::/64, ::1"
+    assert ip_in_allowlist("10.0.0.42", allowlist) is True
     assert ip_in_allowlist("2001:db8::dead", allowlist) is True
     assert ip_in_allowlist("::1", allowlist) is True
     assert ip_in_allowlist("172.17.0.5", allowlist) is False
@@ -289,14 +289,14 @@ async def test_token_with_explicit_ip_list_match_and_miss(
         json={
             "name": "ipacl-list-match",
             "permissions": {"secrets": "r"},
-            "allowed_ips": "127.0.0.1, 10.0.0.1, 10.0.0.1",
+            "allowed_ips": "127.0.0.1, 10.0.0.21, 10.0.0.22",
         },
         headers=headers,
     )
     assert r.status_code == 201
     raw = r.json()["token"]
     # All three IPs canonicalized as /32
-    assert r.json()["allowed_ips"] == "127.0.0.1/32,10.0.0.1/32,10.0.0.1/32"
+    assert r.json()["allowed_ips"] == "127.0.0.1/32,10.0.0.21/32,10.0.0.22/32"
 
     # Test client (127.0.0.1) is in the list -> 200
     r2 = await client.get(
@@ -311,7 +311,7 @@ async def test_token_with_explicit_ip_list_match_and_miss(
         json={
             "name": "ipacl-list-miss",
             "permissions": {"secrets": "r"},
-            "allowed_ips": "10.0.0.1, 10.0.0.1, 10.0.0.1",
+            "allowed_ips": "10.0.0.21, 10.0.0.22, 10.0.0.23",
         },
         headers=headers,
     )

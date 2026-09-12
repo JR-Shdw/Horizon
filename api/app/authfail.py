@@ -3,7 +3,7 @@
 """Authentication failure log - fail2ban-ready.
 
 Appends one line per auth failure. Format:
-    2026-04-13T14:23:45+0000 rhorizon AUTH_FAIL ip=10.0.0.1 type=invalid_token
+    2026-04-13T14:23:45+0000 rhorizon AUTH_FAIL ip=10.0.0.5 type=invalid_token
 
 POSIX guarantees atomic append for writes < PIPE_BUF (4096 bytes),
 so concurrent workers can write safely without locking.

@@ -18,7 +18,7 @@ All three share `lib.rs` : `SecureToken` (mlock + zeroize),
 
 | Var | Lu par | Purpose |
 |-----|--------|---------|
-| `RH_ADDR` | all | API base URL, e.g. `http://10.0.0.1:8200` |
+| `RH_ADDR` | all | API base URL, e.g. `http://10.0.0.20:8200` |
 | `RH_TOKEN_FILE` | all | Path to a mode-0400 file holding the bearer token (preferred) |
 | `RH_TOKEN` | all | Legacy : bearer in env var. Auto-`unsetenv`'d after read. |
 | `RH_SECRETS` | rh-fetch / rh-watch | `name:/path,name:/path,...` |
@@ -37,7 +37,7 @@ services:
     image: rhorizon-agent:latest
     entrypoint: /usr/local/bin/rh-fetch
     environment:
-      RH_ADDR: https://10.0.0.1:8443
+      RH_ADDR: https://10.0.0.20:8443
       RH_TOKEN_FILE: /run/secrets/rh-bootstrap
       RH_SECRETS: prod/db-password:/run/secrets/POSTGRES_PASSWORD
     secrets:
@@ -87,7 +87,7 @@ services:
   n8n:
     image: localhost/n8n-rh:demo
     environment:
-      RH_ADDR: https://10.0.0.1:8443
+      RH_ADDR: https://10.0.0.20:8443
       RH_TOKEN_FILE: /run/secrets/rh-bootstrap
       N8N_ENCRYPTION_KEY: rh://prod/n8n-encryption-key
       DB_TYPE: sqlite
@@ -115,7 +115,7 @@ services:
     image: rhorizon-agent:latest
     entrypoint: /usr/local/bin/rh-watch
     environment:
-      RH_ADDR: https://10.0.0.1:8443
+      RH_ADDR: https://10.0.0.20:8443
       RH_TOKEN_FILE: /run/secrets/rh-bootstrap
       RH_SECRETS: prod/db-password:/run/secrets/POSTGRES_PASSWORD
       RH_POLL_SECS: "30"

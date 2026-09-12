@@ -47,7 +47,7 @@ docker compose -f tools/docker-compose.quickstart.yml up -d
 | Fichier | Publie sur | À utiliser pour |
 |---|---|---|
 | `tools/docker-compose.quickstart.yml` | `127.0.0.1`, API `:8200`, UI `:8080` (HTTP) et `:8443` (TLS) | Laptops, hôtes uniques, évaluation |
-| `docker-compose.yml` (racine) | `${WG_IP:-10.0.0.1}` et `10.0.1.1`, API `:8200`, UI `:8201` | La stack opérateur/VPN |
+| `docker-compose.yml` (racine) | `${WG_IP:-10.0.0.20}` et `10.1.0.1`, API `:8200`, UI `:8201` | La stack opérateur/VPN |
 
 Le fichier racine code en dur des adresses VPN, donc sur un hôte qui ne les a
 pas, Docker refuse de démarrer le stack (*« Couldn't listen on requested

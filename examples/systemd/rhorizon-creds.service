@@ -14,7 +14,7 @@
 ##      rhorizon token create node-2-host \
 ##        --scope secrets:r \
 ##        --namespace node-2 \
-##        --allowed-ips 10.0.0.1/32 \
+##        --allowed-ips 10.0.0.21/32 \
 ##        --ttl 0
 ##    Copy the rh_… value to the file. chmod 400. chown root:root.
 ##

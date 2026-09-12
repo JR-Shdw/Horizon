@@ -95,7 +95,7 @@ single IPs, and CIDRs :
 {
   "name": "ansible-prod-runner",
   "permissions": {"secrets": "r", "namespaces": ["prod"]},
-  "allowed_ips": "10.0.0.1, 10.0.0.1, 10.89.0.0/16"
+  "allowed_ips": "10.0.0.21, 10.0.0.22, 10.89.0.0/16"
 }
 ```
 
@@ -120,11 +120,11 @@ Reference ranges (use as ceilings, not defaults) :
 | `10.89.0.0/16` | Podman default bridge |
 | `172.17.0.0/16` | Docker default bridge |
 | `172.16.0.0/12` | All Docker user-defined bridges |
-| `10.0.0.1/24` *(example)* | VPN subnet |
+| `10.0.0.0/24` *(example)* | VPN subnet |
 
-A single host : `allowed_ips: "10.0.0.1/32"` - most restrictive.
-A few named hosts : `allowed_ips: "10.0.0.1, 10.0.0.1, 10.0.0.1"`.
-VPN mesh : `allowed_ips: "10.0.0.1/24"`. RFC 1918 wide-open is
+A single host : `allowed_ips: "10.0.0.21/32"` - most restrictive.
+A few named hosts : `allowed_ips: "10.0.0.21, 10.0.0.22, 10.0.0.23"`.
+VPN mesh : `allowed_ips: "10.0.0.0/24"`. RFC 1918 wide-open is
 effectively no protection.
 
 The UI form has inline help with these ranges, but no preset buttons -
@@ -148,7 +148,7 @@ intentional, to force the operator to think before clicking.
 // CI runner pinned to the runner pool subnet
 {
   "permissions": {"secrets": "r", "namespaces": ["ci"]},
-  "allowed_ips": "10.0.0.1/24"
+  "allowed_ips": "10.0.40.0/24"
 }
 
 // Honeytoken - attractive name, fires alert on any use

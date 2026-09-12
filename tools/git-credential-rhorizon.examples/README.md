@@ -64,7 +64,7 @@ curl -X POST "$VAULT_URL/api/v1/vault/tokens/" \
   -d '{
     "name": "git-credential-helper",
     "permissions": {"secrets": "r", "namespaces": ["git"]},
-    "allowed_ips": "10.0.0.1/32"
+    "allowed_ips": "10.0.0.21/32"
   }'
 # Returns the bootstrap token. Plaintext shown ONCE.
 ```

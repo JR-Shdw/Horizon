@@ -29,7 +29,7 @@ _TEST_NODE_UUID = "0123456789abcdef0123456789abcdef"
 async def _insert_node(
     *,
     node_uuid: str,
-    source_ip: str = "10.0.0.1",
+    source_ip: str = "10.0.0.50",
     ha_state: str = "joining",
     quarantine_secs: int = 60,
     joined_offset_secs: int = 0,
@@ -194,13 +194,13 @@ async def test_state_machine_batches_multiple_rows(setup_db, _wipe):
     """Two eligible rows in one tick -> both promoted, counter += 2."""
     await _insert_node(
         node_uuid="ffff" * 8,
-        source_ip="10.0.0.1",
+        source_ip="10.0.0.51",
         quarantine_secs=-10,
         heartbeat_offset_secs=1,
     )
     await _insert_node(
         node_uuid="9999" * 8,
-        source_ip="10.0.0.1",
+        source_ip="10.0.0.52",
         quarantine_secs=-10,
         heartbeat_offset_secs=1,
     )
@@ -312,7 +312,7 @@ async def test_heartbeat_reconciles_configured_advertised_ip(
         source_ip="192.0.2.1",
         ha_state="secondary",
     )
-    monkeypatch.setattr(loops.settings, "cluster_advertise_ip", "10.0.0.1")
+    monkeypatch.setattr(loops.settings, "cluster_advertise_ip", "10.0.0.91")
     from api.app import cluster_cert_renewal
 
     wake_renewal = Mock()
@@ -323,7 +323,7 @@ async def test_heartbeat_reconciles_configured_advertised_ip(
         await db.commit()
 
     row = await _get_address_and_renewal(node_uuid)
-    assert row.source_ip == "10.0.0.1"
+    assert row.source_ip == "10.0.0.91"
     assert row.force_renew_at is not None
     wake_renewal.assert_called_once_with()
 
@@ -342,10 +342,10 @@ async def test_heartbeat_address_conflict_does_not_break_liveness(
     )
     await _insert_node(
         node_uuid=other_uuid,
-        source_ip="10.0.0.1",
+        source_ip="10.0.0.92",
         ha_state="secondary",
     )
-    monkeypatch.setattr(loops.settings, "cluster_advertise_ip", "10.0.0.1")
+    monkeypatch.setattr(loops.settings, "cluster_advertise_ip", "10.0.0.92")
     from api.app import cluster_cert_renewal
 
     wake_renewal = Mock()

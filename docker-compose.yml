@@ -147,8 +147,8 @@ services:
       RH_RUST_CUSTODY_MAINTENANCE_INTERVAL_SECS: "${RH_RUST_CUSTODY_MAINTENANCE_INTERVAL_SECS:-${RHORIZON_RUST_CUSTODY_MAINTENANCE_INTERVAL_SECS:-5}}"
     ports:
       # machine-to-machine bus (hardcoded so a missing WG1_IP can't drop the binding)
-      - "10.0.1.1:8200:8200"
-      - "${WG_IP:-10.0.0.1}:8200:8200"   # admin direct access
+      - "10.1.0.1:8200:8200"
+      - "${WG_IP:-10.0.0.20}:8200:8200"   # admin direct access
     networks:
       rhorizon_internal:
         ipv4_address: "${RH_API_BRIDGE_IP:-172.31.250.20}"
@@ -231,9 +231,9 @@ services:
       API_UPSTREAM: "${API_UPSTREAM:-rhorizon_api:8200}"
     ports:
       # VPN, direct internal access
-      - "${WG_IP:-10.0.0.1}:8201:8200"
+      - "${WG_IP:-10.0.0.20}:8201:8200"
       # HTTPS (only useful when TLS_ENABLED=true)
-      - "${WG_IP:-10.0.0.1}:8443:8443"
+      - "${WG_IP:-10.0.0.20}:8443:8443"
     volumes:
       - ${TLS_CERT_DIR:-./certs}:/certs:ro
     networks:

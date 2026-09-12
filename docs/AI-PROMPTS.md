@@ -11,38 +11,117 @@ that first.
 
 ---
 
+## The rule every prompt here follows
+
+**Your assistant holds exactly one credential: its own key.** That key is
+read-only and valid in one section of the vault. It never receives an
+administrative credential, and no prompt below tells it where one is kept.
+
+This is not politeness, it is the only thing that makes the rest work. The
+assistant's key is bounded by a grant the vault checks on every request, so
+whatever the assistant does with it, it cannot reach outside that section. An
+admin token is bounded by nothing: it reads every section, mints keys, and locks
+the vault. Handing one to an assistant discards the boundary in a single step,
+and the assistant does not even have to misbehave for that to matter - anything
+that can read its files inherits the same reach.
+
+So when an operation needs more authority than the assistant's key,
+**you run the command and the credential stays in your shell.** The assistant
+writes the command, explains it, and reads the output you paste back. It does
+not open credential files, and you do not paste credentials into the chat.
+
+## Two ways your assistant got its key
+
+| Your situation | How the key was issued |
+|---|---|
+| **AI-secure install** - your assistant walked you through the quickstart | The script created the section, minted a read-only key scoped to it, granted that key entry, and printed the admin token **once, to you**. The assistant never saw it. |
+| **Existing Horizon** - the vault was already running | An administrator mints a scoped key, grants it entry to one section, and points the assistant's config at it. The assistant is handed the key, never the means to widen it. |
+
+For the second case, this is the operator-side setup. Run it yourself, with an
+admin token in your own shell. It is the same shape the quickstart automates:
+
+```sh
+export RH_TOKEN='<your-admin-token>'      # your shell only, never the chat
+BASE=http://127.0.0.1:8200/api/v1/vault
+
+# 1. A group that will own the assistant's section.
+GID=$(curl -fsS -X POST "$BASE/groups/" -H "Authorization: Bearer $RH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"mcp-agents","permissions":{"secrets":"r"}}' | jq -r .id)
+
+# 2. The section, owned by that group, with membership enforced.
+#    enforce_membership is set-once: it cannot be relaxed later.
+curl -fsS -X POST "$BASE/namespaces/" -H "Authorization: Bearer $RH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"mcp\",\"owner_group_id\":\"$GID\",\"enforce_membership\":true}"
+
+# 3. The assistant's key: read-only, one section.
+MINT=$(curl -fsS -X POST "$BASE/tokens/" -H "Authorization: Bearer $RH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"mcp-agent","permissions":{"secrets":"r","namespaces":["mcp"]}}')
+
+# 4. Grant that key entry. Until this lands, nothing can read the section.
+curl -fsS -X POST "$BASE/groups/$GID/members" -H "Authorization: Bearer $RH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"principal_type\":\"token\",\"principal_id\":\"$(echo "$MINT" | jq -r .id)\"}"
+
+# 5. Give the assistant only the token value from $MINT, in its config file.
+unset RH_TOKEN
+```
+
+Taking access away later is step 4 in reverse: remove the principal from the
+group and the assistant's next request fails. You do not have to re-mint
+anything, and you do not have to trust it to stop using a key.
+
+---
+
 ## 1. Add a new secret for a client
 
 Use this when a client gives you a password / API key / database URL
 and you want to store it in the vault so your AI assistant can use it later.
 
+Writing a secret needs more authority than your assistant's key has, so this
+one is a command you run. I have a token with write access exported as
+`RH_TOKEN` in my own shell before I start.
+
 ```
 I'm using rhorizon (a small encrypted secrets vault running on my
-laptop). My vault is at http://127.0.0.1:8200 and my root token
-is in the file ~/rhorizon/secrets/root-token.
+laptop). I want to store a new client secret. I already have a token
+with write access exported as RH_TOKEN in my shell - do not read it,
+print it, or ask me for it, and do not look for any credential file.
 
 Please give me the exact terminal commands to :
 
-  1. Store this secret in the vault, in the namespace "mcp/clients".
-     The secret name should be "<short-meaningful-name>" (no spaces).
-     Prompt for the value silently in my terminal and pipe it to
-     `rhorizon set --stdin`. Do not ask me to paste it into this chat,
-     place it in a command argument, or echo it.
+  1. Store this secret in the SECTION my assistant can reach, which is
+     the namespace "mcp". Use a structured NAME to keep clients apart,
+     not a nested namespace : name "clients/<short-name>" (no spaces)
+     in namespace "mcp", i.e.
 
-  2. Verify the secret was saved by listing the namespace.
+       rhorizon set "clients/<short-name>" --stdin --namespace mcp
+
+     Prompt for the value silently in my terminal and pipe it in. Do not
+     ask me to paste it into this chat, place it in a command argument,
+     or echo it.
+
+  2. Verify it was saved by listing the namespace.
 
 After running, tell me the fully-qualified name of the new secret
-(format : "mcp/clients/<name>"). I will need it for the next step
-(adding it to the policy so your AI assistant can read it).
+(format : "mcp/clients/<short-name>"). I need it for the next step.
 
-Show the commands before running them. I will enter the secret only
-at the hidden terminal prompt.
+Show the commands before running them. I will enter the secret only at
+the hidden terminal prompt.
 ```
 
-**What this does** : creates a new entry in the `mcp/clients`
-namespace. The value is encrypted at rest using your master
-password's derived keys. The local host and any process authorized by
-the vault or MCP policy remain inside the trust boundary.
+**What this does** : creates an entry inside the one section your assistant's
+key may enter. The value is encrypted at rest using your master password's
+derived keys.
+
+**Why the name carries the slash and not the namespace.** Namespaces are matched
+exactly, never by prefix, so a secret filed under a namespace called
+`mcp/clients` would sit *outside* the `mcp` grant and your assistant could never
+read it. Keeping the namespace `mcp` and putting the structure in the name gives
+the same readable `mcp/clients/<name>` in the policy file, on the right side of
+the boundary.
 
 ---
 
@@ -103,10 +182,16 @@ Then tell me to fully quit and reopen my AI assistant so the change
 takes effect.
 ```
 
-**What this does** : removes the secret from the whitelist. The
-next time your AI assistant tries to read it, the MCP server returns
-`policy_denied`. The secret itself is untouched and still readable
-by anyone with the admin (root) token.
+**What this does** : removes the secret from the whitelist. The next time your
+AI assistant tries to read it, the MCP server returns `policy_denied`. The
+secret itself is untouched.
+
+**This is the soft layer, not the boundary.** The policy file lives under your
+account, so an assistant that can run shell commands can put the entry back. It
+stops mistakes, not intent. To take access away in a way the assistant cannot
+undo, move the secret out of its section, or remove its key from the group that
+owns the section - then the vault refuses on the next request, whatever the
+policy file says.
 
 ---
 
@@ -115,9 +200,14 @@ by anyone with the admin (root) token.
 Use this for client reporting, or before/after a session, or just
 to see what your AI has been up to.
 
+Reading the audit log needs `audit:r`, which your assistant's key does not
+have. Either run this with your own token exported as `RH_TOKEN`, or mint a
+dedicated read-only audit key for it the same way you minted its secrets key.
+
 ```
-I'm using rhorizon. The vault is at http://127.0.0.1:8200, my admin
-token is in ~/rhorizon/secrets/root-token.
+I'm using rhorizon. The vault is at http://127.0.0.1:8200. A token with
+audit read access is exported as RH_TOKEN in my shell - do not read it,
+print it, or ask me for it, and do not look for any credential file.
 
 Please give me a single curl command that lists the last 50 audit
 entries where the actor is "mcp-agent" (the access key used by my
@@ -184,14 +274,22 @@ and client configuration without printing the token.
 Use this if you suspect your master password was seen by someone
 else, or as routine hygiene.
 
+This one is entirely yours to run. Rotating the master password needs both the
+current password and an admin token, which are exactly the two things your
+assistant must never hold. It can explain the operation and hand you the
+commands; every credential stays on your side of the conversation.
+
 ```
-I'm using rhorizon. I want to change my master password.
+I'm using rhorizon. I want to change my master password. I will run
+every command myself.
 
 Context :
   - the vault is at http://127.0.0.1:8200 ;
-  - my current master password is in ~/rhorizon/secrets/master-password ;
-  - my root token is in ~/rhorizon/secrets/root-token ;
-  - I want existing access keys (my AI assistant's, etc.) to keep working
+  - I hold the current master password and an admin token. Do not ask
+    for either, do not read them from any file, and do not include a
+    place to paste them in the commands you write - assume they are
+    already in my shell as RH_MASTER_PASSWORD and RH_TOKEN ;
+  - I want existing access keys (my assistant's, etc.) to keep working
     for a few days while I migrate - NOT immediate invalidation.
 
 Please give me :
@@ -200,16 +298,16 @@ Please give me :
   2. A way to pick a strong new password (suggest a tool, don't
      generate one for me - never put my master password in your
      context).
-  3. The exact curl command to rotate the password (using
-     emergency=false because of point 4 above).
-  4. The command to update ~/rhorizon/secrets/master-password
-     with the new value, and re-`chmod 0400` it.
-  5. A reminder that, if I lose this password, the vault contents
-     are unrecoverable - and the only protection is to back up
-     the new password to a password manager I control.
+  3. The exact curl command to rotate the password, reading both
+     values from the environment, using emergency=false because of
+     point 3 above.
+  4. A reminder to update wherever I keep the password, and to re-run
+     nothing else.
+  5. A reminder that, if I lose this password, the vault contents are
+     unrecoverable - and the only protection is a copy in a password
+     manager I control.
 
-Don't ask me to type or paste my new password into the chat. I'll
-keep it on my side.
+Don't ask me to type or paste any password or token into the chat.
 ```
 
 **What this does** : performs a master password rotation against

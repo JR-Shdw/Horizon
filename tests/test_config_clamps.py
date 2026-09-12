@@ -181,9 +181,9 @@ def test_proxy_auth_requires_explicit_trusted_proxy():
 
     settings = Settings(
         proxy_auth_enabled=True,
-        proxy_trusted_ips="10.0.0.1/32",
+        proxy_trusted_ips="10.0.0.20/32",
     )
-    assert settings.proxy_trusted_ips == "10.0.0.1/32"
+    assert settings.proxy_trusted_ips == "10.0.0.20/32"
 
 
 def test_cluster_ha_requires_explicit_trusted_proxy():
@@ -193,7 +193,7 @@ def test_cluster_ha_requires_explicit_trusted_proxy():
 
 def test_invalid_trusted_proxy_fails_startup_validation():
     with pytest.raises(ValueError, match="invalid trusted proxy"):
-        Settings(proxy_trusted_ips="10.0.0.1/32,not-a-network")
+        Settings(proxy_trusted_ips="10.0.0.20/32,not-a-network")
 
 
 def test_canonical_worker_env_wins_over_legacy(monkeypatch):

@@ -62,7 +62,7 @@ export RH_CA_FILE=~/rhorizon/certs/cert.pem
 ```
 
 > **Do not use the repository's root `docker-compose.yml` for a laptop.** It is
-> the operator/VPN stack: it publishes on `10.0.0.1` and `10.0.1.1`, so on a
+> the operator/VPN stack: it publishes on `10.0.0.20` and `10.1.0.1`, so on a
 > host without those addresses Docker refuses to start with *"Couldn't listen on
 > requested ports"*. The installer uses
 > `tools/docker-compose.quickstart.yml`, which binds `127.0.0.1` only. To drive
@@ -95,6 +95,10 @@ Kubernetes, Podman, BSD, and production paths are listed in
 >
 > Read the script before running it. The setup and its trust boundaries
 > are documented in [`docs/QUICKSTART-AI.md`](docs/QUICKSTART-AI.md).
+> On Linux, if the AI process must not share access to the master password or
+> administrator token, use the separate root-owned system path in
+> [`docs/AI-INSTALL-GUIDE.md`](docs/AI-INSTALL-GUIDE.md). The personal
+> quickstarts do not provide that same-user isolation.
 
 > 🇫🇷 Documentation française : [`docs/fr/README.md`](docs/fr/README.md)
 
@@ -247,9 +251,11 @@ If you run agents, assistants or automation on the same machine:
 - **Run the vault under an account the agent is not.** `--mode system` installs
   as root, so its credentials live under `/etc/rhorizon` owned by root and an
   agent under your login cannot read them regardless of file mode. That is the
-  boundary that matters here. (The service itself still runs as root rather than
-  a dedicated `rhorizon` user; that limits a Horizon compromise, not the agent,
-  and is tracked separately.) A user-mode install gives you no such boundary:
+  boundary that matters here. Installation is privileged; the vault afterwards
+  is not: the daemon drops to a dedicated `rhorizon` account. If that account
+  cannot be created the install stops, rather than quietly leaving the service
+  as root; running it that way takes an explicit `RH_ACCOUNT_FALLBACK_ROOT=1`.
+  A user-mode install gives you no such boundary:
   its credentials are owned by the same account the agent runs as.
 - **Do not leave credentials in a directory an agent is pointed at.** Move them
   into a password manager and delete the files; the vault only needs the
@@ -378,6 +384,6 @@ most users encounter them:
 
 > **License and trademark**
 >
-> - Licensed under **AGPL-3.0-or-later** ([LICENSE](LICENSE)). Source-available; modifications must remain AGPL.
+> - Licensed under **AGPL-3.0-or-later** ([LICENSE](LICENSE)). Modifications must remain AGPL.
 > - **Closed-source relicensing prohibited.** A commercial license is available - see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
 > - **"Resurgamus Horizon" is a reserved project name.** The AGPL license covers the source code only, not the name or logo - it grants no trademark rights. Forks, derivatives, and commercial services built on this code may not use "Resurgamus Horizon" (or a confusingly similar name) to identify themselves without permission from Resurgamus.

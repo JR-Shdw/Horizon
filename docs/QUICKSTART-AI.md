@@ -30,7 +30,7 @@ If you don't have Docker yet :
 | Your OS | Get Docker |
 |---|---|
 | macOS | Install Docker Desktop : https://www.docker.com/products/docker-desktop/ - open it once, accept the prompts. |
-| Linux (Debian, Ubuntu, Fedora, Arch, ...) | Use your distribution's package manager. Quickest way : `curl -fsSL https://get.docker.com \| sh` then `sudo usermod -aG docker $USER` and log out / log back in. |
+| Linux (Debian, Ubuntu, Fedora, Arch, ...) | Use your distribution's Docker or rootless Podman package and its official instructions. Do not add an AI-agent account to the `docker` group: access to the Docker socket is normally root-equivalent. |
 | Windows | Install **WSL2** (search "WSL" in Windows Update / PowerShell : `wsl --install`), then install Ubuntu from the Microsoft Store, then follow the Linux row above **inside the Ubuntu terminal**. |
 
 You also need a **desktop AI assistant with MCP support** (the local
@@ -40,14 +40,16 @@ the same setup.
 
 ---
 
-## Pick a path : container or native
+## Pick a path
 
-Two installs are supported, same end-state. Pick whichever fits :
+The first two paths favour convenience. The third adds an operating-system
+identity boundary from software running as your login account.
 
 | Path | What it runs | Best for |
 |---|---|---|
 | **Container** (default, recommended) | A small PostgreSQL + API + frontend in **Docker** containers. | Anyone who already has Docker (Mac, Windows, Linux). Updates via `docker compose pull`. |
 | **Native** | PostgreSQL + Python venv + uvicorn running **directly on your host** - no Docker, no containers. | Lighter footprint. WSL2 without Docker Desktop. Linux laptops where you'd rather use your system's PostgreSQL. |
+| **AI-secure system** | Native services under a dedicated account; recovery material remains root-only. | Linux hosts where the local AI process must not inherit recovery authority. |
 
 If unsure, take the container path - it's the same script we test against in CI.
 
@@ -95,6 +97,15 @@ Native install supports : Debian, Ubuntu, Arch, Manjaro, Fedora,
 Rocky, AlmaLinux, openSUSE - and any of these running under WSL2.
 On macOS, native install isn't supported yet - use the container
 path.
+
+### AI-secure system path (Linux)
+
+Use this when the AI tool must not share the account that can read the master
+password and administrator token. It requires a reviewed release copied to a
+root-owned source tree and refuses root-equivalent Docker or passwordless-sudo
+access for the target account. Follow
+[`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md); do not substitute the user-mode
+script.
 
 Native user installs follow the normal XDG layout:
 
@@ -149,9 +160,10 @@ When the script finishes, it prints a block that looks like this :
     "rhorizon": {
       "command": "/home/you/.local/share/rhorizon-mcp/.venv/bin/rhorizon-mcp-server",
       "env": {
-        "RH_VAULT_URL": "http://127.0.0.1:8200",
+        "RH_VAULT_URL": "https://127.0.0.1:8200",
+        "RH_VAULT_CAFILE": "/home/you/.config/rhorizon/ca.pem",
         "RH_TOKEN_FILE": "/home/you/.config/rhorizon/mcp.token",
-        "RH_MCP_POLICY": "/home/you/.config/rhorizon-mcp/policy.toml"
+        "RHORIZON_MCP_POLICY": "/home/you/.config/rhorizon-mcp/policy.toml"
       }
     }
   }
@@ -200,9 +212,10 @@ The setup creates these local trust boundaries:
 |---|---|---|
 | Vault database | Encrypted secret records | The database alone is not sufficient to decrypt them. |
 | `~/rhorizon/secrets/master-password` (container) or `~/.config/rhorizon/secrets/master-password` (native) | Master password in clear text | Your account and host root. Mode `0400` blocks other unprivileged users; it does not stop root or compromise of your account. |
-| `~/rhorizon/secrets/root-token` (container) or `~/.config/rhorizon/secrets/root-token` (native) | Vault admin token | Your account and host root. |
-| `~/.config/rhorizon/mcp.token` | Assistant's read-only vault token | The MCP server, your account, and host root. It is separate from the admin token. |
-| `~/.config/rhorizon-mcp/policy.toml` | The list of secrets your AI assistant is allowed to read | Currently **empty**. The assistant can't read anything until you add to this list. |
+| The admin token | Opens every section, creates and revokes keys | Nobody, once setup finishes: it is printed once and removed from disk, because no vault-side grant bounds it. Keep it in your password manager. |
+| `~/.config/rhorizon/mcp.token` | Assistant's read-only vault key | The MCP server, your account, and host root. It is separate from the admin token. |
+| `~/.config/rhorizon-mcp/policy.toml` | Which of the assistant's secrets it is shown | Your account, and anything running as you. A narrowing, not a boundary - see below. |
+| Inside the vault: the `mcp` section | Which section the assistant's key may enter at all | Only an admin can change it. This is the boundary, and it is checked on every request. |
 
 The laptop quickstart stores the master password beside the local
 stack for convenience. Use full-disk encryption and a locked user
@@ -211,13 +224,29 @@ account can expose both the encrypted database and its recovery
 material. Keep off-host recovery material separate as described in
 [`DISASTER-RECOVERY.md`](DISASTER-RECOVERY.md).
 
-Two properties still hold:
+Two properties this setup gives you:
 
-1. **You can give your AI assistant one secret without giving it *all*
-   secrets.** Each secret you store in the vault stays unreadable to
-   the AI until you explicitly add its name to the policy file. Adding
-   a second client's secrets next year doesn't open up the first
-   client's secrets.
+1. **Your AI assistant reaches one section of the vault, and nothing
+   else.** The setup gives the assistant its own key, and grants that key
+   entry to a single section. Everything you keep outside that section is
+   unreachable with it. Adding a second client's secrets next year doesn't
+   open up the first client's, and putting something outside the assistant's
+   section puts it out of reach entirely.
+
+   This one holds even if your assistant is clever. The grant lives in the
+   vault, which re-checks it on every request, so it applies whether the
+   assistant goes through the tools listed above, edits its own policy file,
+   or ignores all of that and talks to the vault directly with its key. None
+   of those routes widen it. Taking access away works the same way: the
+   moment you remove the key from the section, the next request fails. You do
+   not have to reissue anything.
+
+   The policy file is a second, softer layer inside that section. It decides
+   which of the section's secrets the assistant is shown. An assistant that
+   can run commands on your machine - Claude Code, Codex, Cline, Cursor in
+   agent mode - can rewrite that file, so treat it as protection against
+   mistakes rather than against intent. The vault-side grant is the part that
+   holds either way.
 
 2. **Every read is written down.** When your assistant opens a secret, the
    vault records who asked, which secret, and when, in a journal built so
@@ -248,7 +277,7 @@ commands or configuration changes are approved.
 | Symptom | First thing to try |
 |---|---|
 | `docker: command not found` | Install Docker first (see top of this page). |
-| `permission denied` on Docker | On Linux, you need to be in the `docker` group : `sudo usermod -aG docker $USER` then log out / log back in. |
+| `permission denied` on Docker | Use the distribution's documented rootless setup or choose the native path. Do not grant Docker-socket access to an AI-agent account as a convenience fix. |
 | Script ran but your assistant doesn't see "rhorizon" | Did you fully **quit** the app and reopen ? Just closing the window isn't enough - quit from the menu bar / tray icon. |
 | Your assistant says "I see rhorizon but no tools" | The policy file is empty (the safe default). Open `AI-PROMPTS.md` and copy the "let the assistant read a secret" prompt. |
 | `port already in use` | Another program is using port 8200. Re-run with a different port : `RH_API_PORT=8210 bash tools/quickstart-laptop.sh`. |

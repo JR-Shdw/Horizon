@@ -1,4 +1,4 @@
-.PHONY: help up down build restart logs ps lint lint-fix test test-cov db-shell db-dump db-restore secrets laptop laptop-native rust-check rust-check-fast rust-test rust-wheel-install fuzz-smoke fuzz-list gf-ct-check arm64-native-check deps deps-lock deps-audit watch verify-local test-matrix test-native-install-matrix test-native-install-migration k8s-test native-smoke custody-smoke k8s-e2e k8s-ha-e2e retest lab-cleanup chaos-k7-init chaos-k7-check chaos-k7-preflight chaos-k7-24h chaos-k7-24h-detached chaos-k7-24h-high chaos-k7-24h-high-detached chaos-k7-status mcp-proxy-e2e mcp-proxy-e2e-init mcp-proxy-e2e-check
+.PHONY: help up down build restart logs ps lint lint-fix test test-cov db-shell db-dump db-restore secrets laptop laptop-native ai-system rust-check rust-check-fast rust-test rust-wheel-install fuzz-smoke fuzz-list gf-ct-check arm64-native-check deps deps-lock deps-audit watch verify-local test-matrix test-native-install-matrix test-native-install-migration k8s-test native-smoke custody-smoke k8s-e2e k8s-ha-e2e retest lab-cleanup chaos-k7-init chaos-k7-check chaos-k7-preflight chaos-k7-24h chaos-k7-24h-detached chaos-k7-24h-high chaos-k7-24h-high-detached chaos-k7-status mcp-proxy-e2e mcp-proxy-e2e-init mcp-proxy-e2e-check
 
 # Test-PG host port. 5434 collides with forgejo's PG on some dev hosts, so the
 # local test DB defaults to 55434. docker-compose.test.yml reads the same var.
@@ -26,6 +26,10 @@ laptop: ## Setup laptop CONTAINER (Docker) : vault + MCP + token Claude (5 min)
 
 laptop-native: ## Setup laptop NATIF (sans Docker, Linux/WSL2) : vault + MCP + token Claude
 	bash tools/quickstart-laptop-native.sh
+
+ai-system: ## Setup Linux avec identites separees (TARGET_USER=compte-agent, lancer via sudo)
+	@test -n "$(TARGET_USER)" || { echo "usage: sudo make ai-system TARGET_USER=compte-agent"; exit 2; }
+	bash tools/quickstart-ai-system.sh --user "$(TARGET_USER)"
 
 # Stack
 

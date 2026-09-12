@@ -443,9 +443,16 @@ async function _renderMcpAudit(opts = {}) {
     <div class="dim small spaced-top">
       Per-agent MCP tool calls via the optional hub. Chained + tamper-evident;
       empty until a hub is deployed and emitting.
+      <br>
+      Agent is authenticated: it comes from the bearer that made the call. The
+      remaining columns are what the client reported about itself, including
+      Hub, so a row is not evidence that the call went through a hub. The chain
+      proves nothing was altered after the fact, not that it was true when
+      written.
     </div>
     <table class="table"><thead><tr>
-      <th>Time</th><th>Agent</th><th>Hub</th><th>Backend</th><th>Tool</th><th>Target</th><th>Decision</th>
+      <th>Time</th><th>Agent</th><th title="Caller-reported label, not verified origin">Hub (reported)</th>
+      <th>Backend</th><th>Tool</th><th>Target</th><th>Decision</th>
     </tr></thead><tbody>`;
     for (const e of slice) {
       const denied = e.decision !== 'allowed';

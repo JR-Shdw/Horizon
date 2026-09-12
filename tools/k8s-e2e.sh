@@ -247,15 +247,15 @@ kexec() { # run a one-shot busybox wget inside the cluster, preserving failures
   return "$rc"
 }
 
-api_exec_request() { # method path JSON-payload [bearer]
-  local method="$1" path="$2" payload="$3" bearer="${4:-}" request
+pod_exec_request() { # pod method path JSON-payload [bearer]
+  local pod="$1" method="$2" path="$3" payload="$4" bearer="${5:-}" request
   request="$(jq -cn --arg method "$method" --arg path "$path" \
     --arg payload "$payload" --arg bearer "$bearer" \
     '{method:$method,path:$path,payload:$payload,bearer:$bearer}')"
   # One-shot responses (unseal root token, HA bootstrap password) must not
   # depend on kubectl-run attachment to a disposable Pod. Send credentials on
   # stdin and return an explicit transport/status/body envelope from localhost.
-  printf '%s' "$request" | "${KUBECTL[@]}" -n "$NS" exec -i rhorizon-api-0 -- \
+  printf '%s' "$request" | "${KUBECTL[@]}" -n "$NS" exec -i "$pod" -- \
     python -c 'import httpx,json,sys
 q=json.load(sys.stdin)
 h={"Content-Type":"application/json"}
@@ -268,10 +268,28 @@ except Exception as exc:
  raise SystemExit(2)'
 }
 
+api_exec_request() { # method path JSON-payload [bearer]
+  pod_exec_request rhorizon-api-0 "$@"
+}
+
+audit_preflight_request() {
+  audit_preflight_envelope="$(api_exec_request POST \
+    /api/v1/vault/audit/verify/preflight '' "$tok" || true)"
+  audit_preflight_status="$(printf '%s' "$audit_preflight_envelope" \
+    | jq -r '.status // 0' 2>/dev/null || echo 0)"
+  audit_preflight="$(printf '%s' "$audit_preflight_envelope" \
+    | jq -r '.body // empty' 2>/dev/null || true)"
+  [ "$audit_preflight_status" -eq 200 ] \
+    && printf '%s' "$audit_preflight" | jq -e 'has("preflight_ready")' >/dev/null 2>&1
+}
+
 unseal_pod() {
-  local pod="$1" result
-  result="$(kexec "wget -qO- -T30 --post-data='{\"password\":\"$MP\"}' --header='Content-Type: application/json' http://$pod.rhorizon-api-headless:8200/api/v1/vault/unseal" || true)"
-  printf '%s' "$result" | jq -e \
+  local pod="$1" envelope http_status result
+  envelope="$(pod_exec_request "$pod" POST /api/v1/vault/unseal \
+    "{\"password\":\"$MP\"}" || true)"
+  http_status="$(printf '%s' "$envelope" | jq -r '.status // 0' 2>/dev/null || echo 0)"
+  result="$(printf '%s' "$envelope" | jq -r '.body // empty' 2>/dev/null || true)"
+  [ "$http_status" -eq 200 ] && printf '%s' "$result" | jq -e \
     '.status == "unsealed" or .status == "already_unsealed"' >/dev/null
 }
 
@@ -408,7 +426,15 @@ if [ "$HA" = "1" ]; then
   REPLICAS="$HA_REPLICAS"
 
   say "unseal Pods as the StatefulSet rolls and wait for JOIN readiness"
-  wait_for_ha_rollout || fail "HA rollout did not converge while unsealing Pods"
+  if ! wait_for_ha_rollout; then
+    "${KUBECTL[@]}" -n "$NS" get pods -o wide >&2 || true
+    for pod in $("${KUBECTL[@]}" -n "$NS" get pod \
+      -l app.kubernetes.io/component=api \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+      diagnose_api_pod "$pod"
+    done
+    fail "HA rollout did not converge while unsealing Pods"
+  fi
 
   say "wait for exactly one primary and $((HA_REPLICAS - 1)) secondaries"
   ha=""
@@ -424,30 +450,42 @@ if [ "$HA" = "1" ]; then
 
   say "create and verify a signed audit anchor"
   audit_preflight=""
+  audit_preflight_envelope=""
   for _ in $(seq 1 15); do
-    audit_preflight="$(kexec "wget -qO- -T30 --post-data='' --header='Authorization: Bearer $tok' $base/api/v1/vault/audit/verify/preflight" || true)"
-    printf '%s' "$audit_preflight" | jq -e 'has("preflight_ready")' >/dev/null 2>&1 && break
+    audit_preflight_request && break
     sleep 1
   done
   printf '%s' "$audit_preflight" | jq -e 'has("preflight_ready")' >/dev/null 2>&1 \
-    || fail "audit preflight did not answer: $audit_preflight"
+    || fail "audit preflight did not answer: $audit_preflight_envelope"
   audit_job_id="$(printf '%s' "$audit_preflight" | jq -r '.full_verification_job.job_id // empty')"
   if [ -n "$audit_job_id" ]; then
     audit_job=""
+    audit_job_envelope=""
     audit_job_status=""
     for _ in $(seq 1 90); do
-      audit_job="$(kexec "wget -qO- -T15 --header='Authorization: Bearer $tok' $base/api/v1/vault/audit/verify/jobs/$audit_job_id" || true)"
+      audit_job_envelope="$(api_exec_request GET \
+        "/api/v1/vault/audit/verify/jobs/$audit_job_id" '' "$tok" || true)"
+      audit_job_http_status="$(printf '%s' "$audit_job_envelope" \
+        | jq -r '.status // 0' 2>/dev/null || echo 0)"
+      audit_job="$(printf '%s' "$audit_job_envelope" \
+        | jq -r '.body // empty' 2>/dev/null || true)"
       audit_job_status="$(printf '%s' "$audit_job" | jq -r '.status // empty' 2>/dev/null || true)"
-      [ "$audit_job_status" = succeeded ] && break
-      [ "$audit_job_status" = failed ] && fail "audit verification job failed: $audit_job"
+      if [ "$audit_job_http_status" -eq 200 ]; then
+        [ "$audit_job_status" = succeeded ] && break
+        [ "$audit_job_status" = failed ] \
+          && fail "audit verification job failed: $audit_job"
+      fi
       sleep 2
     done
     [ "$audit_job_status" = succeeded ] \
-      || fail "audit verification job did not complete: $audit_job"
-    audit_preflight="$(kexec "wget -qO- -T30 --post-data='' --header='Authorization: Bearer $tok' $base/api/v1/vault/audit/verify/preflight" || true)"
+      || fail "audit verification job did not complete: $audit_job_envelope"
+    for _ in $(seq 1 15); do
+      audit_preflight_request && break
+      sleep 1
+    done
   fi
   printf '%s' "$audit_preflight" | jq -e '.preflight_ready == true' >/dev/null \
-    || fail "signed audit anchor is not ready: $audit_preflight"
+    || fail "signed audit anchor is not ready: $audit_preflight_envelope"
 
   say "run the live HTTPS/mTLS preflight"
   preflight="$(kexec "wget -qO- -T30 --header='Authorization: Bearer $tok' '$base/api/v1/vault/cluster/preflight?live=true'" || true)"

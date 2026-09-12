@@ -1,4 +1,4 @@
-FROM docker.io/library/nginx:stable-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
+FROM docker.io/library/nginx:stable-alpine@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c
 
 # OCI labels for Docker Hub / GHCR / Gitea registry display.
 ARG VERSION=dev
@@ -73,16 +73,17 @@ COPY js/ /usr/share/nginx/html/js/
 RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
     find /usr/share/nginx/html -type d -exec chmod 755 {} +
 
-# The pinned nginx:stable-alpine base (Alpine 3.23) ships packages that lag
-# Alpine's security patches, so upgrade the affected ones here (all HIGH, fixed
-# upstream in v3.23/main):
-#   curl/libcurl 8.19.0-r0 -> 8.20.0-r0 (CVE-2026-5773, CVE-2026-6276)
-#   libexpat, c-ares                    (kept from prior HIGH CVE rounds)
+# The pinned nginx:stable-alpine base (Alpine 3.24) lags Alpine's security
+# patches for util-linux: it still carries libuuid 2.42.1-r0, against seven HIGH
+# CVEs fixed in 2.42.3-r1 (CVE-2026-53612, CVE-2026-53613, CVE-2026-53614,
+# CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410).
 # curl is required at runtime by the compose healthcheck, so it stays in the
-# image. The pinned digest is already the latest stable-alpine tag, so a digest
-# bump would not help. Drop an entry once upstream rebuilds the base against it.
+# image. The previous entries here (curl/libcurl, libexpat, c-ares) are gone
+# because the base rebuild this digest points at already carries their fixes,
+# along with openssl 3.5.8-r0 for CVE-2026-14456. Per that same rule, drop
+# libuuid once upstream rebuilds the base against it.
 RUN apk add --no-cache curl && \
-    apk upgrade --no-cache curl libcurl libexpat c-ares
+    apk upgrade --no-cache libuuid
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m

@@ -77,7 +77,7 @@ async def test_pki_lifecycle(client, master_password, admin_token, algorithm):
         f"{PKI}/issue",
         json={
             "common_name": "svc.internal",
-            "san_ips": ["10.0.0.1"],
+            "san_ips": ["10.0.0.7"],
             "san_dns": ["svc.internal"],
             "ttl_days": 30,
         },

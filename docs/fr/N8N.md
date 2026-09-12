@@ -97,7 +97,7 @@ services:
   rh-fetch-n8n:
     image: localhost/rhorizon-agent:latest
     environment:
-      RH_ADDR: https://10.0.0.1:8443
+      RH_ADDR: https://10.0.0.20:8443
       RH_TOKEN_FILE: /run/secrets/rh-bootstrap
       RH_SECRETS: encryption-key:/run/n8n-secrets/encryption-key
       RH_NAMESPACE: n8n
@@ -197,7 +197,7 @@ services:
   n8n:
     image: localhost/n8n-rh:custom        # ton image construite ci-dessus
     environment:
-      RH_ADDR: https://10.0.0.1:8443
+      RH_ADDR: https://10.0.0.20:8443
       RH_TOKEN_FILE: /run/secrets/rh-bootstrap
       N8N_ENCRYPTION_KEY_FILE: /run/n8n-secrets/encryption-key
       STRIPE_KEY: rh://n8n/stripe-key

@@ -97,7 +97,7 @@ async def test_ca_and_leaf_extensions(client, master_password, admin_token):
         h,
         common_name="svc.internal",
         san_dns=["svc.internal", "svc"],
-        san_ips=["10.0.0.1"],
+        san_ips=["10.0.0.7"],
         ttl_days=30,
     )
     assert r.status_code == 201, r.text
@@ -111,7 +111,7 @@ async def test_ca_and_leaf_extensions(client, master_password, admin_token):
     leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier)
     san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     assert set(san.get_values_for_type(x509.DNSName)) == {"svc.internal", "svc"}
-    assert "10.0.0.1" in {str(i) for i in san.get_values_for_type(x509.IPAddress)}
+    assert "10.0.0.7" in {str(i) for i in san.get_values_for_type(x509.IPAddress)}
     assert format(leaf.serial_number, "x") == body["serial"]
     span = leaf.not_valid_after_utc - leaf.not_valid_before_utc
     assert datetime.timedelta(days=29) < span < datetime.timedelta(days=31)

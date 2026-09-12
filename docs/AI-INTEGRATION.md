@@ -110,7 +110,7 @@ For higher-trust agents, add an IP allowlist (see
 {
   "name": "agent",
   "permissions": { "secrets": "r", "namespaces": ["agent"] },
-  "allowed_ips": "10.0.0.1/32"
+  "allowed_ips": "10.0.0.21/32"
 }
 ```
 
@@ -155,9 +155,9 @@ The agent's transcript shows it just running `git push` or `matrix-notify
 Every helper call hits rhorizon. Every hit is a `read_secret` event:
 
 ```
-actor=agent  action=read_secret  target=gitea-agent-write    ip_address=10.0.0.1
-actor=agent  action=read_secret  target=matrix-agent-token   ip_address=10.0.0.1
-actor=agent  action=read_secret  target=matrix-agent-room    ip_address=10.0.0.1
+actor=agent  action=read_secret  target=gitea-agent-write    ip_address=10.0.0.21
+actor=agent  action=read_secret  target=matrix-agent-token   ip_address=10.0.0.21
+actor=agent  action=read_secret  target=matrix-agent-room    ip_address=10.0.0.21
 ```
 
 The operator can answer questions like "what did the AI agent access in

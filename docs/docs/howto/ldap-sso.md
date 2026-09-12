@@ -88,7 +88,7 @@ curl -X POST http://127.0.0.1:8200/api/v1/vault/auth/proxy/config \
     "enabled": true,
     "user_header": "Remote-User",
     "groups_header": "Remote-Groups",
-    "trusted_ips": "10.0.0.1/32, 10.0.0.1/32",
+    "trusted_ips": "10.0.0.10/32, 10.0.0.11/32",
     "session_ttl_hours": 8
   }'
 ```

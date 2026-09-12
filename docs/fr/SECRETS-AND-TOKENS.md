@@ -189,7 +189,7 @@ curl -X POST https://vault.example/api/v1/vault/tokens/ \
   -d '{
     "name": "ansible-prod",
     "permissions": {"secrets": "r", "namespaces": ["prod"]},
-    "allowed_ips": "10.0.0.1/32, 10.0.0.1/32"
+    "allowed_ips": "10.0.0.21/32, 10.0.0.22/32"
   }'
 ```
 
@@ -198,10 +198,10 @@ curl -X POST https://vault.example/api/v1/vault/tokens/ \
 | Forme | Signification |
 |---|---|
 | `null` / absent / `""` | Aucune restriction. Defaut retro-compatible. |
-| `"10.0.0.1"` | Un seul host. IP nue -> stockee en `/32` (v4) ou `/128` (v6). |
-| `"10.0.0.1, 10.0.0.1, 10.0.0.1"` | **Les listes sont supportees** - separees par virgule. Melangez IP individuelles et CIDR librement. |
+| `"10.0.0.21"` | Un seul host. IP nue -> stockee en `/32` (v4) ou `/128` (v6). |
+| `"10.0.0.21, 10.0.0.22, 10.0.0.23"` | **Les listes sont supportees** - separees par virgule. Melangez IP individuelles et CIDR librement. |
 | `"10.89.0.0/16"` | Un bloc CIDR - tout host du subnet est autorise. |
-| `"10.0.0.1/24, 2001:db8::/64"` | IPv4 et IPv6 dans la meme allowlist. |
+| `"10.0.0.0/24, 2001:db8::/64"` | IPv4 et IPv6 dans la meme allowlist. |
 | `"not-a-cidr"` | Rejete a la creation avec `400 Invalid allowed_ips entry`. |
 
 Les espaces autour des entrees sont toleres. La valeur stockee est
@@ -216,7 +216,7 @@ namespace limite **quels secrets** il touche. L'IP allowlist limite
 **d'ou le token peut etre rejoue** s'il fuit.
 
 Sans elle, un token long-lived dans une config Ansible sur le host
-`10.0.0.1` est tout aussi valide depuis n'importe quel autre host du
+`10.0.0.21` est tout aussi valide depuis n'importe quel autre host du
 mesh VPN ou du bridge Docker. Avec elle, un compromis d'un workload
 sans rapport sur le meme reseau prive ne donne pas un credential vault
 utilisable.
@@ -225,9 +225,9 @@ Plus c'est etroit, mieux c'est :
 
 | Allowlist | Surface de rejeu si fuite |
 |---|---|
-| `"10.0.0.1/32"` | Un host. Le compromis de tout autre host LAN ne le rejouera pas. |
-| `"10.0.0.1, 10.0.0.1"` | Deux hosts. Liste explicite - chirurgicale. |
-| `"10.0.0.1/24"` | Un subnet entier. OK pour un segment VPN serre. |
+| `"10.0.0.21/32"` | Un host. Le compromis de tout autre host LAN ne le rejouera pas. |
+| `"10.0.0.21, 10.0.0.22"` | Deux hosts. Liste explicite - chirurgicale. |
+| `"10.0.0.0/24"` | Un subnet entier. OK pour un segment VPN serre. |
 | `"10.0.0.0/8"` | Tout RFC 1918 / 10. Effectivement inutile pour la defense mouvement-lateral. |
 | `null` (defaut) | Partout sur le reseau qui atteint le vault. |
 
@@ -240,7 +240,7 @@ Plus c'est etroit, mieux c'est :
 | `10.89.0.0/16` | Bridge Podman par defaut `podman` |
 | `172.17.0.0/16` | Bridge Docker par defaut `docker0` |
 | `172.16.0.0/12` | Couvre `docker0` plus les bridges Docker user-defined (alloues depuis ce pool) |
-| votre subnet VPN | Mesh VPN - ce que vous avez assigne (ex. `10.0.0.1/24`) |
+| votre subnet VPN | Mesh VPN - ce que vous avez assigne (ex. `10.0.0.0/24`) |
 
 Ces plages sont documentees pour le dimensionnement, pas comme valeurs
 recommandees. Un mesh VPN est souvent le plus lache que vous
@@ -283,7 +283,7 @@ curl -X POST https://vault.example/api/v1/vault/tokens/ephemeral \
   -d '{
     "permissions": {"secrets": "r", "namespaces": ["ci/frontend"]},
     "ttl_seconds": 900,
-    "allowed_ips": "10.0.0.1/32"
+    "allowed_ips": "10.0.0.42/32"
   }'
 ```
 

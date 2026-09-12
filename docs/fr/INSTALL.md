@@ -10,6 +10,7 @@ C'est cette page qui couvre le reste.
 | Vous voulez | Allez à |
 |---|---|
 | Une commande sur un laptop | [Install rapide](#install-rapide-une-commande) |
+| Séparer un processus IA local de l'autorité de récupération | [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) |
 | Choisir le runtime et la taille | [Contrôle total](#contrôle-total-power-user) |
 | Le natif, détail par OS | [`INSTALL-NATIVE.md`](INSTALL-NATIVE.md) |
 | Premier secret, premier unseal | [`QUICKSTART.md`](QUICKSTART.md) |
@@ -50,6 +51,12 @@ curl -fsSL https://raw.githubusercontent.com/JR-Shdw/Horizon/main/tools/quicksta
 Le chemin natif a besoin de `sudo` (paquets système + PostgreSQL). Il active
 aussi le verrouillage mémoire du process entier quand l'hôte a du swap non
 chiffré ; voir [Protection mémoire et swap](DEPLOYMENT.md#36-protection-mémoire-et-swap).
+
+Les deux quickstarts laptop conservent le matériel de récupération sous le
+compte de connexion pour simplifier l'usage. Sous Linux, utilisez le parcours
+système séparé de [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) lorsque le
+processus IA ne doit recevoir que son token MCP limité et que le mot de passe
+maître ainsi que le token administrateur doivent rester réservés à root.
 
 ## Contrôle total (power user)
 

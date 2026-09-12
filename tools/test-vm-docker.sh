@@ -5,7 +5,7 @@
 # docker validation: boot a Debian/Ubuntu cloud VM, install
 # docker.io + compose plugin, load the locally-built rhorizon-agent
 # image, run the four-pattern step 2 compose against the production
-# vault (vault.example.com / 10.0.0.1:8200 over VPN NAT), and
+# vault (vault.example.com / 10.0.0.20:8200 over VPN NAT), and
 # assert each backend authenticates with its vault-fetched secret.
 #
 # Usage :
@@ -16,7 +16,7 @@
 #                                   namespace claude). Mounted into the
 #                                   VM as a file ; compose treats it as
 #                                   a docker file-secret.
-#   RHORIZON_VAULT_ADDR           - default http://10.0.0.1:8200
+#   RHORIZON_VAULT_ADDR           - default http://10.0.0.20:8200
 #
 # This script does *not* run pytest ; it only validates that the agent
 # binaries and compose patterns work under a real `docker compose` -
@@ -53,7 +53,7 @@ if [[ -z "${RHORIZON_BOOTSTRAP_TOKEN:-}" ]]; then
     echo "Set RHORIZON_BOOTSTRAP_TOKEN (a token with tokens:w + secrets:r in namespace claude)" >&2
     exit 1
 fi
-VAULT_ADDR="${RHORIZON_VAULT_ADDR:-http://10.0.0.1:8200}"
+VAULT_ADDR="${RHORIZON_VAULT_ADDR:-http://10.0.0.20:8200}"
 
 DISK="${WORK_DIR}/disk.qcow2"
 SEED="${WORK_DIR}/seed.iso"
