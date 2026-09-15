@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "rhorizon-custody-core"
-version = "0.9.4-beta.1"
+version = "0.9.5-beta.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "rhorizon_crypto"
-version = "0.9.4-beta.1"
+version = "0.9.5-beta.1"
 dependencies = [
  "aes",
  "aes-gcm",

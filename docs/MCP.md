@@ -7,9 +7,16 @@ Claude Code - can call these tools. MCP tool payloads do not expose the vault
 token; allow-listed secret values are returned to the LLM when it calls
 `vault_get_secret`.
 
-The MCP server is the **trust boundary** between the LLM and the
-vault: it holds the token, it consults a policy whitelist, and it
-fails closed.
+The **vault-side token and grants are the authoritative security boundary**.
+The local MCP policy adds a fail-closed, secret-level filtering layer for calls
+through the MCP server.
+
+For same-UID coding agents, `policy.toml` is **defense in depth, not an OS
+security boundary**: an agent running as the server's account can edit the
+policy, read its token, or bypass MCP and call the vault directly. Those actions
+cannot widen the scoped token's permissions or vault-side membership grants.
+Keep administrator credentials and recovery material outside that account;
+see [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md).
 
 For the use of long-lived tokens, ephemeral tokens, and the rest of
 the auth model independently of MCP, see
@@ -50,8 +57,8 @@ flowchart LR
 |---|---|---|
 | LLM client | The names of MCP tools (e.g. `vault_get_secret`) | Calls tools by name, hands the LLM the result |
 | `rhorizon-mcp` server | The vault token, the policy, the LLM session | Validates each call against `policy.toml`, forwards to vault on success, returns a structured error on denial |
-| `policy.toml` | A whitelist of allowed secrets and tools | Determines what the LLM is **allowed** to ask for |
-| rhorizon vault | The encrypted secrets, the audit chain | Authenticates the MCP server's token, logs every read with `actor=<token-name>` |
+| `policy.toml` | A whitelist of allowed secrets and tools | Filters calls made through the MCP server within the vault-side permissions |
+| rhorizon vault | The encrypted secrets, token permissions, membership grants, the audit chain | Authenticates the token, enforces its permissions and namespace membership, logs every read with `actor=<token-name>` |
 
 The server reads the vault token at startup from `RH_TOKEN_FILE` (mode 0600)
 and does not include it in MCP schemas or responses. The account running the
@@ -79,7 +86,10 @@ vault directly. That fails on three counts:
    sets `actor=<token-name>` per call, and you can correlate with the
    client's session log on your side.
 
-The MCP server inserts the layer that handles all three.
+The MCP server keeps the token out of tool responses, filters calls through
+MCP and supports correlation with client logs. It does not prevent a same-UID
+agent from using the token directly, and client-reported session metadata is
+not verified identity.
 
 ---
 
@@ -125,11 +135,12 @@ allow = [
 
 | Layer | Where | Granularity |
 |---|---|---|
-| Token scope + namespace | rhorizon vault (server-side) | Coarse - which namespaces the token can reach at all |
-| `policy.toml` whitelist | rhorizon-mcp server | Fine - which specific secrets the LLM can ask for |
+| Token scope + namespace membership grants | rhorizon vault (server-side) | Authoritative - which namespaces and operations the token can reach at all |
+| `policy.toml` whitelist | rhorizon-mcp server | Additional filtering - which specific secrets can be requested through MCP |
 
-The token scope is your **upper bound**; the policy is what you let the
-LLM actually do within that bound.
+The token scope and vault-side grants are your **upper bound**; the policy
+further restricts calls through MCP within that bound. An agent that controls
+the local policy can relax that filtering, but cannot expand its vault grant.
 
 ---
 

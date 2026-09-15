@@ -6,8 +6,8 @@ description: |
   PostgreSQL + FastAPI + libsodium + Rust memory protection.
   AGPL-3.0-or-later.
 type: application
-version: 0.9.4
-appVersion: "0.9.4-beta"
+version: 0.9.5
+appVersion: "0.9.5-beta"
 keywords:
   - secrets
   - secrets-manager

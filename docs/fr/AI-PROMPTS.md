@@ -5,9 +5,10 @@ les placeholders `<...>` qui ne sont pas secrets. Relis les commandes
 et changements de configuration avant de les approuver. Ne mets
 jamais un secret, un token ou le mot de passe principal dans le prompt.
 
-Ces prompts supposent que tu as déjà suivi
-[`QUICKSTART-AI.md`](QUICKSTART-AI.md). Si ce n'est pas
-fait, commence par là.
+Ces prompts supposent qu'Horizon est installé et que ton assistant dispose
+d'une clé MCP limitée. Commence par [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md)
+pour choisir entre l'installation à identités séparées et le quickstart local
+personnel.
 
 ---
 
@@ -32,15 +33,17 @@ L'assistant écrit la commande, l'explique, et lit la sortie que tu lui colles.
 Il n'ouvre pas de fichier de credentials, et tu ne colles pas de credentials
 dans le chat.
 
-## Deux façons dont ton assistant a reçu sa clé
+## Comment ton assistant a reçu sa clé
 
 | Ta situation | Comment la clé a été émise |
 |---|---|
-| **Install AI-secure** : ton assistant t'a guidé dans le quickstart | Le script a créé la section, émis une clé en lecture seule limitée à cette section, accordé l'entrée à cette clé, et affiché le token admin **une fois, pour toi**. L'assistant ne l'a jamais vu. |
+| **Install AI-secure** : installation Linux à identités séparées | Le script a créé la section gouvernée, émis une clé en lecture seule limitée à cette section et accordé l'entrée à cette clé. Le token administrateur **persiste dans `/etc/rhorizon/secrets/root-token`, lisible uniquement par root**. Il n'est jamais remis à l'assistant. |
+| **Quickstart local personnel** | Le script a créé la section gouvernée et sa clé limitée en lecture seule. Il a affiché le token admin une fois pour l'opérateur puis supprimé son fichier. Le matériel de récupération et l'assistant partagent un compte système ; ce parcours n'isole pas l'autorité de récupération d'un agent de même UID. |
 | **Horizon existant** : le coffre-fort tournait déjà | Un administrateur émet une clé limitée, lui accorde l'entrée d'une section, et pointe la config de l'assistant dessus. On lui remet la clé, jamais de quoi l'élargir. |
 
-Pour le second cas, voici la préparation côté opérateur. À lancer toi-même, avec
-un token admin dans ton propre shell. C'est la forme que le quickstart automatise :
+Pour une installation Horizon existante, voici la préparation côté opérateur.
+À lancer toi-même, avec un token admin dans ton propre shell. C'est la forme
+que le quickstart automatise :
 
 ```sh
 export RH_TOKEN='<ton-token-admin>'       # ton shell uniquement, jamais le chat
@@ -134,10 +137,11 @@ côté de la frontière.
 
 ## 2. Donner à ton assistant IA l'accès à un secret précis
 
-À utiliser quand tu as un secret dans le coffre-fort et que tu
-veux que ton assistant IA puisse le lire. **Sans
-cette étape, le secret est invisible pour l'IA** - c'est le défaut
-sécurisé.
+À utiliser quand tu as un secret dans le coffre-fort et que tu veux que ton
+assistant IA puisse le lire via MCP. **Sans cette étape, le serveur MCP refuse
+la lecture.** Un agent de même UID peut modifier la policy ou appeler le
+coffre-fort directement avec sa clé limitée ; l'autorisation côté coffre-fort
+reste la frontière.
 
 ```
 J'utilise rhorizon. Je veux donner à mon assistant IA un accès en

@@ -6,6 +6,55 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+## 0.9.5-beta - 2026-09-15
+
+### Added
+
+- Identity-separated AI onboarding on Linux with
+  `tools/quickstart-ai-system.sh`. Horizon runs as the non-login `rhorizon`
+  account; the AI account receives a scoped MCP token, a trusted local CA
+  certificate and an initially empty MCP secret whitelist.
+
+### Security
+
+- AI onboarding and the personal quickstart create a governed `mcp` namespace,
+  a read-only agent group and a namespace-scoped token with an explicit
+  membership grant. The vault enforces the grant even when an agent bypasses
+  MCP or edits its local policy.
+- Identity-separated onboarding retains the master password and administrator
+  token under `/etc/rhorizon/secrets`, readable only by root. It rejects root
+  and service accounts as AI identities, agent-writable source paths, source
+  symlinks, Docker group/socket access and detected passwordless sudo/doas
+  authority.
+- Updated the pinned frontend base image and vulnerable system packages, and
+  the Terraform provider's gRPC dependency, to address dependency scan findings.
+
+### Fixed
+
+- The AI installation guides now target `v0.9.5-beta`, which includes the
+  dedicated onboarding script missing from `v0.9.4-beta`.
+- Kubernetes HA audit checks can be retried, and unseal checks reuse the
+  existing helper Pod instead of creating a Pod for every request.
+- Public source exports sanitize private network prefixes as well as complete
+  addresses.
+
+### Documentation
+
+- AI prompts distinguish the root-only persistent administrator token in the
+  identity-separated install from the personal quickstart's one-time display
+  and file removal. Privileged operations stay with the operator; the assistant
+  receives only its scoped credential.
+- MCP documentation identifies vault-side token permissions and grants as the
+  authoritative boundary. Local policy is additional filtering for MCP calls,
+  not an OS boundary against an agent running under the same UID.
+- Hub audit metadata is described as caller-reported attribution, not verified
+  client or model provenance.
+- Client-secret examples use namespace `mcp` and names such as
+  `clients/<name>`; `mcp/clients` is a different namespace and is outside an
+  exact `mcp` grant.
+- English and French guides clarify the service identity, recovery-material
+  ownership and limitations of a personal local installation.
+
 ## 0.9.4-beta - 2026-08-30
 
 ### Added

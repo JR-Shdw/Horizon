@@ -8,9 +8,17 @@ En mode stdio, les schémas et réponses MCP n'exposent pas le token vault ; les
 valeurs des secrets autorisés sont en revanche transmises au LLM lorsqu'il les
 demande.
 
-Le serveur MCP est la **frontière de confiance** entre le LLM et le
-vault : il tient le token, il consulte une policy whitelist, il fait
-fail-closed.
+Le **token et les autorisations côté coffre-fort constituent la frontière de
+sécurité faisant autorité**. La policy MCP locale ajoute un filtre par secret
+qui refuse par défaut les appels passant par le serveur MCP.
+
+Pour les agents de développement de même UID, `policy.toml` est une **défense
+en profondeur, pas une frontière de sécurité du système d'exploitation** : un
+agent exécuté sous le compte du serveur peut modifier la policy, lire son token
+ou contourner MCP et appeler directement le coffre-fort. Ces actions ne peuvent
+pas élargir les permissions du token limité ni ses autorisations d'appartenance
+côté coffre-fort. Garde les credentials administrateur et le matériel de
+récupération hors de ce compte ; voir [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md).
 
 Pour l'usage de tokens long-lived, éphémères, et le reste du modèle
 d'auth indépendamment de MCP, voir [`SECRETS-AND-TOKENS.md`](SECRETS-AND-TOKENS.md).
@@ -49,8 +57,8 @@ flowchart LR
 |---|---|---|
 | Client LLM | Les noms des tools MCP (ex. `vault_get_secret`) | Appelle les tools par nom, transmet le résultat au LLM |
 | Serveur `rhorizon-mcp` | Le token vault, la policy, la session LLM | Valide chaque appel contre `policy.toml`, forward au vault si OK, retourne une erreur structurée si refus |
-| `policy.toml` | Une whitelist de secrets et tools autorisés | Détermine ce que le LLM a le **droit** de demander |
-| Vault rhorizon | Les secrets chiffrés, la chaîne d'audit | Authentifie le token du serveur MCP, log chaque read avec `actor=<token-name>` |
+| `policy.toml` | Une whitelist de secrets et tools autorisés | Filtre les appels passant par le serveur MCP dans les permissions côté coffre-fort |
+| Vault rhorizon | Les secrets chiffrés, les permissions des tokens, les autorisations d'appartenance, la chaîne d'audit | Authentifie le token, applique ses permissions et l'appartenance aux namespaces, log chaque read avec `actor=<token-name>` |
 
 Le serveur lit le token vault une fois au démarrage depuis `RH_TOKEN_FILE`
 (mode 0600) et ne l'inclut pas dans les payloads MCP. Le compte local du
@@ -73,7 +81,10 @@ au vault directement. Ça échoue sur trois points :
 2. **Pas de filtrage.** Le scope du token vault est large (ex. `secrets:r` sur un namespace entier). Le LLM n'a peut-être besoin que de 3 secrets précis sur 100. Pas moyen d'exprimer "lis ces 3, refuse le reste" sans une couche intermédiaire.
 3. **Attribution audit grossière.** Chaque entrée d'audit dit "ce token a lu X" - mais quelle session LLM, quel prompt utilisateur ? Le serveur MCP met `actor=<token-name>` par appel, et tu peux corréler avec le log de session du client de ton côté.
 
-Le serveur MCP insère la couche qui gère ces trois points.
+Le serveur MCP garde le token hors des réponses des tools, filtre les appels
+MCP et permet la corrélation avec les logs du client. Il n'empêche pas un agent
+de même UID d'utiliser directement le token, et les métadonnées de session
+déclarées par le client ne constituent pas une identité vérifiée.
 
 ---
 
@@ -119,11 +130,13 @@ allow = [
 
 | Couche | Où | Granularité |
 |---|---|---|
-| Token scope + namespace | Vault rhorizon (côté serveur) | Grossière - quels namespaces le token peut atteindre |
-| Whitelist `policy.toml` | Serveur rhorizon-mcp | Fine - quels secrets précis le LLM peut demander |
+| Scope du token + autorisations d'appartenance aux namespaces | Vault rhorizon (côté serveur) | Fait autorité - quels namespaces et opérations le token peut atteindre |
+| Whitelist `policy.toml` | Serveur rhorizon-mcp | Filtrage supplémentaire - quels secrets précis sont accessibles via MCP |
 
-Le scope du token est ta **borne haute** ; la policy est ce que tu
-laisses le LLM faire dans cette borne.
+Le scope du token et les autorisations côté coffre-fort sont ta **borne haute** ;
+la policy restreint davantage les appels passant par MCP dans cette borne. Un
+agent qui contrôle la policy locale peut assouplir ce filtre, mais ne peut pas
+élargir son autorisation côté coffre-fort.
 
 ---
 

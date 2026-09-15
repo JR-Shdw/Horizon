@@ -1,6 +1,6 @@
 # Installer Horizon avec un assistant IA
 
-S'applique à Horizon 0.9.4-beta.
+S'applique à Horizon 0.9.5-beta.
 
 Cette page est la fiche d'instructions à fournir à un assistant IA. Elle couvre
 une installation locale, pas un déploiement exposé sur Internet ou en HA.
@@ -49,7 +49,7 @@ Exécutez une seule commande à la fois et attendez son résultat.
    appartenant à root :
 
    ```bash
-   sudo git clone --branch v0.9.4-beta --depth 1 https://github.com/JR-Shdw/Horizon.git /usr/local/src/rhorizon
+   sudo git clone --branch v0.9.5-beta --depth 1 https://github.com/JR-Shdw/Horizon.git /usr/local/src/rhorizon
    ```
 
    Si le répertoire existe déjà, arrêtez-vous. Ne le supprimez, ne l'écrasez et

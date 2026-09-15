@@ -5,9 +5,9 @@ non-secret `<...>` placeholders before using it. Review commands and
 configuration changes before approving them. Never put a secret,
 token, or master password in the prompt.
 
-These prompts assume you have already run
-[`QUICKSTART-AI.md`](QUICKSTART-AI.md). If you haven't, do
-that first.
+These prompts assume Horizon is already installed and your assistant has a
+scoped MCP key. Start with [`AI-INSTALL-GUIDE.md`](AI-INSTALL-GUIDE.md) to choose
+between an identity-separated installation and the personal local quickstart.
 
 ---
 
@@ -30,15 +30,17 @@ So when an operation needs more authority than the assistant's key,
 writes the command, explains it, and reads the output you paste back. It does
 not open credential files, and you do not paste credentials into the chat.
 
-## Two ways your assistant got its key
+## How your assistant got its key
 
 | Your situation | How the key was issued |
 |---|---|
-| **AI-secure install** - your assistant walked you through the quickstart | The script created the section, minted a read-only key scoped to it, granted that key entry, and printed the admin token **once, to you**. The assistant never saw it. |
+| **AI-secure install** - identity-separated Linux installation | The script created the governed section, minted a read-only key scoped to it, and granted that key entry. The administrator token **persists at `/etc/rhorizon/secrets/root-token`, readable only by root**. It is never handed to the assistant. |
+| **Personal local quickstart** | The script created the governed section and its scoped read-only key. It printed the admin token once for the operator and removed its file. Recovery material and the assistant share a host account; this path does not isolate recovery authority from a same-UID agent. |
 | **Existing Horizon** - the vault was already running | An administrator mints a scoped key, grants it entry to one section, and points the assistant's config at it. The assistant is handed the key, never the means to widen it. |
 
-For the second case, this is the operator-side setup. Run it yourself, with an
-admin token in your own shell. It is the same shape the quickstart automates:
+For an existing Horizon installation, this is the operator-side setup. Run it
+yourself, with an admin token in your own shell. It is the same shape the
+quickstart automates:
 
 ```sh
 export RH_TOKEN='<your-admin-token>'      # your shell only, never the chat
@@ -128,8 +130,9 @@ the boundary.
 ## 2. Let your AI assistant read a specific secret
 
 Use this when you have a secret in the vault and you want your AI
-assistant to be able to read it. **Without this step,
-the secret is invisible to the AI** - that's the safe default.
+assistant to be able to read it through MCP. **Without this step, the MCP
+server refuses the read.** A same-UID agent can edit the policy or call the
+vault directly with its scoped key; the vault-side grant remains the boundary.
 
 ```
 I'm using rhorizon. I want to grant my AI assistant read access to
