@@ -6,6 +6,19 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+### Security
+
+- Pin the API image's Debian updates for `perl-base`, `gzip`, `libpcre2-8-0`
+  and `libsqlite3-0`, addressing the three CRITICAL and nine HIGH findings in
+  the September 2026 scan. A failed runtime package installation now fails
+  the image build instead of being hidden by cleanup commands.
+
+### Fixed
+
+- The API scan prints package names, CVE identifiers and fixed versions using
+  Trivy's own report renderer. Scanner errors now fail the step instead of
+  being ignored; the dedicated secret-scan step remains separate.
+
 ## 0.9.5-beta - 2026-09-15
 
 ### Added

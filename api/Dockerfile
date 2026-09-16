@@ -141,8 +141,20 @@ ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
 # DELETE once python:3.12-slim ships >= 3.5.7-1~deb13u2.
 ARG OPENSSL_VERSION=3.5.7-1~deb13u2
 
+# Debian fixes not yet included in the pinned Python base (September 2026):
+# gzip: CVE-2026-41992; PCRE2: CVE-2026-86145/89161;
+# SQLite: CVE-2026-11822/11824; Perl: CVE-2026-13221/42496/8376
+# and CVE-2026-42497/48962/57432/57433. Keep exact versions so rebuilding
+# never silently selects a different security update. Remove these overrides
+# when the pinned base contains the fixes.
+ARG GZIP_VERSION=1.13-1+deb13u1
+ARG PCRE2_VERSION=10.46-1~deb13u2
+ARG SQLITE_VERSION=3.46.1-7+deb13u2
+ARG PERL_VERSION=5.40.1-6+deb13u1
+
 # Runtime only: libsodium + libldap (no -dev, no gcc)
-RUN apt-get update && \
+RUN set -eux; \
+    apt-get update; \
     apt-get install -y --no-install-recommends --only-upgrade \
         util-linux=${UTIL_LINUX_VERSION} \
         bsdutils=1:${UTIL_LINUX_VERSION} \
@@ -155,16 +167,19 @@ RUN apt-get update && \
         login=1:4.16.0-2+really${UTIL_LINUX_VERSION} \
         libssl3t64=${OPENSSL_VERSION} \
         openssl=${OPENSSL_VERSION} \
-        openssl-provider-legacy=${OPENSSL_VERSION} && \
-    apt-get install -y --no-install-recommends libsodium23 libldap2 libsasl2-2 && \
-    rm -rf /var/lib/apt/lists/* && \
+        openssl-provider-legacy=${OPENSSL_VERSION} \
+        gzip=${GZIP_VERSION} \
+        libpcre2-8-0=${PCRE2_VERSION} \
+        libsqlite3-0=${SQLITE_VERSION} \
+        perl-base=${PERL_VERSION}; \
+    apt-get install -y --no-install-recommends libsodium23 libldap2 libsasl2-2; \
+    rm -rf /var/lib/apt/lists/*; \
     # Remove tools an attacker could use
-    rm -f /usr/bin/wget /usr/bin/curl 2>/dev/null; \
-    pip uninstall -y pip setuptools 2>/dev/null; \
-    rm -rf /usr/local/lib/python3.12/ensurepip && \
+    rm -f /usr/bin/wget /usr/bin/curl; \
+    pip uninstall -y pip setuptools; \
+    rm -rf /usr/local/lib/python3.12/ensurepip; \
     # Remove __pycache__ from stdlib to reduce image size
-    find /usr/local/lib/python3.12 -name __pycache__ -exec rm -rf {} + 2>/dev/null; \
-    true
+    find /usr/local/lib/python3.12 -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # Copy Python packages from builder
 COPY --from=builder /install /usr/local
