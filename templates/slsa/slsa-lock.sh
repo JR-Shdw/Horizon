@@ -34,7 +34,9 @@ _run() { docker run --rm -v "$PWD:/work" -w /work "$IMAGE" sh -c "$1"; }
 _lock() {
   s="pip install --no-cache-dir -q 'pip==$PIP_PIN' pip-tools"
   for f in $ins; do
-    s="$s && pip-compile --generate-hashes --quiet --output-file='${f%.in}.txt' '$f'"
+    # Recompute hashes: a manually edited output pin may still carry hashes
+    # for its previous version. Reusing those produces an invalid lockfile.
+    s="$s && pip-compile --generate-hashes --no-reuse-hashes --quiet --output-file='${f%.in}.txt' '$f'"
   done
   _run "$s"
   printf '[slsa] locked:'; for f in $ins; do printf ' %s' "${f%.in}.txt"; done; echo

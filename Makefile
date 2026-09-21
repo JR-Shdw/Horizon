@@ -13,6 +13,12 @@ CHAOS_K7_ENV ?= tools/chaos/k7.env
 MCP_E2E_ENV ?= mcp-lab/proxy-e2e.env
 CHAOS_K7_PROFILE ?= medium
 
+# Registry image scan: override IMAGE to inspect another published image.
+# Keep the scanner pin aligned with .woodpecker/scan.yml.
+IMAGE ?= ghcr.io/jr-shdw/rhorizon-api:latest
+CONTAINER_RUNTIME ?= docker
+TRIVY_IMAGE ?= docker.io/aquasec/trivy:0.71.2@sha256:f5d0e600ecda7449e2a9b272805aef698631d3bb3f3a739a750de2c6819acdc9
+
 # Aide
 
 help: ## Affiche cette aide
@@ -75,6 +81,14 @@ db-restore: ## Restore la BDD depuis FILE=<dump.sql.gz> (DESTRUCTIF -- stop l'AP
 		&& echo "restored from $(FILE)"
 
 # Dev / CI
+
+.PHONY: scan-trivy
+scan-trivy: ## Scan registry API image for HIGH/CRITICAL CVEs (IMAGE=..., CONTAINER_RUNTIME=docker|podman)
+	$(CONTAINER_RUNTIME) run --rm \
+		-v rhorizon-trivy-cache:/root/.cache/trivy \
+		"$(TRIVY_IMAGE)" image --image-src remote \
+		--scanners vuln --severity HIGH,CRITICAL --format table \
+		--exit-code 1 "$(IMAGE)"
 
 lint: ## Lint du code API (ruff)
 	ruff check api/
