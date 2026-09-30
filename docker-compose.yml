@@ -20,8 +20,9 @@ services:
 
   postgres:
     # Built from postgres/Dockerfile: stock postgres with the gosu Go binary
-    # removed (see that file). Compose names the image `rhorizon-postgres`,
-    # which is what .woodpecker/scan.yml scans.
+    # removed (see that file). Keep the scan tag independent of the Compose
+    # project name configured on the runner.
+    image: rhorizon-postgres:latest
     build:
       context: .
       dockerfile: postgres/Dockerfile

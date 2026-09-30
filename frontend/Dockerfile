@@ -78,12 +78,13 @@ RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
 # CVEs fixed in 2.42.3-r1 (CVE-2026-53612, CVE-2026-53613, CVE-2026-53614,
 # CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410).
 # curl is required at runtime by the compose healthcheck, so it stays in the
-# image. The previous entries here (curl/libcurl, libexpat, c-ares) are gone
+# image. The previous entries here (curl/libcurl, c-ares) are gone
 # because the base rebuild this digest points at already carries their fixes,
 # along with openssl 3.5.8-r0 for CVE-2026-14456. Per that same rule, drop
-# libuuid once upstream rebuilds the base against it.
+# libuuid once upstream rebuilds the base against it. libexpat 2.8.5-r0 fixes
+# CVE-2026-93990; drop its override when the base includes that fix too.
 RUN apk add --no-cache curl && \
-    apk upgrade --no-cache libuuid
+    apk upgrade --no-cache libuuid libexpat
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m

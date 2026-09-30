@@ -8,6 +8,8 @@ cadence; things ship when they're ready.
 
 ### Security
 
+- Update frontend `libexpat` for CVE-2026-93990 and pin PostgreSQL image
+  security updates for gzip, PCRE2, Perl, SQLite and OpenSSL.
 - Pin the API image's Debian updates for `perl-base`, `gzip`, `libpcre2-8-0`
   and `libsqlite3-0`, addressing the three CRITICAL and nine HIGH findings in
   the September 2026 scan. A failed runtime package installation now fails
@@ -15,6 +17,9 @@ cadence; things ship when they're ready.
 
 ### Fixed
 
+- Require all eight image and module vulnerability reports, and fail on
+  scanner or report errors. Scan the published agent image after local image
+  pruning and give PostgreSQL a stable image tag for the scan.
 - The API scan prints package names, CVE identifiers and fixed versions using
   Trivy's own report renderer. Scanner errors now fail the step instead of
   being ignored; the dedicated secret-scan step remains separate.

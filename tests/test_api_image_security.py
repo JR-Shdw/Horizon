@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -56,29 +58,83 @@ class ApiImageSecurityTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 42, result.stderr)
                 self.assertFalse(marker.exists(), "cleanup masked the package failure")
 
-    def test_api_scan_propagates_scan_and_report_errors(self) -> None:
+    def test_scans_propagate_scan_and_report_errors(self) -> None:
         workflow = yaml.safe_load((ROOT / ".woodpecker/scan.yml").read_text())
-        step = next(step for step in workflow["steps"] if step["name"] == "scan-api")
-        command = "\n".join(step["commands"]).replace("$$", "$")
+        for step in workflow["steps"]:
+            if step["name"].startswith("scan-"):
+                operation = "fs" if step["name"] == "scan-client-modules" else "image"
+                for fail_operation in (operation, "convert"):
+                    with self.subTest(step=step["name"], operation=fail_operation):
+                        self._assert_scan_failure(step, fail_operation)
 
-        for operation in ("image", "convert"):
-            with (
-                self.subTest(operation=operation),
-                tempfile.TemporaryDirectory() as tmp,
-            ):
-                self._executable(
-                    Path(tmp),
-                    "trivy",
-                    '[ "$1" != "$FAIL_OPERATION" ] || exit 43\nexit 0',
-                )
+    def _assert_scan_failure(self, step: dict, operation: str) -> None:
+        command = "\n".join(step["commands"]).replace("$$", "$")
+        with tempfile.TemporaryDirectory() as tmp:
+            self._executable(
+                Path(tmp),
+                "trivy",
+                '[ "$1" != "$FAIL_OPERATION" ] || exit 43\nexit 0',
+            )
+            result = subprocess.run(
+                ["/bin/sh", "-c", command],
+                env={**os.environ, "PATH": tmp, "FAIL_OPERATION": operation},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 43, result.stderr)
+
+    @unittest.skipUnless(shutil.which("jq"), "scan summary requires jq")
+    def test_summary_requires_complete_valid_clean_reports(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".woodpecker/scan.yml").read_text())
+        step = next(step for step in workflow["steps"] if step["name"] == "summary")
+        command = step["commands"][-1].replace("$$", "$")
+        names = (
+            "api",
+            "frontend",
+            "agent",
+            "postgres",
+            "module_agent",
+            "module_cryptolib",
+            "module_npmsdk",
+            "module_tfprovider",
+        )
+        for case in (
+            "clean",
+            "missing",
+            "malformed",
+            "wrong-schema",
+            "high",
+            "critical",
+        ):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                report = {"SchemaVersion": 2, "ArtifactName": "test", "Results": []}
+                for name in names:
+                    (directory / f"rhorizon_{name}.json").write_text(json.dumps(report))
+                target = directory / "rhorizon_postgres.json"
+                if case == "missing":
+                    target.unlink()
+                elif case == "malformed":
+                    target.write_text("{broken")
+                elif case == "wrong-schema":
+                    target.write_text("{}")
+                elif case in ("high", "critical"):
+                    report["Results"] = [
+                        {"Vulnerabilities": [{"Severity": case.upper()}]}
+                    ]
+                    target.write_text(json.dumps(report))
                 result = subprocess.run(
-                    ["/bin/sh", "-c", command],
-                    env={**os.environ, "PATH": tmp, "FAIL_OPERATION": operation},
+                    ["/bin/sh", "-c", command.replace("/reports/", f"{tmp}/")],
                     capture_output=True,
                     text=True,
                     check=False,
                 )
-                self.assertEqual(result.returncode, 43, result.stderr)
+                if case == "clean":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertNotIn("[OK]", result.stdout)
 
     @staticmethod
     def _executable(directory: Path, name: str, body: str) -> None:

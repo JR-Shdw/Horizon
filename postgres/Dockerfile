@@ -37,6 +37,13 @@ RUN set -eux; \
 # in the single materialised layer and no lower layer keeps the old binaries.
 # DELETE once the base ships >= 2.41.5-0+deb13u1.
 ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
+# Security fixes not yet included in the pinned base. Keep exact versions;
+# remove these overrides when the base includes the fixes.
+ARG OPENSSL_VERSION=3.5.7-1~deb13u2
+ARG GZIP_VERSION=1.13-1+deb13u1
+ARG PCRE2_VERSION=10.46-1~deb13u2
+ARG SQLITE_VERSION=3.46.1-7+deb13u2
+ARG PERL_VERSION=5.40.1-6+deb13u1
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends --only-upgrade \
@@ -48,7 +55,17 @@ RUN set -eux; \
         libsmartcols1=${UTIL_LINUX_VERSION} \
         libuuid1=${UTIL_LINUX_VERSION} \
         mount=${UTIL_LINUX_VERSION} \
-        login=1:4.16.0-2+really${UTIL_LINUX_VERSION}; \
+        login=1:4.16.0-2+really${UTIL_LINUX_VERSION} \
+        libssl3t64=${OPENSSL_VERSION} \
+        openssl=${OPENSSL_VERSION} \
+        openssl-provider-legacy=${OPENSSL_VERSION} \
+        gzip=${GZIP_VERSION} \
+        libpcre2-8-0=${PCRE2_VERSION} \
+        libsqlite3-0=${SQLITE_VERSION} \
+        libperl5.40=${PERL_VERSION} \
+        perl=${PERL_VERSION} \
+        perl-base=${PERL_VERSION} \
+        perl-modules-5.40=${PERL_VERSION}; \
     rm -rf /var/lib/apt/lists/*
 
 # docker-entrypoint.sh only ever calls `gosu postgres <cmd...>`. Replace the
