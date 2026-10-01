@@ -138,17 +138,18 @@ ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
 # in this image speaks QUIC -- but the fix is already in the Debian archive
 # while the base image still ships the vulnerable build, so taking it costs
 # nothing and keeps the scan honest about what is actually installed.
-# DELETE once python:3.12-slim ships >= 3.5.7-1~deb13u2.
-ARG OPENSSL_VERSION=3.5.7-1~deb13u2
+# deb13u3 also fixes CVE-2026-75804 and CVE-2026-84782.
+# DELETE once python:3.12-slim ships >= 3.5.7-1~deb13u3.
+ARG OPENSSL_VERSION=3.5.7-1~deb13u3
 
 # Debian fixes not yet included in the pinned Python base (September 2026):
-# gzip: CVE-2026-41992; PCRE2: CVE-2026-86145/89161;
+# gzip: CVE-2026-41992; PCRE2: CVE-2026-86145/89161/103111;
 # SQLite: CVE-2026-11822/11824; Perl: CVE-2026-13221/42496/8376
 # and CVE-2026-42497/48962/57432/57433. Keep exact versions so rebuilding
 # never silently selects a different security update. Remove these overrides
 # when the pinned base contains the fixes.
 ARG GZIP_VERSION=1.13-1+deb13u1
-ARG PCRE2_VERSION=10.46-1~deb13u2
+ARG PCRE2_VERSION=10.46-1~deb13u3
 ARG SQLITE_VERSION=3.46.1-7+deb13u2
 ARG PERL_VERSION=5.40.1-6+deb13u1
 

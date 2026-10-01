@@ -8,6 +8,8 @@ cadence; things ship when they're ready.
 
 ### Security
 
+- Update API and PostgreSQL OpenSSL and PCRE2 security pins for
+  CVE-2026-75804, CVE-2026-84782 and CVE-2026-103111.
 - Update frontend `libexpat` for CVE-2026-93990 and pin PostgreSQL image
   security updates for gzip, PCRE2, Perl, SQLite and OpenSSL.
 - Pin the API image's Debian updates for `perl-base`, `gzip`, `libpcre2-8-0`

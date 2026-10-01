@@ -39,9 +39,9 @@ RUN set -eux; \
 ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
 # Security fixes not yet included in the pinned base. Keep exact versions;
 # remove these overrides when the base includes the fixes.
-ARG OPENSSL_VERSION=3.5.7-1~deb13u2
+ARG OPENSSL_VERSION=3.5.7-1~deb13u3
 ARG GZIP_VERSION=1.13-1+deb13u1
-ARG PCRE2_VERSION=10.46-1~deb13u2
+ARG PCRE2_VERSION=10.46-1~deb13u3
 ARG SQLITE_VERSION=3.46.1-7+deb13u2
 ARG PERL_VERSION=5.40.1-6+deb13u1
 RUN set -eux; \
