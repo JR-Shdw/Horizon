@@ -209,9 +209,9 @@ RUN useradd -r -u 1500 -s /usr/sbin/nologin -M rhorizon && \
     # node_uuid volume mountpoint: pre-create with uid 1500 so
     # the named volume inherits ownership on first mount (read_only root
     # FS prevents runtime mkdir at the root path).
-    mkdir -p /var/lib/rhorizon && \
-    chown 1500:1500 /var/lib/rhorizon && \
-    chmod 0700 /var/lib/rhorizon
+    mkdir -p /var/lib/rhorizon /var/log/rhorizon && \
+    chown 1500:1500 /var/lib/rhorizon /var/log/rhorizon && \
+    chmod 0700 /var/lib/rhorizon /var/log/rhorizon
 
 USER 1500
 

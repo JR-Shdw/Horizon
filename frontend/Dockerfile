@@ -83,8 +83,11 @@ RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
 # along with openssl 3.5.8-r0 for CVE-2026-14456. Per that same rule, drop
 # libuuid once upstream rebuilds the base against it. libexpat 2.8.5-r0 fixes
 # CVE-2026-93990; drop its override when the base includes that fix too.
+# PCRE2 10.48-r0 in the base is affected by CVE-2026-103111. Require the
+# fixed Alpine package so a stale mirror fails the build instead of shipping it.
 RUN apk add --no-cache curl && \
-    apk upgrade --no-cache libuuid libexpat
+    apk upgrade --no-cache libuuid libexpat && \
+    apk add --no-cache --upgrade 'pcre2>=10.49-r0'
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m
