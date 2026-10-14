@@ -85,9 +85,10 @@ RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
 # CVE-2026-93990; drop its override when the base includes that fix too.
 # PCRE2 10.48-r0 in the base is affected by CVE-2026-103111. Require the
 # fixed Alpine package so a stale mirror fails the build instead of shipping it.
+# TIFF 4.7.2-r0 fixes CVE-2026-4775 in the base image.
 RUN apk add --no-cache curl && \
     apk upgrade --no-cache libuuid libexpat && \
-    apk add --no-cache --upgrade 'pcre2>=10.49-r0'
+    apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0'
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m
