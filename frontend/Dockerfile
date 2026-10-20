@@ -81,14 +81,16 @@ RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
 # image. The previous entries here (curl/libcurl, c-ares) are gone
 # because the base rebuild this digest points at already carries their fixes,
 # along with openssl 3.5.8-r0 for CVE-2026-14456. Per that same rule, drop
-# libuuid once upstream rebuilds the base against it. libexpat 2.8.5-r0 fixes
-# CVE-2026-93990; drop its override when the base includes that fix too.
+# libuuid once upstream rebuilds the base against it.
+# libexpat 2.9.0-r0 fixes CVE-2026-77214; libx11 1.8.14-r0 fixes
+# CVE-2026-88806. Require these minimum versions until the base includes them.
 # PCRE2 10.48-r0 in the base is affected by CVE-2026-103111. Require the
 # fixed Alpine package so a stale mirror fails the build instead of shipping it.
 # TIFF 4.7.2-r0 fixes CVE-2026-4775 in the base image.
 RUN apk add --no-cache curl && \
-    apk upgrade --no-cache libuuid libexpat && \
-    apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'tiff>=4.7.2-r0'
+    apk upgrade --no-cache libuuid && \
+    apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0' \
+        'pcre2>=10.49-r0' 'tiff>=4.7.2-r0'
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m
