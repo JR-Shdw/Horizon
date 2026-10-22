@@ -12,3 +12,5 @@ typer==0.20.0
 idna>=3.15
 # Match the API's AnyIO security floor (also pulled in here by httpx).
 anyio>=4.14.2
+# GHSA-6q48-6c7w-9gw2: match the API's certifi security floor.
+certifi>=2026.10.19

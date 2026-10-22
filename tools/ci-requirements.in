@@ -10,3 +10,5 @@ maturin==1.9.6
 idna>=3.15
 urllib3>=2.7.0
 msgpack>=1.2.1
+# GHSA-6q48-6c7w-9gw2: match the API's certifi security floor.
+certifi>=2026.10.19
