@@ -1,4 +1,4 @@
-FROM docker.io/library/nginx:stable-alpine@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c
+FROM docker.io/library/nginx:stable-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951
 
 # OCI labels for Docker Hub / GHCR / Gitea registry display.
 ARG VERSION=dev
@@ -73,24 +73,10 @@ COPY js/ /usr/share/nginx/html/js/
 RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
     find /usr/share/nginx/html -type d -exec chmod 755 {} +
 
-# The pinned nginx:stable-alpine base (Alpine 3.24) lags Alpine's security
-# patches for util-linux: it still carries libuuid 2.42.1-r0, against seven HIGH
-# CVEs fixed in 2.42.3-r1 (CVE-2026-53612, CVE-2026-53613, CVE-2026-53614,
-# CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410).
-# curl is required at runtime by the compose healthcheck, so it stays in the
-# image. The previous entries here (curl/libcurl, c-ares) are gone
-# because the base rebuild this digest points at already carries their fixes,
-# along with openssl 3.5.8-r0 for CVE-2026-14456. Per that same rule, drop
-# libuuid once upstream rebuilds the base against it.
-# libexpat 2.9.0-r0 fixes CVE-2026-77214; libx11 1.8.14-r0 fixes
-# CVE-2026-88806. Require these minimum versions until the base includes them.
-# PCRE2 10.48-r0 in the base is affected by CVE-2026-103111. Require the
-# fixed Alpine package so a stale mirror fails the build instead of shipping it.
-# TIFF 4.7.2-r0 fixes CVE-2026-4775 in the base image.
-RUN apk add --no-cache curl && \
-    apk upgrade --no-cache libuuid && \
-    apk add --no-cache --upgrade 'libexpat>=2.9.0-r0' 'libx11>=1.8.14-r0' \
-        'pcre2>=10.49-r0' 'tiff>=4.7.2-r0'
+# The pinned nginx 1.30.6 / Alpine 3.24.3 base includes the libuuid,
+# libexpat, libx11, PCRE2 and TIFF security fixes on amd64 and arm64.
+# curl is required at runtime by the compose healthcheck.
+RUN apk add --no-cache curl
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m
