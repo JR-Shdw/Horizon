@@ -58,3 +58,5 @@ backups/
 
 # Custody throughput bench output (host-specific measurements, not artefacts).
 .bench-custody*/
+.venv-pages/
+_site/

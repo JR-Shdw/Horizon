@@ -4,7 +4,7 @@ Covers: trusted IP validation, header parsing, group mapping,
         token creation, disabled state, missing headers, untrusted IP.
 """
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from api.app.routes.auth_proxy import (
@@ -178,6 +178,55 @@ async def test_proxy_login_success(client, master_password):
     async with async_session() as db:
         await db.execute(text("DELETE FROM vault_tokens WHERE name = 'proxy:jdoe'"))
         await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_proxy_login_preserves_empty_namespace_restriction(
+    client, master_password, admin_token
+):
+    """SSO-issued empty claims deny reads and cannot delegate broader access."""
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+    secret = await client.post(
+        "/api/v1/vault/secrets/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"name": "ssons-probe", "namespace": "ssons", "value": "private"},
+    )
+    assert secret.status_code == 201, secret.text
+    permissions = {"tokens": "rw", "secrets": "r", "namespaces": []}
+    with (
+        _enable_proxy(),
+        patch("api.app.routes.auth_proxy._is_trusted", return_value=True),
+        patch(
+            "api.app.routes.auth_proxy._get_proxy_mappings",
+            new=AsyncMock(return_value={"empty-readers": permissions}),
+        ),
+    ):
+        login = await client.post(
+            "/api/v1/vault/auth/proxy",
+            headers={"Remote-User": "empty-ns-user", "Remote-Groups": "empty-readers"},
+        )
+    assert login.status_code == 200, login.text
+    assert login.json()["permissions"] == permissions
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    try:
+        result = await client.get(
+            "/api/v1/vault/secrets/ssons-probe?namespace=ssons", headers=headers
+        )
+        assert result.status_code == 403, result.text
+        result = await client.post(
+            "/api/v1/vault/tokens/",
+            headers=headers,
+            json={"name": "ssons-escape", "permissions": {"secrets": "r"}},
+        )
+        assert result.status_code == 403, result.text
+    finally:
+        from api.app.database import async_session
+
+        async with async_session() as db:
+            await db.execute(
+                text("DELETE FROM vault_tokens WHERE name = 'proxy:empty-ns-user'")
+            )
+            await db.commit()
 
 
 @pytest.mark.asyncio

@@ -24,14 +24,14 @@ does not move backwards. If a later release extends it, the longer period
 applies to that release; it never shortens for a version already supplied.
 
 **The five years to September 2031 are unconditional.** They are not
-contingent on revenue, funding, commercial uptake, or the project's staffing.
+contingent on revenue, donations, sponsorship, or the project's staffing.
 That is deliberate: the CRA floor is an obligation owed to everyone the
 product was supplied to, so making it conditional would defeat it.
 
 What *is* conditional is anything **beyond** that date. Resurgamus intends to
-extend the support period past September 2031, and commercial licensing and
-paid support are what would fund a longer commitment - potentially a rolling
-window rather than a fixed end date. Any extension will be announced as a new
+extend the support period past September 2031, and donations, sponsorship and
+paid deployment assistance are what would fund a longer commitment -
+potentially a rolling window rather than a fixed end date. Any extension will be announced as a new
 end date here, in month-and-year form, before the current one lapses. An
 extension can only ever lengthen the period; it never shortens it, and the
 absence of an extension never shortens it either.
@@ -71,7 +71,7 @@ support period expires.
 
 **Do not open a public issue for security vulnerabilities.**
 
-- **Paying sponsors / commercial members:** email **horizon@resurgamus.com**.
+- **Sponsors:** email **horizon@resurgamus.com**.
   First response within **48 hours**, or the shorter time in your support
   agreement if you have one.
 - **Everyone else (OSS / AGPL):** email **security@resurgamus.com**. First response
@@ -90,7 +90,7 @@ second is how fast a fix ships, and it does **not** depend on who reported.
 
 | | First response | Applies to |
 |---|---|---|
-| Paying sponsor / commercial member | 48 hours | Reports to `horizon@resurgamus.com` |
+| Sponsor | 48 hours | Reports to `horizon@resurgamus.com` |
 | Anyone else | 96 hours | Reports to `security@resurgamus.com` |
 
 Remediation is driven by severity, not by reporter. A critical flaw found by
@@ -109,7 +109,7 @@ advisory per fixed issue. Paying sponsorship buys **attention latency and
 support**, never privileged access to a fix or an embargo extension.
 
 These targets are effort commitments for a small maintainer team, not a
-contractual uptime SLA. Where one conflicts with a commercial support
+contractual uptime SLA. Where one conflicts with a paid support
 agreement, the agreement governs for that customer - and can only be shorter,
 never longer.
 

@@ -51,7 +51,7 @@ Enterprise qui en retienne une partie.
 - **Auto-hébergeable sur une seule VM** avec Docker Compose. Pas de cluster multi-nœuds en prérequis.
 - **Aucune dépendance SaaS.** Pas de phone-home, pas de control plane sous licence, pas de clé d'API tierce dans le chemin de vos autres secrets.
 - **Sealed par défaut.** Après chaque reboot, le vault ne tient rien en RAM. Un opérateur (ou un quorum d'opérateurs, via Shamir Secret Sharing) le remet en ligne.
-- **AGPL-3.0.** Toute modification doit être publiée ; le rehosting closed-source n'est pas autorisé. Une licence commerciale existe pour les cas où l'AGPL est incompatible.
+- **AGPL-3.0.** Toute modification doit être publiée ; le rehosting closed-source n'est pas autorisé. L'AGPL est la seule licence proposée : pas de tier commercial, pas d'édition payante.
 
 ---
 
@@ -281,7 +281,7 @@ plupart des utilisateurs les rencontrent :
 
 - **L'utiliser gratuitement.** Pas d'inscription, pas de télémétrie,
   pas d'upsell. La totalité des fonctionnalités est dans ce repository.
-- **Licence commerciale** ([LICENSE-COMMERCIAL.md](../../LICENSE-COMMERCIAL.md))
+- **Financement par dons** ([SUPPORT.md](../../SUPPORT.md))
   pour les organisations qui ont besoin de redistribuer en closed-source,
   veulent rebrander dans leur propre offre SaaS, ou ne peuvent pas
   accepter les exigences de source-availability de l'AGPL.
@@ -306,5 +306,6 @@ développement via la licence.
 > **Licence et marque**
 >
 > - Sous licence **AGPL-3.0-or-later** ([LICENSE](../../LICENSE)). Les modifications doivent rester AGPL.
-> - **Relicensing closed-source interdit.** Une licence commerciale est disponible - voir [LICENSE-COMMERCIAL.md](../../LICENSE-COMMERCIAL.md).
+> - **Relicensing closed-source interdit.** L'AGPL-3.0-or-later est la seule licence proposée ; aucun tier commercial.
+> - **Finance par dons.** Les releases et les correctifs de securite arrivent a tout le monde en meme temps - rien n'est reserve aux sponsors. Voir [SUPPORT.md](../../SUPPORT.md).
 > - **"Resurgamus Horizon"** est un nom de projet ; l'AGPL n'accorde aucun droit de marque.

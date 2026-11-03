@@ -162,13 +162,15 @@ def _merge_permissions(groups: list[str], mappings: dict) -> dict:
             if k == "namespaces":
                 has_ns_restriction = True
                 if isinstance(v, list):
-                    ns_set.update(v)
+                    ns_set.update(entry for entry in v if isinstance(entry, str))
                 continue
             cur = out.get(k)
             if cur == "rw":
                 continue
             out[k] = v if (v == "rw" or cur is None) else cur
-    if has_ns_restriction and ns_set:
+    # A present but empty (or malformed) claim denies every namespace. Only
+    # an absent claim is unrestricted, matching auth.namespace_claim.
+    if has_ns_restriction:
         out["namespaces"] = sorted(ns_set)
     return out
 

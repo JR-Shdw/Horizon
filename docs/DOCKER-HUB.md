@@ -157,7 +157,7 @@ Two access paths:
 - **Public mirror**: [`github.com/JR-Shdw/Horizon`](https://github.com/JR-Shdw/Horizon) (synced from
   Forgejo - same commits, same signatures).
 - **License**: AGPL-3.0-or-later. Closed-source rehosting requires
-  a commercial license - see `LICENSE-COMMERCIAL.md`.
+  donation funded - see `SUPPORT.md`.
 - **Issues / questions**: please open them on the canonical
   Forgejo. The GitHub mirror does not accept PRs.
 

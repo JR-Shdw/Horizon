@@ -4,10 +4,9 @@ Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
 This product is licensed under the GNU Affero General Public License v3.0
 or later (AGPL-3.0-or-later). The full license text is in the LICENSE file.
 
-A commercial license is available for organizations that cannot operate
-under AGPL terms; see LICENSE-COMMERCIAL.md for details. The commercial
-license does not authorize redistribution under a non-AGPL open-source
-license.
+The project is funded by donations. There is no paid tier and no alternative
+proprietary terms: AGPL-3.0-or-later is the only license under which Horizon
+is offered.
 
 ================================================================================
 DO NOT REMOVE THIS FILE
@@ -29,6 +28,29 @@ TRADEMARK
 "Resurgamus Horizon" and "rhorizon" are project names. The AGPL-3.0 license
 grants no rights in any trademark, service mark, trade name, or logo of the
 copyright holder.
+
+================================================================================
+FUNDING AND ACCESS
+================================================================================
+
+Horizon is donation funded. Every release, every pre-built artifact and every
+security fix is published to everyone at the same time. Nothing is reserved
+for donors or sponsors, and nothing reaches them earlier.
+
+Deployment assistance, onboarding and operational support are not part of this
+license and are not guaranteed. Where offered, they are a separate service.
+See SUPPORT.md.
+
+================================================================================
+NO WARRANTY
+================================================================================
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See sections 15, 16 and 17 of the LICENSE file.
+
+The security support period stated in SECURITY.md is a separate, unconditional
+commitment and is not a warranty.
 
 ================================================================================
 THIRD-PARTY ATTRIBUTION

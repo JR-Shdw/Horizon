@@ -9,7 +9,7 @@ AI vault, MCP vault.
 
 What it is:
 
-- AGPL-3.0-or-later, with a commercial license available
+- AGPL-3.0-or-later, the only license on offer; donation funded
 - complete public feature set, no Enterprise feature gates
 - no SaaS dependency, no telemetry, no lock-in
 - lightweight: one API container plus PostgreSQL, no external coordinator

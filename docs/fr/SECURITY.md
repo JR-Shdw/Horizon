@@ -29,7 +29,7 @@ qui a signale.
 
 | | Premiere reponse | Adresse |
 |---|---|---|
-| Sponsor payant / membre commercial | 48 heures | `horizon@resurgamus.com` |
+| Sponsor | 48 heures | `horizon@resurgamus.com` |
 | Toute autre personne | 96 heures | `security@resurgamus.com` |
 
 La correction est pilotee par la severite, pas par le rapporteur : critique

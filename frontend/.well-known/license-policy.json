@@ -15,9 +15,12 @@
     "url": "https://www.gnu.org/licenses/agpl-3.0.html",
     "file": "/LICENSE"
   },
-  "commercial_license": {
-    "available": true,
-    "file": "/LICENSE-COMMERCIAL.md",
+  "funding": {
+    "model": "donations",
+    "commercial_license_available": false,
+    "file": "/SUPPORT.md",
+    "access_guarantee": "Releases, pre-built artifacts and security fixes are published to everyone at the same time; nothing is reserved for donors or sponsors and nothing reaches them earlier.",
+    "paid_services": "Deployment and onboarding assistance only, as a separate service.",
     "contact": "horizon@resurgamus.com"
   },
   "stripping_prohibited": [
@@ -25,7 +28,6 @@
     "Copyright lines in source files",
     "/NOTICE",
     "/LICENSE",
-    "/LICENSE-COMMERCIAL.md",
     "/.well-known/tdmrep.json",
     "/.well-known/license-policy.json",
     "/robots.txt",

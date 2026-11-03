@@ -1,9 +1,10 @@
 # Resurgamus Horizon - CRA readiness (Regulation (EU) 2024/2847)
 
-Version: 1.1
-Date: 2026-08-04
-Scope: Resurgamus Horizon as a **product with digital elements** placed on the
-EU market by a commercial manufacturer (Resurgamus)
+Version: 1.2
+Date: 2026-10-25
+Scope: Resurgamus Horizon as a **product with digital elements**. The economic
+operator's status is under re-determination following the move to donation
+funding - see the scope notice below.
 
 ---
 
@@ -26,15 +27,48 @@ Key dates:
 
 ### CRA position for Horizon
 
-Horizon is one product and one public codebase. The commercial licence grants
-alternative terms for the same software and adds commercial support; it is not
-a separate proprietary edition.
+Horizon is one product and one public codebase, offered under
+AGPL-3.0-or-later only. There is no commercial licence, no paid tier and no
+separate proprietary edition.
+
+> **Scope under review (2026-10-25).** The commercial licence was withdrawn on
+> this date and Horizon moved to donation funding. The market-scope conclusion
+> below was reasoned from the commercial licence and paid SLA, so it no longer
+> rests on its original basis and must be re-determined with legal review
+> before the Annex VII technical documentation is finalised.
+>
+> What changed, and what it does not settle:
+>
+> - The clearest trigger is gone. Charging a price for the software is the
+>   plainest form of placing it on the market; there is now no paid tier and
+>   no alternative proprietary terms.
+> - Paid deployment assistance remains. Recital 15 treats charging for
+>   technical support as commercial activity where it does more than recover
+>   actual costs, and the Commission guidance (C(2026) 5252, draft) reads the
+>   decisive test as whether access to the software is conditioned on payment
+>   (point 56), allowing cost recovery to include reasonable living expenses
+>   (point 58). Access is not conditioned on payment here: see SUPPORT.md.
+> - Donations do not by themselves place the product on the market where they
+>   are accepted without profit intent (point 61). They would if donating
+>   became a de facto condition for obtaining releases or security fixes
+>   (point 62, examples 21 and 22) - which SUPPORT.md commits against.
+> - Who the economic operator is still decides the outcome. An individual
+>   publishing a free community version is outside scope (point 53); an
+>   open-source steward must be a legal person other than the manufacturer
+>   (Article 3(14)). Whether Resurgamus is acting as a legal person here is
+>   the open question, and it is not one this document can answer.
+>
+> **Nothing in the support commitment is withdrawn.** The security support
+> period to September 2031 in SECURITY.md was published as unconditional and
+> stays owed to everyone the product was supplied to, whatever the scope
+> re-determination concludes.
+
 
 | Question | Horizon position | Basis |
 |---|---|---|
-| Is the product in CRA market scope? | **Yes.** Resurgamus offers commercial licences and paid support/SLA. | Articles 3(13), 3(22) and recital 15 |
+| Is the product in CRA market scope? | **Under re-determination.** The commercial licence and paid SLA that grounded the previous "yes" were withdrawn on 2026-10-25. Paid deployment assistance remains, but access to the software, its releases and its security fixes is not conditioned on payment. | Articles 3(13), 3(22), recital 15; Commission guidance C(2026) 5252 points 56, 58, 61, 62 |
 | Who is the economic operator? | **Resurgamus is the manufacturer**, not an open-source software steward. | Article 3(13); a steward must be a legal person other than the manufacturer under Article 3(14) |
-| Does Horizon qualify as FOSS? | **Yes.** Its source is openly shared and the product is made available under AGPL-3.0. Offering alternative commercial terms does not withdraw the AGPL distribution. | Article 3(48) |
+| Does Horizon qualify as FOSS? | **Yes**, and now unambiguously: the source is openly shared and AGPL-3.0-or-later is the only licence on offer. | Article 3(48) |
 | Product category | **Important product, class I.** Self-assessed as Annex III category 3, "password managers" (stores/shares credentials and secrets). Not settled: the Implementing Regulation's technical description of that category centers on client-side store/generate/auto-fill; Horizon is an API-token-gated infra vault with no auto-fill. "Identity and access management / privileged access management software" is also class I and arguably a closer functional fit. Either way the CE-marking route is unchanged (both categories sit in class I, same Module A eligibility), so this is a citation-precision question, not a compliance gap - flag for legal review before the Annex VII technical documentation is finalised. | Annex III and Implementing Regulation (EU) 2025/2392 |
 | Conformity procedure | **Internal control, Module A.** Resurgamus uses the FOSS route in Article 32(5) and publishes the Article 31 technical documentation when placing the product on the market. | Articles 32(1)(a), 32(5), 31 and Annex VIII |
 | External conformity assessor | **Not required for the adopted route.** | Article 32(5) permits the procedures in Article 32(1), including Module A |
@@ -44,6 +78,15 @@ This position depends on maintaining a public AGPL distribution of the same
 Horizon product and publishing the complete Article 31 technical documentation.
 It must be reviewed if Resurgamus later ships a distinct proprietary-only
 edition or stops meeting the Article 3(48) FOSS definition.
+
+It must equally be reviewed if the funding model changes again: reintroducing a
+paid tier, or gating releases or security fixes behind donations, would place
+the product on the market and restore the full manufacturer obligations.
+
+The conservative course while the question is open is to keep executing the
+manufacturer workstream below. Being out of scope removes an obligation; it
+does not make the work wasted, and every item here is a security practice on
+its own merits.
 
 ### Statuses
 

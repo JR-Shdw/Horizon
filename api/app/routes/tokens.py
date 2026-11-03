@@ -17,6 +17,7 @@ from ..auth import (
     check_namespace,
     is_external_session,
     is_reserved_token_name,
+    namespace_claim,
     require_permission,
     require_vault_token,
 )
@@ -72,9 +73,9 @@ def _check_grant_permissions(caller_perms: dict, requested_perms: dict):
 
     # Namespace subset, applies even to admin: a namespace-restricted caller
     # must not mint an unrestricted token.
-    caller_ns = caller_perms.get("namespaces")
-    if caller_ns:
-        requested_ns = requested_perms.get("namespaces")
+    caller_ns = namespace_claim({"permissions": caller_perms})
+    if caller_ns is not None:
+        requested_ns = namespace_claim({"permissions": requested_perms})
         if requested_ns is None:
             raise HTTPException(
                 403,
@@ -96,10 +97,10 @@ def _check_namespace_subset(caller_perms: dict, target_perms: dict):
     access isn't granting it, so a pure token-admin manages its namespace
     regardless of the target's scopes.
     """
-    caller_ns = caller_perms.get("namespaces")
-    if not caller_ns:
+    caller_ns = namespace_claim({"permissions": caller_perms})
+    if caller_ns is None:
         return  # unrestricted caller
-    target_ns = target_perms.get("namespaces")
+    target_ns = namespace_claim({"permissions": target_perms})
     if target_ns is None:
         raise HTTPException(
             403, "Namespace-restricted caller cannot manage an unrestricted token"
@@ -423,13 +424,13 @@ async def list_tokens(
     # namespaces claim is a subset of its own. Tokens with no namespaces claim
     # (root / unrestricted) are hidden from restricted callers, mirroring the
     # _check_grant_permissions gate (you can't grant what you can't see).
-    allowed_ns = token_info.get("permissions", {}).get("namespaces")
+    allowed_ns = namespace_claim(token_info)
 
     def _visible(perms) -> bool:
-        if not allowed_ns:
+        if allowed_ns is None:
             return True
-        tns = perms.get("namespaces") if isinstance(perms, dict) else None
-        return bool(tns) and set(tns).issubset(set(allowed_ns))
+        tns = namespace_claim({"permissions": perms})
+        return tns is not None and set(tns).issubset(set(allowed_ns))
 
     result = await db.execute(
         text("""
@@ -554,7 +555,7 @@ async def whoami(
         "name": row.name,
         "permissions": perms,
         "scopes": [k for k in perms if k != "namespaces"],
-        "namespaces": perms.get("namespaces") or None,
+        "namespaces": namespace_claim({"permissions": row.permissions}),
         "allowed_ips": row.allowed_ips,
         "active": row.active,
         "created_by": row.created_by,
@@ -753,11 +754,10 @@ async def list_pending_token_rotations(
             ORDER BY created_at DESC
         """)
     )
-    perms = token_info.get("permissions", {})
-    allowed_ns = perms.get("namespaces")
+    allowed_ns = namespace_claim(token_info)
     items = []
     for r in rows.fetchall():
-        if allowed_ns and r.namespace not in allowed_ns:
+        if allowed_ns is not None and r.namespace not in allowed_ns:
             continue
         items.append(
             {

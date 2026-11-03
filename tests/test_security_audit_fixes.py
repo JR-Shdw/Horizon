@@ -12,6 +12,59 @@ import pytest
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("child_path", ["/", "/ephemeral"])
+async def test_empty_namespace_child_cannot_escape_over_http(
+    client, master_password, admin_token, child_path
+):
+    """A non-admin dev token cannot escape through an empty-claim child."""
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+    root_headers = {"Authorization": f"Bearer {admin_token}"}
+    prefix = f"empty-ns-{_sec.token_hex(4)}"
+    parent = await client.post(
+        "/api/v1/vault/tokens/",
+        headers=root_headers,
+        json={
+            "name": f"{prefix}-parent",
+            "permissions": {"tokens": "rw", "secrets": "r", "namespaces": ["dev"]},
+        },
+    )
+    assert parent.status_code == 201, parent.text
+    parent_headers = {"Authorization": f"Bearer {parent.json()['token']}"}
+    child_permissions = {"tokens": "rw", "secrets": "r", "namespaces": []}
+    child = await client.post(
+        f"/api/v1/vault/tokens{child_path}",
+        headers=parent_headers,
+        json={"name": f"{prefix}-child", "permissions": child_permissions},
+    )
+    assert child.status_code in (200, 201), child.text
+    child_headers = {"Authorization": f"Bearer {child.json()['token']}"}
+
+    for path in ("/", "/ephemeral"):
+        for requested in ({"secrets": "r"}, {"secrets": "r", "namespaces": ["prod"]}):
+            result = await client.post(
+                f"/api/v1/vault/tokens{path}",
+                headers=child_headers,
+                json={"name": f"{prefix}-escape", "permissions": requested},
+            )
+            assert result.status_code == 403, result.text
+
+    identity = await client.get("/api/v1/vault/tokens/whoami", headers=child_headers)
+    assert identity.status_code == 200, identity.text
+    assert identity.json()["namespaces"] == []
+    visible = await client.get("/api/v1/vault/tokens/", headers=child_headers)
+    assert visible.status_code == 200, visible.text
+    assert all(
+        t["permissions"].get("namespaces") == [] for t in visible.json()["items"]
+    )
+    for suffix in ("rotate", "revoke"):
+        result = await client.post(
+            f"/api/v1/vault/tokens/{parent.json()['id']}/{suffix}",
+            headers=child_headers,
+        )
+        assert result.status_code == 403, result.text
+
+
+@pytest.mark.asyncio
 async def test_token_create_namespace_escalation_blocked(
     client, master_password, admin_token
 ):

@@ -187,7 +187,7 @@ If the audit chain breaks :
 
 Do not file a public issue. PGP if available.
 
-- **Paying sponsors / commercial members:** `horizon@resurgamus.com`. First
+- **Sponsors:** `horizon@resurgamus.com`. First
   response within **48 hours** (or the shorter time in your agreement).
 - **Everyone else (OSS / AGPL):** `security@resurgamus.com`. First response within
   **96 hours**.

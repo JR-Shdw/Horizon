@@ -32,5 +32,5 @@ reach out through the contact in [SECURITY.md](SECURITY.md).
 
 ## License
 
-AGPL-3.0 (see [LICENSE](LICENSE)). A commercial license is available - see
-[LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+AGPL-3.0 (see [LICENSE](LICENSE)). It is the only license on offer: there is
+no commercial tier. The project is donation funded -- see [SUPPORT.md](SUPPORT.md).

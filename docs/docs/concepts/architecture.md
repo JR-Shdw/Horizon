@@ -187,7 +187,7 @@ workers keep no share and can be replaced without reducing the quorum. See
 - **cluster HA RPC**: cross-host mTLS with node certificates issued by the
   rhorizon cluster CA. Multi-host HA runs the API cluster on top of a
   provider-neutral Database HA layer: Patroni is the Linux/Kubernetes
-  reference, while [`rhorizon-pgha`](../../PGHA.md)
+  reference, while [`rhorizon-pgha`](https://github.com/JR-Shdw/Horizon/blob/main/docs/PGHA.md)
   supplies peer-quorum supervision and the write VIP on BSD.
 
 See [Memory protection](memory-protection.md), [Audit chain](audit.md),

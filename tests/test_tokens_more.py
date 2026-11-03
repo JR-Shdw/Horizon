@@ -48,6 +48,52 @@ def test_admin_modes_apply_without_escalating_read_to_write():
     )
 
 
+@pytest.mark.parametrize("scope", [{"tokens": "rw", "secrets": "r"}, {"admin": "rw"}])
+@pytest.mark.parametrize("claim", [[], None, "", [None, 123]])
+@pytest.mark.parametrize("target", [None, ["dev"]])
+def test_empty_or_malformed_claim_cannot_delegate_namespace_access(
+    scope, claim, target
+):
+    from fastapi import HTTPException
+
+    caller = {**scope, "namespaces": claim}
+    requested = {"secrets": "r"}
+    if target is not None:
+        requested["namespaces"] = target
+    with pytest.raises(HTTPException) as exc:
+        _check_grant_permissions(caller, requested)
+    assert exc.value.status_code == 403
+
+
+def test_empty_child_cannot_escape_parent_namespace():
+    from fastapi import HTTPException
+
+    parent = {"tokens": "rw", "secrets": "r", "namespaces": ["dev"]}
+    child = {"tokens": "rw", "secrets": "r", "namespaces": []}
+    _check_grant_permissions(parent, child)
+    _check_grant_permissions(child, {"secrets": "r", "namespaces": []})
+    with pytest.raises(HTTPException) as exc:
+        _check_grant_permissions(child, {"secrets": "r"})
+    assert exc.value.status_code == 403
+
+
+def test_unrestricted_root_can_delegate_unrestricted_and_scoped_tokens():
+    root = {"admin": "rw"}
+    _check_grant_permissions(root, {"admin": "rw"})
+    _check_grant_permissions(root, {"secrets": "r", "namespaces": ["prod"]})
+    _check_grant_permissions(root, {"secrets": "r", "namespaces": []})
+
+
+@pytest.mark.parametrize("target", [{"secrets": "r"}, {"namespaces": ["dev"]}])
+def test_empty_claim_cannot_manage_unrestricted_or_scoped_tokens(target):
+    from api.app.routes.tokens import _check_namespace_subset
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        _check_namespace_subset({"tokens": "rw", "namespaces": []}, target)
+    assert exc.value.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_create_ephemeral_invalid_allowed_ips_returns_400(
     client, master_password, admin_token

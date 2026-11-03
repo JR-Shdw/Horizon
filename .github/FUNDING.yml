@@ -3,4 +3,6 @@
 #
 # GitHub Sponsor button. The button only shows once Sponsors is enabled for the
 # account; other channels (liberapay, ko_fi, custom URL...) per GitHub's docs.
-github: YOUR-GITHUB-USERNAME
+# Funding this project grants no privileged access: releases and security
+# fixes go to everyone at the same time. See SUPPORT.md.
+github: JR-Shdw

@@ -1,9 +1,11 @@
 # Resurgamus Horizon - preparation au CRA (Reglement (UE) 2024/2847)
 
-Version : 1.0
-Date : 2026-07-24
+Version : 1.1
+Date : 2026-10-25
 Perimetre : Resurgamus Horizon en tant que **produit comportant des elements
-numeriques** mis sur le marche de l'UE par un fabricant commercial (Resurgamus)
+numeriques**. Le statut de l'operateur economique est en cours de
+redetermination apres le passage au financement par dons - voir l'avis de
+perimetre ci-dessous.
 
 ---
 
@@ -27,15 +29,51 @@ Dates cles :
 
 ### Position CRA retenue pour Horizon
 
-Horizon est un seul produit et un seul code source public. La licence
-commerciale accorde des conditions alternatives sur le meme logiciel et ajoute
-du support commercial ; elle ne constitue pas une edition proprietaire separee.
+Horizon est un seul produit et un seul code source public, propose uniquement
+sous AGPL-3.0-or-later. Il n'existe plus de licence commerciale, ni de tier
+payant, ni d'edition proprietaire distincte.
+
+> **Perimetre en cours de reexamen (2026-10-25).** La licence commerciale a ete
+> retiree a cette date et Horizon est passe au financement par dons. La
+> conclusion sur le perimetre de marche ci-dessous etait fondee sur la licence
+> commerciale et le SLA payant : elle ne repose donc plus sur sa base initiale
+> et doit etre redeterminee avec une revue juridique avant la finalisation de
+> la documentation technique de l'annexe VII.
+>
+> Ce qui change, et ce que cela ne tranche pas :
+>
+> - Le declencheur le plus net a disparu. Facturer le logiciel est la forme la
+>   plus simple de mise sur le marche ; il n'y a plus de tier payant ni de
+>   conditions proprietaires alternatives.
+> - L'assistance au deploiement payante subsiste. Le considerant 15 qualifie
+>   d'activite commerciale la facturation du support technique au-dela de la
+>   recuperation des couts reels, et l'orientation de la Commission
+>   (C(2026) 5252, projet) retient comme test decisif le fait que l'acces au
+>   logiciel soit ou non conditionne a un paiement (point 56), la recuperation
+>   des couts pouvant inclure des frais de subsistance raisonnables
+>   (point 58). Ici l'acces n'est pas conditionne : voir SUPPORT.md.
+> - Les dons ne mettent pas a eux seuls le produit sur le marche lorsqu'ils
+>   sont acceptes sans intention lucrative (point 61). Ils le feraient si
+>   donner devenait de fait une condition d'obtention des releases ou des
+>   correctifs (point 62, exemples 21 et 22) - ce que SUPPORT.md exclut.
+> - L'identite de l'operateur economique reste determinante. Une personne
+>   physique publiant une version communautaire gratuite est hors perimetre
+>   (point 53) ; un gestionnaire de logiciels libres doit etre une personne
+>   morale autre que le fabricant (article 3(14)). Savoir si Resurgamus agit
+>   ici comme personne morale est la question ouverte, et ce document ne peut
+>   pas y repondre.
+>
+> **Aucun engagement de support n'est retire.** La periode de support de
+> securite jusqu'a septembre 2031 (SECURITY.md) a ete publiee comme
+> inconditionnelle et reste due a tous ceux a qui le produit a ete fourni,
+> quelle que soit la conclusion du reexamen.
+
 
 | Question | Position Horizon | Fondement |
 |---|---|---|
-| Le produit entre-t-il dans le perimetre du CRA ? | **Oui.** Resurgamus propose des licences commerciales et du support/SLA payant. | Articles 3(13), 3(22) et considerant 15 |
+| Le produit entre-t-il dans le perimetre du CRA ? | **En cours de redetermination.** La licence commerciale et le SLA payant qui fondaient le "oui" precedent ont ete retires le 2026-10-25. L'assistance au deploiement payante subsiste, mais l'acces au logiciel, a ses releases et a ses correctifs de securite n'est pas conditionne a un paiement. | Articles 3(13), 3(22), considerant 15 ; orientation C(2026) 5252 points 56, 58, 61, 62 |
 | Quel est l'operateur economique ? | **Resurgamus est le fabricant**, pas un gestionnaire de logiciels libres. | Article 3(13) ; l'article 3(14) reserve le role de gestionnaire a une personne morale autre que le fabricant |
-| Horizon est-il un logiciel libre et open source ? | **Oui.** Son code source est partage publiquement et le produit est disponible sous AGPL-3.0. La licence commerciale alternative ne retire pas la distribution AGPL. | Article 3(48) |
+| Horizon est-il un logiciel libre et open source ? | **Oui**, et desormais sans ambiguite : le code source est partage publiquement et l'AGPL-3.0-or-later est la seule licence proposee. | Article 3(48) |
 | Categorie du produit | **Produit important, classe I, annexe III, categorie 3 : gestionnaires de mots de passe.** Horizon stocke et partage des justificatifs et des secrets, notamment en entreprise. | Annexe III et reglement d'execution (UE) 2025/2392 |
 | Procedure de conformite | **Controle interne, module A.** Resurgamus utilise la voie FOSS de l'article 32(5) et publie la documentation technique de l'article 31 lors de la mise sur le marche. | Articles 32(1)(a), 32(5), 31 et annexe VIII |
 | Organisme externe d'evaluation | **Non requis pour la voie retenue.** | L'article 32(5) autorise les procedures de l'article 32(1), dont le module A |

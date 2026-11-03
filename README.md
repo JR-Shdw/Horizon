@@ -97,14 +97,15 @@ so you can verify what you deploy.
 Bug reports, documentation feedback and use cases are welcome. See
 [how to contribute](CONTRIBUTING.md).
 
-To support development, [sponsor the project](.github/FUNDING.yml).
-For deployment help, training or a [commercial license](LICENSE-COMMERCIAL.md),
-contact [horizon@resurgamus.com](mailto:horizon@resurgamus.com).
+To support development, [sponsor the project](.github/FUNDING.yml) -- it buys
+no privileged access, see [SUPPORT.md](SUPPORT.md). For deployment help or
+training, contact [horizon@resurgamus.com](mailto:horizon@resurgamus.com).
 
 ## License
 
 > **License and trademark**
 >
 > - Licensed under **AGPL-3.0-or-later** ([LICENSE](LICENSE)). Modifications must remain AGPL.
-> - **Closed-source relicensing prohibited.** A commercial license is available - see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+> - **Closed-source relicensing prohibited.** AGPL-3.0-or-later is the only license on offer; there is no commercial tier and no paid edition.
+> - **Donation funded.** Releases and security fixes reach everyone at the same time -- nothing is gated behind sponsorship. See [SUPPORT.md](SUPPORT.md).
 > - **"Resurgamus Horizon" is a reserved project name.** The AGPL license covers the source code only, not the name or logo - it grants no trademark rights. Forks, derivatives, and commercial services built on this code may not use "Resurgamus Horizon" (or a confusingly similar name) to identify themselves without permission from Resurgamus.

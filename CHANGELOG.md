@@ -8,6 +8,11 @@ cadence; things ship when they're ready.
 
 ### Security
 
+- Prevent namespace-scoped tokens from escaping their scope through a child
+  with `namespaces: []`. Empty claims now remain restricted during delegation,
+  token management and listing, and token introspection. Reverse-proxy SSO
+  preserves empty or malformed namespace restrictions when merging group
+  permissions. Root tokens without a namespace claim remain unrestricted.
 - Update frontend Expat for CVE-2026-117610 and CVE-2026-118370, and patch
   filelock, msgpack and urllib3 in the hash-locked CI tooling dependencies.
 - Audit all runtime, driver and tooling dependency locks in CI. Public source

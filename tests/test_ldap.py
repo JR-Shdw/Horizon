@@ -50,6 +50,13 @@ class TestResolvePermissions:
         result = _resolve_permissions(["team-a", "team-b"], mappings)
         assert set(result["namespaces"]) == {"prod/a", "prod/b"}
 
+    def test_empty_namespace_claim_remains_restricted(self):
+        mappings = {"readers": {"secrets": "r", "namespaces": []}}
+        assert _resolve_permissions(["readers"], mappings) == {
+            "secrets": "r",
+            "namespaces": [],
+        }
+
     def test_empty_groups(self):
         mappings = {"vault-admins": {"admin": "rw"}}
         result = _resolve_permissions([], mappings)

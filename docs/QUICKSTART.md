@@ -356,4 +356,4 @@ reach it over a VPN or a private network, never the public internet.
 
 [AGPL-3.0](../LICENSE) - Free to use, modify, and deploy. Modifications must be published under AGPL-3.0.
 
-A [commercial license](../LICENSE-COMMERCIAL.md) is available for managed service providers, organizations with AGPL restrictions, or guaranteed support needs.
+There is no commercial tier. The project is donation funded, and deployment assistance is a separate service - see [SUPPORT.md](../SUPPORT.md).

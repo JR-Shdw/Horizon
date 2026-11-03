@@ -40,14 +40,36 @@ def test_merge_permissions_namespaces_union():
     assert out["namespaces"] == ["dev", "prod", "staging"]  # union + tri
 
 
-def test_merge_permissions_namespaces_string_value_ignored():
-    """L163 : isinstance(v, list) check - string value ignoree."""
+@pytest.mark.parametrize("claim", [[], None, "not-a-list", [None, 123, []]])
+def test_merge_permissions_invalid_or_empty_namespaces_deny_all(claim):
+    """A present empty/malformed restriction must not become unrestricted."""
     from api.app.routes.auth_proxy import _merge_permissions
 
-    mappings = {"g": {"namespaces": "not-a-list"}}
+    mappings = {"g": {"secrets": "r", "namespaces": claim}}
     out = _merge_permissions(["g"], mappings)
-    # has_ns_restriction=True but empty ns_set -> no namespaces key in out
-    assert "namespaces" not in out
+    assert out == {"secrets": "r", "namespaces": []}
+
+
+def test_merge_permissions_empty_claim_preserves_union():
+    from api.app.routes.auth_proxy import _merge_permissions
+
+    mappings = {
+        "empty": {"secrets": "r", "namespaces": []},
+        "dev": {"secrets": "rw", "namespaces": ["dev"]},
+    }
+    for groups in (["empty", "dev"], ["dev", "empty"]):
+        assert _merge_permissions(groups, mappings) == {
+            "secrets": "rw",
+            "namespaces": ["dev"],
+        }
+
+
+def test_merge_permissions_unrestricted_admin_stays_unrestricted():
+    from api.app.routes.auth_proxy import _merge_permissions
+
+    assert _merge_permissions(["admins"], {"admins": {"admin": "rw"}}) == {
+        "admin": "rw"
+    }
 
 
 @pytest.mark.asyncio

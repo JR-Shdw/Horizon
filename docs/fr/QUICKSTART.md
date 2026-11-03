@@ -372,4 +372,4 @@ jamais via l'internet public.
 
 [AGPL-3.0](../../LICENSE) - Libre d'utilisation, modification et déploiement. Les modifications doivent être publiées sous AGPL-3.0.
 
-Une [licence commerciale](../../LICENSE-COMMERCIAL.md) est disponible pour les prestataires de services managés, les organisations avec des restrictions AGPL, ou les besoins de support garanti.
+Il n'existe pas de tier commercial. Le projet est finance par dons, et l'assistance au deploiement est un service distinct - voir [SUPPORT.md](../../SUPPORT.md).
