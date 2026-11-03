@@ -289,7 +289,7 @@ unseal_pod() {
     "{\"password\":\"$MP\"}" || true)"
   http_status="$(printf '%s' "$envelope" | jq -r '.status // 0' 2>/dev/null || echo 0)"
   result="$(printf '%s' "$envelope" | jq -r '.body // empty' 2>/dev/null || true)"
-  [ "$http_status" -eq 200 ] && printf '%s' "$result" | jq -e \
+  [ "${http_status:-0}" -eq 200 ] && printf '%s' "$result" | jq -e \
     '.status == "unsealed" or .status == "already_unsealed"' >/dev/null
 }
 
@@ -530,7 +530,8 @@ if [ "$HA" = "1" ]; then
   say "$distinct Pods, $unique distinct identities, $pvcs identity PVCs"
 
   say "replace one secondary and retain its node identity"
-  secondary_uuid="$(printf '%s' "$ha" | jq -r '.nodes[] | select(.ha_state == "secondary") | .node_uuid' | head -1)"
+  secondary_uuid="$(printf '%s' "$ha" | jq -r '[.nodes[] | select(.ha_state == "secondary") | .node_uuid][0] // empty')"
+  [ -n "$secondary_uuid" ] || fail "cluster reported no secondary to replace"
   secondary_pod=""
   for p in $pods; do
     u="$("${KUBECTL[@]}" -n "$NS" exec "$p" -- cat /var/lib/rhorizon/node-uuid 2>/dev/null || true)"

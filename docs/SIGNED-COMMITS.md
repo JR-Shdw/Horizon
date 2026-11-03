@@ -25,7 +25,7 @@ git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/git-signing_ed25519.pub
 git config --global commit.gpgsign true
 git config --global tag.gpgsign true
-git config --global gpg.ssh.allowedSignersFile /home/automation/dev/tools/rhorizon/.gitsigners
+git config --global gpg.ssh.allowedSignersFile /home/user/dev/tools/rhorizon/.gitsigners
 ```
 
 Verify the current commit before pushing:

@@ -8,6 +8,12 @@ cadence; things ship when they're ready.
 
 ### Security
 
+- Update frontend Expat for CVE-2026-117610 and CVE-2026-118370, and patch
+  filelock, msgpack and urllib3 in the hash-locked CI tooling dependencies.
+- Audit all runtime, driver and tooling dependency locks in CI. Public source
+  exports exclude private files and operator paths and preserve mirror history.
+- Require patched frontend Brotli and curl packages for CVE-2026-111497
+  and CVE-2026-92392.
 - Update API and PostgreSQL OpenSSL and PCRE2 security pins for
   CVE-2026-75804, CVE-2026-84782 and CVE-2026-103111.
 - Update frontend `libexpat` for CVE-2026-93990 and pin PostgreSQL image
@@ -19,6 +25,8 @@ cadence; things ship when they're ready.
 
 ### Fixed
 
+- Keep the Kubernetes HA smoke test from aborting with SIGPIPE while selecting
+  a secondary, and tolerate an empty response while its container restarts.
 - Require all eight image and module vulnerability reports, and fail on
   scanner or report errors. Scan the published agent image after local image
   pruning and give PostgreSQL a stable image tag for the scan.

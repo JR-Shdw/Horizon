@@ -166,7 +166,7 @@ def test_ai_guides_enforce_transport_and_docker_boundaries() -> None:
 
 def test_ai_system_script_contains_no_private_deployment_identifiers() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
-    forbidden = ("192.168.", "10.0.", "gitea.example.com", "/home/automation")
+    forbidden = ("192.168.", "10.0.", "gitea.example.com", "/home/user")
     assert not any(value in source for value in forbidden)
 
 

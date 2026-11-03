@@ -5,10 +5,11 @@ bandit==1.8.6
 pip-audit==2.9.0
 detect-secrets==1.5.0
 maturin==1.9.6
-# transitive CVE floors: idna<3.15 -> CVE-2026-45409 ; urllib3<2.7.0 -> PYSEC-2026-141/142 ;
-# msgpack<1.2.1 -> GHSA-6v7p-g79w-8964 (pulled in transitively via cachecontrol)
+# Transitive CVE floors, including the November 2026 audit findings in
+# filelock, msgpack and urllib3 pulled in by the audit tooling.
 idna>=3.15
-urllib3>=2.7.0
-msgpack>=1.2.1
+urllib3>=2.8.0
+msgpack>=1.2.3
+filelock>=4.2.1
 # GHSA-6q48-6c7w-9gw2: match the API's certifi security floor.
 certifi>=2026.10.19
