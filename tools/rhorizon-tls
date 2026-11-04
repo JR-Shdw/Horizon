@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+"""Create a private TLS certificate for a vault and trust it on clients.
+
+Single file, Python 3.9+ stdlib and openssl only.
+
+On the vault host, from the deployment folder:
+
+    rhorizon-tls generate --ip 192.0.2.10 --dns vault.example --out certs
+
+On each client, after copying certs/ca.pem:
+
+    rhorizon-tls trust ca.pem --name vault
+    rhorizon-tls check https://192.0.2.10:8443
+
+generate creates a one-time CA limited to the listed addresses, signs the
+server certificate with it, then deletes the CA key. Nothing can be signed
+with that CA afterwards, and the server key cannot sign certificates.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import ipaddress
+import os
+import re
+import secrets
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+from pathlib import Path
+
+ANCHOR_DIRS = (
+    # refresh command, anchor directory
+    (("update-ca-certificates",), "/usr/local/share/ca-certificates"),
+    (("update-ca-trust", "extract"), "/etc/ca-certificates/trust-source/anchors"),
+)
+FEDORA_ANCHORS = "/etc/pki/ca-trust/source/anchors"
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+DNS_RE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9-]+)*")
+
+
+class Fail(Exception):
+    """Expected failure, printed without a traceback."""
+
+
+def run(*command: str, check: bool = True) -> subprocess.CompletedProcess:
+    result = subprocess.run(command, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise Fail(f"{command[0]} failed: {result.stderr.strip()}")
+    return result
+
+
+def need(tool: str) -> None:
+    if not shutil.which(tool):
+        raise Fail(f"{tool} is not installed")
+
+
+def parse_ips(values: list[str]) -> list[str]:
+    ips = []
+    for value in values:
+        if "/" in value:
+            raise Fail(
+                f"{value} is a subnet: a certificate lists exact addresses, "
+                "give the vault's own IP on that network"
+            )
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            raise Fail(f"not an IP address: {value}")
+        if address.version != 4:
+            raise Fail(f"only IPv4 is supported: {value}")
+        ips.append(str(address))
+    return ips
+
+
+def parse_dns(values: list[str]) -> list[str]:
+    for value in values:
+        if not DNS_RE.fullmatch(value):
+            raise Fail(f"not a DNS name: {value}")
+    return values
+
+
+def unique(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def constraints(ips: list[str], names: list[str]) -> str:
+    entries = [f"permitted;IP:{ip}/255.255.255.255" for ip in ips]
+    entries += [f"permitted;DNS:{name}" for name in names]
+    return "nameConstraints=critical," + ",".join(entries)
+
+
+def fingerprint(path: Path) -> str:
+    output = run(
+        "openssl", "x509", "-in", str(path), "-noout", "-fingerprint", "-sha256"
+    ).stdout
+    return output.strip().split("=", 1)[1]
+
+
+def build_certificates(work: Path, ips: list[str], names: list[str], days: int) -> None:
+    label = names[0] if names[0] != "localhost" else ips[0]
+    key_options = ("-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1")
+    run(
+        "openssl", "req", "-x509", *key_options, "-sha256", "-nodes",
+        "-days", str(days),
+        "-keyout", str(work / "ca.key"),
+        "-out", str(work / "ca.pem"),
+        "-subj", f"/CN=rhorizon one-time CA {label}",
+        "-addext", "basicConstraints=critical,CA:TRUE,pathlen:0",
+        "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+        "-addext", constraints(ips, names),
+    )  # fmt: skip
+    run(
+        "openssl", "req", "-new", *key_options, "-nodes",
+        "-keyout", str(work / "key.pem"),
+        "-out", str(work / "server.csr"),
+        "-subj", f"/CN={label}",
+    )  # fmt: skip
+    san = ",".join([f"IP:{ip}" for ip in ips] + [f"DNS:{name}" for name in names])
+    extensions = work / "server.ext"
+    extensions.write_text(
+        f"subjectAltName={san}\n"
+        "basicConstraints=critical,CA:FALSE\n"
+        "keyUsage=critical,digitalSignature\n"
+        "extendedKeyUsage=serverAuth\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid\n"
+    )
+    run(
+        "openssl", "x509", "-req", "-sha256",
+        "-in", str(work / "server.csr"),
+        "-CA", str(work / "ca.pem"),
+        "-CAkey", str(work / "ca.key"),
+        "-set_serial", "0x" + secrets.token_hex(16),
+        "-days", str(days),
+        "-extfile", str(extensions),
+        "-out", str(work / "server.pem"),
+    )  # fmt: skip
+    for flag, values in (("-verify_ip", ips), ("-verify_hostname", names)):
+        for value in values:
+            run(
+                "openssl", "verify", "-x509_strict",
+                "-CAfile", str(work / "ca.pem"),
+                flag, value,
+                str(work / "server.pem"),
+            )  # fmt: skip
+
+
+def install_file(source: Path, target: Path, default_mode: int, stamp: str) -> None:
+    """Replace target atomically, keeping a backup and its owner and mode."""
+    staged = target.with_name(f".{target.name}.new")
+    shutil.copyfile(source, staged)
+    os.chmod(staged, default_mode)
+    if target.exists():
+        shutil.copy2(target, target.with_name(f"{target.name}.{stamp}.bak"))
+        info = target.stat()
+        os.chmod(staged, info.st_mode & 0o777)
+        if os.geteuid() == 0:
+            os.chown(staged, info.st_uid, info.st_gid)
+    os.replace(staged, target)
+
+
+def cmd_generate(args: argparse.Namespace) -> int:
+    need("openssl")
+    if not args.ip:
+        raise Fail("give at least one --ip, the address clients connect to")
+    ips = unique(parse_ips(args.ip) + ["127.0.0.1"])
+    names = unique(parse_dns(args.dns) + ["localhost"])
+    out = Path(args.out).expanduser()
+    out.mkdir(parents=True, exist_ok=True)
+
+    memory = "/dev/shm" if os.access("/dev/shm", os.W_OK) else None
+    with tempfile.TemporaryDirectory(dir=memory) as raw:
+        work = Path(raw)
+        build_certificates(work, ips, names, args.days)
+        chain = work / "chain.pem"
+        chain.write_text(
+            (work / "server.pem").read_text() + (work / "ca.pem").read_text()
+        )
+        stamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        install_file(work / "key.pem", out / "key.pem", 0o600, stamp)
+        install_file(chain, out / "cert.pem", 0o644, stamp)
+        install_file(work / "ca.pem", out / "ca.pem", 0o644, stamp)
+        (work / "ca.key").write_bytes(b"\0" * (work / "ca.key").stat().st_size)
+
+    print(f"Created in {out}: cert.pem, key.pem, ca.pem")
+    print(f"Valid for: {', '.join(ips + names)}")
+    print("The CA key is deleted.")
+    print(f"ca.pem SHA-256 fingerprint: {fingerprint(out / 'ca.pem')}")
+    print("\nNext: restart the frontend, then on each client:")
+    print("  rhorizon-tls trust ca.pem --name <name>")
+    return 0
+
+
+def describe(path: Path) -> str:
+    return run(
+        "openssl", "x509", "-in", str(path), "-noout", "-subject", "-enddate",
+        "-ext", "subjectAltName,nameConstraints,basicConstraints",
+    ).stdout  # fmt: skip
+
+
+def check_certificate(path: Path, allow_unconstrained: bool) -> str:
+    """Refuse a file that is unsafe to trust. Return its description."""
+    if not path.is_file():
+        raise Fail(f"no such file: {path}")
+    text = path.read_text(errors="replace")
+    if "PRIVATE KEY" in text:
+        raise Fail(f"{path} contains a private key, it must never be copied")
+    if text.count("BEGIN CERTIFICATE") != 1:
+        raise Fail(f"{path} must hold exactly one certificate, use ca.pem")
+    details = describe(path)
+    is_ca = "CA:TRUE" in details
+    if is_ca and "Name Constraints" not in details and not allow_unconstrained:
+        raise Fail(
+            f"{path} can vouch for any website once trusted; create one with "
+            "rhorizon-tls generate, or pass --allow-unconstrained"
+        )
+    return details
+
+
+def privileged(*command: str) -> None:
+    if os.geteuid() == 0:
+        run(*command)
+    else:
+        need("sudo")
+        result = subprocess.run(("sudo", *command))
+        if result.returncode != 0:
+            raise Fail(f"sudo {command[0]} failed")
+
+
+def system_store() -> tuple[tuple[str, ...], str]:
+    for refresh, directory in ANCHOR_DIRS:
+        if shutil.which(refresh[0]):
+            if refresh[0] == "update-ca-trust" and Path(FEDORA_ANCHORS).parent.exists():
+                return refresh, FEDORA_ANCHORS
+            return refresh, directory
+    raise Fail(
+        "no system CA store tool found (update-ca-certificates, update-ca-trust)"
+    )
+
+
+def trust_system(path: Path, name: str) -> None:
+    refresh, directory = system_store()
+    target = f"{directory}/rhorizon-{name}.crt"
+    privileged("install", "-D", "-m", "0644", str(path), target)
+    privileged(*refresh)
+    print(f"System store: installed {target}")
+
+
+def untrust_system(name: str) -> None:
+    refresh, directory = system_store()
+    privileged("rm", "-f", f"{directory}/rhorizon-{name}.crt")
+    privileged(*refresh)
+    print("System store: removed")
+
+
+def nss_db() -> tuple[Path, str]:
+    path = Path.home() / ".pki/nssdb"
+    return path, f"sql:{path}"
+
+
+def nss_remove(database: str, name: str) -> None:
+    for _ in range(20):
+        if run("certutil", "-d", database, "-D", "-n", name, check=False).returncode:
+            return
+
+
+def trust_browser(path: Path, name: str) -> None:
+    need("certutil")
+    directory, database = nss_db()
+    if not (directory / "cert9.db").exists():
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        run("certutil", "-d", database, "-N", "--empty-password")
+    nss_remove(database, name)
+    run("certutil", "-d", database, "-A", "-t", "C,,", "-n", name, "-i", str(path))
+    print(f"Browser store: added {name}. Quit Brave or Chrome and reopen it.")
+
+
+def untrust_browser(name: str) -> None:
+    need("certutil")
+    directory, database = nss_db()
+    if (directory / "cert9.db").exists():
+        nss_remove(database, name)
+    print("Browser store: removed")
+
+
+def targets(args: argparse.Namespace) -> tuple[bool, bool]:
+    if args.system or args.browser:
+        return args.system, args.browser
+    return True, True
+
+
+def valid_name(name: str) -> str:
+    if not NAME_RE.fullmatch(name):
+        raise Fail("name may use letters, digits, dot, dash, underscore")
+    return name
+
+
+def run_steps(steps: list) -> int:
+    """Run every step, so one missing store does not block the other."""
+    failed = 0
+    for step, *step_args in steps:
+        try:
+            step(*step_args)
+        except Fail as error:
+            print(f"rhorizon-tls: {error}", file=sys.stderr)
+            failed += 1
+    return 2 if failed else 0
+
+
+def cmd_trust(args: argparse.Namespace) -> int:
+    need("openssl")
+    name = valid_name(args.name)
+    path = Path(args.file).expanduser().resolve()
+    details = check_certificate(path, args.allow_unconstrained)
+    print(details.rstrip())
+    print(f"SHA-256 fingerprint: {fingerprint(path)}\n")
+    if args.fingerprint and normalize(args.fingerprint) != normalize(fingerprint(path)):
+        raise Fail("fingerprint does not match, nothing was changed")
+    if not (args.yes or args.fingerprint):
+        if not sys.stdin.isatty():
+            raise Fail("pass --yes or --fingerprint to run unattended")
+        answer = input(
+            "Compare the fingerprint with the vault host. Trust? (y/n) [n]: "
+        )
+        if answer.strip().lower() not in ("y", "yes", "o", "oui"):
+            print("Nothing changed.")
+            return 1
+    system, browser = targets(args)
+    steps = []
+    if system:
+        steps.append((trust_system, path, name))
+    if browser:
+        steps.append((trust_browser, path, name))
+    return run_steps(steps)
+
+
+def normalize(value: str) -> str:
+    return value.replace(":", "").strip().lower()
+
+
+def cmd_untrust(args: argparse.Namespace) -> int:
+    name = valid_name(args.name)
+    system, browser = targets(args)
+    steps = []
+    if system:
+        steps.append((untrust_system, name))
+    if browser:
+        steps.append((untrust_browser, name))
+    return run_steps(steps)
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    parts = urllib.parse.urlsplit(args.url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise Fail("give an https:// URL")
+    host, port = parts.hostname, parts.port or 443
+    context = ssl.create_default_context(cafile=args.ca_file)
+    try:
+        with socket.create_connection((host, port), timeout=10) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as tls:
+                print(f"OK: {host}:{port} is trusted ({tls.version()})")
+                return 0
+    except ssl.SSLCertVerificationError as error:
+        raise Fail(f"{host}:{port} is not trusted: {error.verify_message}")
+    except ssl.SSLError as error:
+        raise Fail(f"TLS failed on {host}:{port}, is this the TLS port? {error}")
+    except OSError as error:
+        raise Fail(f"cannot reach {host}:{port}: {error}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rhorizon-tls",
+        description="Create a private vault certificate and trust it on clients.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    generate = commands.add_parser("generate", help="create certificates (vault host)")
+    generate.add_argument(
+        "--ip", action="append", default=[], help="vault address, repeatable"
+    )
+    generate.add_argument(
+        "--dns", action="append", default=[], help="vault DNS name, repeatable"
+    )
+    generate.add_argument("--out", default="certs", help="directory (default certs)")
+    generate.add_argument("--days", type=int, default=825, help="validity in days")
+    generate.set_defaults(handler=cmd_generate)
+
+    trust = commands.add_parser("trust", help="trust ca.pem on this machine")
+    trust.add_argument("file", help="certificate to trust, usually ca.pem")
+    trust.add_argument("--name", required=True, help="short label, for example lab")
+    trust.add_argument("--system", action="store_true", help="system store only")
+    trust.add_argument("--browser", action="store_true", help="Brave/Chrome only")
+    trust.add_argument("--fingerprint", help="expected SHA-256, skips the question")
+    trust.add_argument("--yes", action="store_true", help="apply without asking")
+    trust.add_argument(
+        "--allow-unconstrained",
+        action="store_true",
+        help="accept a CA with no name constraints",
+    )
+    trust.set_defaults(handler=cmd_trust)
+
+    untrust = commands.add_parser("untrust", help="remove a trusted certificate")
+    untrust.add_argument("--name", required=True)
+    untrust.add_argument("--system", action="store_true", help="system store only")
+    untrust.add_argument("--browser", action="store_true", help="Brave/Chrome only")
+    untrust.set_defaults(handler=cmd_untrust)
+
+    check = commands.add_parser("check", help="test a TLS endpoint from this machine")
+    check.add_argument("url", help="for example https://192.0.2.10:8443")
+    check.add_argument("--ca-file", help="use this CA instead of the system store")
+    check.set_defaults(handler=cmd_check)
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    try:
+        return args.handler(args)
+    except Fail as error:
+        print(f"rhorizon-tls: {error}", file=sys.stderr)
+        return 2
+    except OSError as error:
+        print(f"rhorizon-tls: {error}", file=sys.stderr)
+        return 2
+    except (KeyboardInterrupt, EOFError):
+        print("\nStopped.", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -4,6 +4,9 @@ End-to-end recipe to stop embedding API tokens in `.git/config` URLs and
 fetch them on demand from a rhorizon vault. The example values below
 match the layout this project itself uses.
 
+To give one repository its own token, or to pick a vault per repository, use
+[`rhorizon-git`](../../docs/docs/howto/git-credentials.md).
+
 ## What you get
 
 Before:

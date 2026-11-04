@@ -54,6 +54,46 @@ class KubernetesE2EHelperTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("integer", result.stderr)
 
+    def _live_preflight(self, stub):
+        helper = SCRIPT[
+            SCRIPT.index("live_preflight_request() {") : SCRIPT.index(
+                "\nunseal_pod() {"
+            )
+        ]
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                "set -euo pipefail; tok=t; "
+                + stub
+                + "\n"
+                + helper
+                + "\nif live_preflight_request; then echo ok; else echo retry; fi"
+                + '; printf "%s|%s" "$preflight_status" "$preflight"',
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_live_preflight_keeps_a_failed_check_as_an_answer(self):
+        body = json.dumps({"checks": [{"id": "mtls_live", "status": "fail"}]})
+        envelope = json.dumps({"transport": "ok", "status": 200, "body": body})
+        result = self._live_preflight(
+            f"api_exec_request() {{ printf '%s' '{envelope}'; }}"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f"ok\n200|{body}")
+
+    def test_live_preflight_retries_transport_and_http_errors(self):
+        for stub in (
+            "api_exec_request() { return 2; }",
+            "api_exec_request() { printf '%s' "
+            + '\'{"transport":"ok","status":503,"body":"sealed"}\'; }',
+        ):
+            result = self._live_preflight(stub)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(result.stdout.startswith("retry\n"), result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

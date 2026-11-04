@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 shdw <horizon@resurgamus.com>
+"""Link a git repository to a credential held in a rhorizon vault.
+
+Single file, Python 3.9+ stdlib and git only. Copy it to a host and run it:
+
+    install -m 0755 rhorizon-git ~/.local/bin/
+    rhorizon-git setup                  # asks for repo, remote, vault, secret
+    rhorizon-git status
+
+Unattended:
+
+    rhorizon-git setup --repo ~/dev/app --remote origin \\
+        --url https://github.com/acme/app.git --vault lab \\
+        --secret git/app-github --yes
+
+The setting is local to the repository and scoped to the remote host, so two
+repositories on one forge can use different tokens. Only the secret name is
+written to .git/config. The value is read from the vault on each git operation.
+
+Vault profiles live in ~/.config/rhorizon/vaults.ini (RH_CONFIG_DIR overrides
+the directory):
+
+    [lab]
+    url = https://vault.example:8443
+    token_file = ~/.config/rhorizon/lab.token
+    ca_file = ~/.config/rhorizon/lab-ca.pem
+"""
+
+from __future__ import annotations
+
+import argparse
+import configparser
+import getpass
+import json
+import os
+import re
+import shlex
+import ssl
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+SELF = Path(__file__).resolve()
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+YES = ("y", "yes", "o", "oui")
+# Forges that ignore the username but require a fixed one with a token.
+TOKEN_USERNAMES = {"github.com": "x-access-token", "gitlab.com": "oauth2"}
+
+
+class Fail(Exception):
+    """Expected failure, printed without a traceback."""
+
+
+def config_dir() -> Path:
+    raw = os.environ.get("RH_CONFIG_DIR") or "~/.config/rhorizon"
+    return Path(raw).expanduser()
+
+
+def read_token(path: Path) -> str:
+    if not path.is_file():
+        raise Fail(f"no vault token at {path}")
+    mode = path.stat().st_mode & 0o777
+    if mode & 0o077:
+        raise Fail(f"{path} is too open (mode {mode:o}); chmod 0600 it")
+    return path.read_text().strip()
+
+
+def write_private(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(content)
+
+
+class Vault:
+    def __init__(
+        self,
+        url: str,
+        token_file: Path,
+        ca_file: Path | None = None,
+        allow_insecure: bool = False,
+    ):
+        self.url = url.rstrip("/")
+        self.token_file = token_file
+        self.ca_file = ca_file
+        self.allow_insecure = allow_insecure
+
+    def is_plain_http(self) -> bool:
+        parts = urllib.parse.urlsplit(self.url)
+        return parts.scheme == "http" and parts.hostname not in LOOPBACK
+
+    def _context(self) -> ssl.SSLContext | None:
+        parts = urllib.parse.urlsplit(self.url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise Fail(f"not a usable vault URL: {self.url}")
+        if self.is_plain_http() and not self.allow_insecure:
+            raise Fail(
+                f"{self.url} is plain http, tokens would cross the network "
+                "unencrypted; use https (native TLS listens on :8443) or pass "
+                "--allow-insecure-vault"
+            )
+        if parts.scheme != "https":
+            return None
+        cafile = str(self.ca_file) if self.ca_file else None
+        try:
+            return ssl.create_default_context(cafile=cafile)
+        except OSError as error:
+            raise Fail(f"cannot load CA file {cafile}: {error}")
+
+    def _call(self, method: str, path: str, body: dict | None = None) -> dict:
+        context = self._context()
+        request = urllib.request.Request(
+            self.url + path,
+            method=method,
+            data=None if body is None else json.dumps(body).encode(),
+            headers={
+                "Authorization": f"Bearer {read_token(self.token_file)}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=10, context=context
+            ) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                raise Fail(f"vault rejected the token in {self.token_file}")
+            raise Fail(f"vault answered {error.code} for {path.split('?')[0]}")
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            reason = getattr(error, "reason", None)
+            hint = ""
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                hint = " (certificate not trusted: check the CA file and its SAN)"
+            elif isinstance(reason, ssl.SSLError):
+                hint = " (TLS failed: is this the TLS port? usually :8443)"
+            raise Fail(f"vault unreachable at {self.url}: {error}{hint}")
+
+    def check_unsealed(self) -> None:
+        if self._call("GET", "/api/v1/vault/status").get("sealed") is True:
+            raise Fail(f"vault {self.url} is sealed; unseal it first")
+        self._call("GET", "/api/v1/vault/tokens/whoami")
+
+    def list_secrets(self) -> list[str]:
+        items = self._call("GET", "/api/v1/vault/secrets/").get("items", [])
+        return sorted(f"{item['namespace']}/{item['name']}" for item in items)
+
+    def read_secret(self, ref: str) -> str:
+        namespace, name = split_ref(ref)
+        query = urllib.parse.urlencode({"namespace": namespace})
+        quoted = urllib.parse.quote(name, safe="")
+        path = f"/api/v1/vault/secrets/{quoted}?{query}"
+        return self._call("GET", path)["value"]
+
+    def create_secret(self, ref: str, value: str) -> None:
+        namespace, name = split_ref(ref)
+        body = {"namespace": namespace, "name": name, "value": value}
+        self._call("POST", "/api/v1/vault/secrets/", body)
+
+
+def split_ref(ref: str) -> tuple[str, str]:
+    namespace, _, name = ref.partition("/")
+    if not namespace or not name:
+        raise Fail(f"secret must look like namespace/name, got {ref!r}")
+    return namespace, name
+
+
+def load_profiles() -> dict[str, Vault]:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(config_dir() / "vaults.ini")
+    return {
+        name: Vault(
+            section["url"],
+            Path(section["token_file"]).expanduser(),
+            Path(section["ca_file"]).expanduser() if "ca_file" in section else None,
+        )
+        for name, section in parser.items()
+        if name != "DEFAULT"
+    }
+
+
+def save_profile(name: str, vault: Vault) -> None:
+    path = config_dir() / "vaults.ini"
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(path)
+    parser[name] = {"url": vault.url, "token_file": str(vault.token_file)}
+    if vault.ca_file:
+        parser[name]["ca_file"] = str(vault.ca_file)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        parser.write(handle)
+
+
+def normalize_url(url: str) -> str:
+    """Return an https remote URL carrying no embedded credential."""
+    url = url.strip()
+    ssh = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+)$", url)
+    if ssh:
+        url = f"https://{ssh.group(1)}/{ssh.group(2)}"
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("https", "http") or not parts.hostname:
+        raise Fail(f"not a usable remote URL: {strip_auth(url)}")
+    if parts.scheme == "http" and parts.hostname not in LOOPBACK:
+        raise Fail("refusing to send a token over plain http")
+    return strip_auth(url)
+
+
+def strip_auth(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    host = parts.netloc.rpartition("@")[2]
+    return urllib.parse.urlunsplit(parts._replace(netloc=host))
+
+
+def git(repo: Path, *args: str, check: bool = True) -> str:
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+    if check and result.returncode != 0:
+        command = strip_auth(args[0])
+        raise Fail(f"git {command} failed: {strip_secrets(result.stderr)}")
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def strip_secrets(text: str) -> str:
+    return re.sub(r"://[^/@\s]+@", "://", text).strip()
+
+
+def scope_key(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    return f"credential.{parts.scheme}://{parts.netloc}.helper"
+
+
+def helper_command(vault: Vault, secret: str, username: str) -> str:
+    args = [
+        str(SELF),
+        "credential",
+        "--vault-url",
+        vault.url,
+        "--token-file",
+        str(vault.token_file),
+        "--secret",
+        secret,
+        "--username",
+        username,
+    ]
+    if vault.ca_file:
+        args += ["--ca-file", str(vault.ca_file)]
+    if vault.allow_insecure:
+        args.append("--allow-insecure-vault")
+    return "!" + shlex.join(args)
+
+
+def ask(prompt: str, default: str = "") -> str:
+    if not sys.stdin.isatty():
+        raise Fail(f"missing value for: {prompt} (pass it as an option)")
+    suffix = f" [{default}]" if default else ""
+    return input(f"{prompt}{suffix}: ").strip() or default
+
+
+def choose(title: str, options: list[str]) -> int:
+    """Return the chosen index."""
+    print(title)
+    for index, option in enumerate(options, 1):
+        print(f"  {index}) {option}")
+    while True:
+        answer = ask("Choice", "1")
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer) - 1
+        print(f"Enter a number from 1 to {len(options)}")
+
+
+def pick_repo(value: str | None) -> Path:
+    raw = value or ask("Repository path", os.getcwd())
+    path = Path(raw).expanduser().resolve()
+    top = (
+        git(path, "rev-parse", "--show-toplevel", check=False) if path.is_dir() else ""
+    )
+    if not top:
+        raise Fail(f"not a git repository: {path}")
+    return Path(top)
+
+
+def valid_remote_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name))
+
+
+def ask_remote_name(default: str = "") -> str:
+    while True:
+        name = ask("New remote name (for example github, the URL comes next)", default)
+        if valid_remote_name(name):
+            return name
+        print("A remote name is a short word, not a URL.")
+
+
+def pick_remote(repo: Path, value: str | None) -> str:
+    if value:
+        if not valid_remote_name(value):
+            raise Fail(f"invalid remote name: {strip_auth(value)}")
+        return value
+    remotes = git(repo, "remote").split()
+    if not remotes:
+        return ask_remote_name("origin")
+    labels = [f"{name}  {current_url(repo, name)}" for name in remotes]
+    index = choose("Remote:", labels + ["add a new remote"])
+    return remotes[index] if index < len(remotes) else ask_remote_name()
+
+
+def current_url(repo: Path, remote: str) -> str:
+    return strip_auth(git(repo, "config", f"remote.{remote}.url", check=False))
+
+
+def pick_vault(args: argparse.Namespace) -> Vault:
+    allow = args.allow_insecure_vault
+    if args.vault_url:
+        path = args.token_file or str(config_dir() / "token")
+        ca_file = Path(args.ca_file).expanduser().resolve() if args.ca_file else None
+        return Vault(args.vault_url, Path(path).expanduser(), ca_file, allow)
+    profiles = load_profiles()
+    for vault in profiles.values():
+        vault.allow_insecure = allow
+    if args.vault:
+        if args.vault not in profiles:
+            raise Fail(f"unknown vault {args.vault!r}, known: {sorted(profiles)}")
+        return profiles[args.vault]
+    names = sorted(profiles)
+    labels = [f"{name}  {profiles[name].url}" for name in names]
+    index = choose("Vault:", labels + ["add a new vault"])
+    return profiles[names[index]] if index < len(names) else add_vault(allow)
+
+
+def add_vault(allow_insecure: bool) -> Vault:
+    name = ask("Vault name (for example lab)")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise Fail("vault name may use letters, digits, dot, dash, underscore")
+    url = ask("Vault URL (for example https://vault.example:8443)")
+    ca_file = None
+    if url.startswith("https://"):
+        raw_ca = ask("Vault CA file (empty for the system CAs)")
+        ca_file = Path(raw_ca).expanduser().resolve() if raw_ca else None
+    default = str(config_dir() / f"{name}.token")
+    token_file = Path(ask("Vault token file", default)).expanduser()
+    if not token_file.exists():
+        token = getpass.getpass("Vault token (hidden): ").strip()
+        write_private(token_file, token + "\n")
+    elif token_file.stat().st_mode & 0o077:
+        if ask(f"{token_file} is too open, chmod 0600? (y/n)", "y").lower() in YES:
+            token_file.chmod(0o600)
+    vault = Vault(url, token_file, ca_file, allow_insecure)
+    vault.check_unsealed()
+    save_profile(name, vault)
+    return vault
+
+
+def pick_secret(vault: Vault, value: str | None) -> str:
+    if value:
+        return value
+    try:
+        names = vault.list_secrets()
+    except Fail as error:
+        print(f"Cannot list secrets ({error}); enter the name by hand.")
+        names = []
+    extra = ["type a secret name", "store a new token in the vault"]
+    index = choose("Secret holding the git token:", names + extra)
+    if index < len(names):
+        return names[index]
+    ref = ask("Secret (namespace/name)")
+    if index == len(names) + 1:
+        vault.create_secret(ref, getpass.getpass("Git token (hidden): ").strip())
+    return ref
+
+
+def apply_link(repo: Path, remote: str, url: str, key: str, command: str) -> None:
+    if git(repo, "config", f"remote.{remote}.url", check=False):
+        git(repo, "remote", "set-url", remote, url)
+    else:
+        git(repo, "remote", "add", remote, url)
+    git(repo, "config", "--local", "--unset-all", key, check=False)
+    # The empty entry drops inherited helpers for this host.
+    git(repo, "config", "--local", "--add", key, "")
+    git(repo, "config", "--local", "--add", key, command)
+
+
+def restore(repo: Path, remote: str, old_url: str, key: str, old: list[str]) -> None:
+    if old_url:
+        git(repo, "remote", "set-url", remote, old_url)
+    else:
+        git(repo, "remote", "remove", remote, check=False)
+    git(repo, "config", "--local", "--unset-all", key, check=False)
+    for value in old:
+        git(repo, "config", "--local", "--add", key, value)
+
+
+def local_values(repo: Path, key: str) -> list[str]:
+    raw = git(repo, "config", "--local", "--get-all", key, check=False)
+    return raw.split("\n") if raw else []
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    repo = pick_repo(args.repo)
+    remote = pick_remote(repo, args.remote)
+    raw_old_url = git(repo, "config", f"remote.{remote}.url", check=False)
+    old_url = strip_auth(raw_old_url)
+    url = normalize_url(args.url or ask("Remote URL", old_url))
+
+    vault = pick_vault(args)
+    vault.check_unsealed()
+    if vault.is_plain_http():
+        print(f"Warning: {vault.url} is plain http, tokens travel unencrypted.")
+
+    secret = pick_secret(vault, args.secret)
+    split_ref(secret)
+    vault.read_secret(secret)
+
+    host = urllib.parse.urlsplit(url).hostname or ""
+    username = args.username or (
+        TOKEN_USERNAMES.get(host)
+        or ask("Git username for this forge", getpass.getuser())
+    )
+
+    print(f"\nRepository  {repo}")
+    print(f"Remote      {remote}: {old_url or '(new)'} -> {url}")
+    print(f"Vault       {vault.url}")
+    print(f"Secret      {secret} (username {username})")
+    if not args.yes and ask("Apply? (y/n)", "n").lower() not in YES:
+        print("Nothing changed.")
+        return 1
+
+    key = scope_key(url)
+    previous = local_values(repo, key)
+    apply_link(repo, remote, url, key, helper_command(vault, secret, username))
+    if args.no_verify:
+        print("Linked, not verified.")
+        return 0
+    try:
+        git(repo, "ls-remote", remote, "HEAD")
+    except (Fail, subprocess.TimeoutExpired) as error:
+        restore(repo, remote, raw_old_url, key, previous)
+        raise Fail(f"remote check failed, previous settings restored: {error}")
+    print(f"Linked and verified: git ls-remote {remote} works.")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    repo = pick_repo(args.repo or os.getcwd())
+    for remote in git(repo, "remote").split():
+        url = current_url(repo, remote)
+        print(f"{remote}  {url}")
+        if not url.startswith(("https://", "http://")):
+            continue
+        values = [v for v in local_values(repo, scope_key(url)) if v]
+        match = re.search(r"--secret (\S+)", values[-1]) if values else None
+        print(f"  secret: {match.group(1) if match else 'not linked'}")
+    return 0
+
+
+def cmd_credential(args: argparse.Namespace) -> int:
+    if args.operation != "get":
+        sys.stdin.read()
+        return 0
+    attrs = dict(
+        line.split("=", 1) for line in sys.stdin.read().splitlines() if "=" in line
+    )
+    host = attrs.get("host", "")
+    if attrs.get("protocol") != "https" and host.split(":")[0] not in LOOPBACK:
+        raise Fail("refusing to send a token over plain http")
+    ca_file = Path(args.ca_file) if args.ca_file else None
+    vault = Vault(
+        args.vault_url, Path(args.token_file), ca_file, args.allow_insecure_vault
+    )
+    value = vault.read_secret(args.secret).strip()
+    if not value or re.search(r"[\r\n\0]", value):
+        raise Fail(f"secret {args.secret} is not a single-line token")
+    print(f"username={args.username}\npassword={value}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rhorizon-git",
+        description="Link a git repository to a credential in a rhorizon vault.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    setup = commands.add_parser("setup", help="link a repository (interactive)")
+    setup.add_argument("--repo", help="repository path")
+    setup.add_argument("--remote", help="remote name, created if missing")
+    setup.add_argument("--url", help="remote URL; ssh and embedded tokens are cleaned")
+    setup.add_argument("--vault", help="profile name from vaults.ini")
+    setup.add_argument("--vault-url", help="vault URL, instead of a profile")
+    setup.add_argument("--token-file", help="vault token file, with --vault-url")
+    setup.add_argument("--ca-file", help="vault CA file, with --vault-url")
+    setup.add_argument(
+        "--allow-insecure-vault",
+        action="store_true",
+        help="accept a plain http vault outside localhost",
+    )
+    setup.add_argument("--secret", help="namespace/name of the git token")
+    setup.add_argument("--username", help="git username for this forge")
+    setup.add_argument("--yes", action="store_true", help="apply without asking")
+    setup.add_argument("--no-verify", action="store_true", help="skip git ls-remote")
+    setup.set_defaults(handler=cmd_setup)
+
+    status = commands.add_parser("status", help="show remotes and linked secrets")
+    status.add_argument("--repo", help="repository path")
+    status.set_defaults(handler=cmd_status)
+
+    credential = commands.add_parser("credential", help="git credential helper")
+    credential.add_argument("--vault-url", required=True)
+    credential.add_argument("--token-file", required=True)
+    credential.add_argument("--secret", required=True)
+    credential.add_argument("--username", required=True)
+    credential.add_argument("--ca-file")
+    credential.add_argument("--allow-insecure-vault", action="store_true")
+    credential.add_argument("operation", choices=("get", "store", "erase"))
+    credential.set_defaults(handler=cmd_credential)
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    try:
+        return args.handler(args)
+    except Fail as error:
+        print(f"rhorizon-git: {error}", file=sys.stderr)
+        return 2
+    except (KeyboardInterrupt, EOFError):
+        print("\nNothing changed.", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

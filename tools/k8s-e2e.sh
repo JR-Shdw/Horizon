@@ -283,6 +283,17 @@ audit_preflight_request() {
     && printf '%s' "$audit_preflight" | jq -e 'has("preflight_ready")' >/dev/null 2>&1
 }
 
+live_preflight_request() {
+  preflight_envelope="$(api_exec_request GET \
+    '/api/v1/vault/cluster/preflight?live=true' '' "$tok" || true)"
+  preflight_status="$(printf '%s' "$preflight_envelope" \
+    | jq -r '.status // 0' 2>/dev/null || echo 0)"
+  preflight="$(printf '%s' "$preflight_envelope" \
+    | jq -r '.body // empty' 2>/dev/null || true)"
+  [ "$preflight_status" -eq 200 ] \
+    && printf '%s' "$preflight" | jq -e 'has("checks")' >/dev/null 2>&1
+}
+
 unseal_pod() {
   local pod="$1" envelope http_status result
   envelope="$(pod_exec_request "$pod" POST /api/v1/vault/unseal \
@@ -488,7 +499,15 @@ if [ "$HA" = "1" ]; then
     || fail "signed audit anchor is not ready: $audit_preflight_envelope"
 
   say "run the live HTTPS/mTLS preflight"
-  preflight="$(kexec "wget -qO- -T30 --header='Authorization: Bearer $tok' '$base/api/v1/vault/cluster/preflight?live=true'" || true)"
+  preflight=""
+  preflight_envelope=""
+  # Retry only an unanswered request; a failed check is an answer.
+  for _ in $(seq 1 10); do
+    live_preflight_request && break
+    sleep 3
+  done
+  printf '%s' "$preflight" | jq -e 'has("checks")' >/dev/null 2>&1 \
+    || fail "live preflight did not answer: $preflight_envelope"
   printf '%s' "$preflight" | jq -e '
     .live_mtls_requested == true and
     ([.checks[] | select(.id == "health_cluster" or .id == "worker_convergence" or .id == "peer_state" or .id == "mtls_live")] | length) == 4 and

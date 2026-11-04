@@ -6,6 +6,13 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+### Added
+
+- Add `tools/rhorizon-git`, a single-file tool that links a repository remote
+  to a token in a chosen vault, with interactive and unattended modes.
+- Add `tools/rhorizon-tls`, which creates a private vault certificate from a
+  constrained one-time CA and trusts it in the system and browser stores.
+
 ### Security
 
 - Prevent namespace-scoped tokens from escaping their scope through a child
@@ -30,6 +37,8 @@ cadence; things ship when they're ready.
 
 ### Fixed
 
+- Run the Kubernetes HA live preflight through the API Pod with bounded
+  retries, and report its HTTP status and body when it gets no answer.
 - Keep the Kubernetes HA smoke test from aborting with SIGPIPE while selecting
   a secondary, and tolerate an empty response while its container restarts.
 - Require all eight image and module vulnerability reports, and fail on

@@ -94,6 +94,7 @@ nav:
       - howto/index.md
       - Agents (rh-fetch / rh-inject / rh-watch): howto/agents.md
       - MCP (LLM access): howto/mcp.md
+      - Git credentials: howto/git-credentials.md
       - Kubernetes sidecar pattern: howto/kubernetes-sidecar.md
       - LDAP & SSO proxy auth: howto/ldap-sso.md
       - 2FA setup: howto/2fa.md
