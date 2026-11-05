@@ -614,6 +614,14 @@ CREATE TABLE IF NOT EXISTS vault_notification_channels (
     enabled     BOOLEAN DEFAULT true,
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE vault_notification_channels
+    ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS last_error TEXT,
+    ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS secrets_ct BYTEA,
+    ADD COLUMN IF NOT EXISTS secrets_nonce BYTEA,
+    ADD COLUMN IF NOT EXISTS dek_id UUID REFERENCES vault_dek(id);
 
 -- Dynamic secret modules: cluster-wide fine-grained activation under the hard
 -- dynamic-engines.ini boundary. Missing rows mean enabled on first boot.

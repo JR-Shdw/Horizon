@@ -214,10 +214,11 @@ async def oneshot_read(
             sec_r = await db.execute(
                 text("""
                     SELECT s.id, s.ciphertext, s.nonce, s.aad_version, s.dek_id,
-                           d.encrypted_key, d.nonce AS dek_nonce
+                           s.is_honey, d.encrypted_key, d.nonce AS dek_nonce
                     FROM vault_secrets s
                     JOIN vault_dek d ON d.id = s.dek_id
                     WHERE s.name = :name AND s.namespace = :ns
+                      AND s.deleted_at IS NULL
                 """),
                 {"name": body.name, "ns": body.namespace},
             )
@@ -244,6 +245,16 @@ async def oneshot_read(
                     version=row.aad_version,
                 ),
             )
+
+            if row.is_honey:
+                from ..honey import alert_honey_access
+
+                await alert_honey_access(
+                    kind="secret",
+                    name=body.name,
+                    request=request,
+                    actor="oneshot",
+                )
 
             await clear_failures(db, client_ip)
             await log_action(

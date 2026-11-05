@@ -4,6 +4,7 @@ Targets: _send_notification (unknown channel), dispatch_event (try/except),
 _send_email (recipient parsing, missing host), _smtp_send_sync (mock SMTP).
 """
 
+import ssl
 from email.message import EmailMessage
 from unittest.mock import MagicMock, patch
 
@@ -239,7 +240,7 @@ def test_smtp_send_sync_starttls(monkeypatch):
     fake_client = MagicMock()
     smtp_class = MagicMock(return_value=fake_client)
 
-    monkeypatch.setattr("smtplib.SMTP", smtp_class)
+    monkeypatch.setattr("api.app.routes.notifications._PinnedSMTP", smtp_class)
 
     msg = EmailMessage()
     msg["Subject"] = "x"
@@ -269,7 +270,7 @@ def test_smtp_send_sync_ssl_no_login(monkeypatch):
     fake_client = MagicMock()
     ssl_class = MagicMock(return_value=fake_client)
 
-    monkeypatch.setattr("smtplib.SMTP_SSL", ssl_class)
+    monkeypatch.setattr("api.app.routes.notifications._PinnedSMTPSSL", ssl_class)
 
     msg = EmailMessage()
     msg["Subject"] = "x"
@@ -299,7 +300,7 @@ def test_smtp_send_sync_quit_failure_falls_back_to_close(monkeypatch):
     fake_client.quit.side_effect = RuntimeError("connection broken")
     smtp_class = MagicMock(return_value=fake_client)
 
-    monkeypatch.setattr("smtplib.SMTP", smtp_class)
+    monkeypatch.setattr("api.app.routes.notifications._PinnedSMTP", smtp_class)
 
     msg = EmailMessage()
     msg["Subject"] = "x"
@@ -318,3 +319,121 @@ def test_smtp_send_sync_quit_failure_falls_back_to_close(monkeypatch):
     )
 
     fake_client.close.assert_called_once()
+
+
+def _smtp_message() -> EmailMessage:
+    msg = EmailMessage()
+    msg["Subject"] = "x"
+    msg["From"] = "a@b"
+    msg["To"] = "c@d"
+    msg.set_content("body")
+    return msg
+
+
+def _verifying(context) -> bool:
+    return context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+
+
+def test_smtp_starttls_verifies_the_server_certificate(monkeypatch):
+    fake_client = MagicMock()
+    monkeypatch.setattr(
+        "api.app.routes.notifications._PinnedSMTP", MagicMock(return_value=fake_client)
+    )
+    _smtp_send_sync("mail.example.com", 587, False, True, "me", "pw", _smtp_message())
+    assert _verifying(fake_client.starttls.call_args.kwargs["context"])
+
+
+def test_smtp_ssl_verifies_the_server_certificate(monkeypatch):
+    ssl_class = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr("api.app.routes.notifications._PinnedSMTPSSL", ssl_class)
+    _smtp_send_sync("mail.example.com", 465, True, False, "me", "pw", _smtp_message())
+    assert _verifying(ssl_class.call_args.kwargs["context"])
+
+
+def test_smtp_credentials_are_refused_without_tls(monkeypatch):
+    smtp_class = MagicMock()
+    monkeypatch.setattr("api.app.routes.notifications._PinnedSMTP", smtp_class)
+    with pytest.raises(ValueError, match="require TLS"):
+        _smtp_send_sync(
+            "mail.example.com", 25, False, False, "me", "pw", _smtp_message()
+        )
+    smtp_class.assert_not_called()
+
+
+def _addresses(*ips):
+    return [(2, 1, 6, "", (ip, 0)) for ip in ips]
+
+
+def test_pinned_address_rejects_any_internal_answer(monkeypatch):
+    from api.app.routes import notifications as n
+
+    monkeypatch.setattr(
+        n.socket, "getaddrinfo", lambda *a, **k: _addresses("8.8.8.8", "10.0.0.1")
+    )
+    with pytest.raises(ValueError, match="SSRF"):
+        n._pinned_address("rebind.example", 443)
+
+
+def test_pinned_address_rejects_ipv4_mapped_loopback(monkeypatch):
+    from api.app.routes import notifications as n
+
+    monkeypatch.setattr(
+        n.socket, "getaddrinfo", lambda *a, **k: _addresses("::ffff:127.0.0.1")
+    )
+    with pytest.raises(ValueError, match="SSRF"):
+        n._pinned_address("rebind.example", 443)
+
+
+@pytest.mark.asyncio
+async def test_rebinding_after_the_early_check_never_connects(monkeypatch):
+    """The name is public for the guard, then internal for the connection."""
+    from api.app.routes import notifications as n
+
+    answers = iter(["8.8.8.8", "127.0.0.1"])
+    monkeypatch.setattr(
+        n.socket, "getaddrinfo", lambda *a, **k: _addresses(next(answers))
+    )
+    connected = []
+
+    class Recorder:
+        async def connect_tcp(self, host, port, **kwargs):
+            connected.append(host)
+            raise AssertionError("must not connect")
+
+    monkeypatch.setattr(n.httpcore, "AnyIOBackend", Recorder)
+    with pytest.raises(ValueError, match="SSRF"):
+        await n._send_webhook({"url": "http://rebind.example/hook"}, "e", "m")
+    assert connected == []
+
+
+@pytest.mark.asyncio
+async def test_backend_connects_to_the_validated_address(monkeypatch):
+    from api.app.routes import notifications as n
+
+    monkeypatch.setattr(n.socket, "getaddrinfo", lambda *a, **k: _addresses("8.8.8.8"))
+    seen = {}
+
+    class Recorder:
+        async def connect_tcp(self, host, port, **kwargs):
+            seen["host"] = host
+            return "stream"
+
+    monkeypatch.setattr(n.httpcore, "AnyIOBackend", Recorder)
+    assert await n._PinnedBackend().connect_tcp("hook.example", 443) == "stream"
+    assert seen["host"] == "8.8.8.8"
+
+
+def test_smtp_socket_connects_to_the_validated_address(monkeypatch):
+    from api.app.routes import notifications as n
+
+    monkeypatch.setattr(n.socket, "getaddrinfo", lambda *a, **k: _addresses("8.8.8.8"))
+    seen = {}
+
+    def fake_get_socket(self, host, port, timeout):
+        seen["host"] = host
+        return "socket"
+
+    monkeypatch.setattr(n.smtplib.SMTP, "_get_socket", fake_get_socket)
+    client = n._PinnedSMTP()
+    assert client._get_socket("mail.example", 25, 5) == "socket"
+    assert seen["host"] == "8.8.8.8"

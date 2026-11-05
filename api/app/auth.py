@@ -430,6 +430,38 @@ def namespace_claim(token_info: dict) -> list[str] | None:
     return [entry for entry in claim if isinstance(entry, str)]
 
 
+def merge_group_permissions(grants: list[dict]) -> dict:
+    """Merge group grants into one token without exceeding any single group.
+
+    A token has one scope set and one namespace list, so a mode survives only
+    if the groups granting it cover every namespace on the token. Returns {}
+    when no scope survives.
+    """
+    claims = [namespace_claim({"permissions": grant}) for grant in grants]
+    restricted = [set(claim) for claim in claims if claim is not None]
+    target = set().union(*restricted)
+
+    merged: dict = {}
+    scopes = {scope for grant in grants for scope in grant if scope != "namespaces"}
+    for scope in sorted(scopes):
+        modes = ""
+        for mode in "rw":
+            covering = [
+                claim
+                for grant, claim in zip(grants, claims)
+                if mode in _permission_bits(grant.get(scope))
+            ]
+            if not covering:
+                continue
+            if None in covering or target <= set().union(*map(set, covering)):
+                modes += mode
+        if modes:
+            merged[scope] = modes
+    if merged and restricted:
+        merged["namespaces"] = sorted(target)
+    return merged
+
+
 def check_namespace(token_info: dict, namespace: str) -> None:
     """Raise 403 when a present namespace claim does not allow the namespace."""
     allowed_ns = namespace_claim(token_info)

@@ -14,20 +14,46 @@ const PULSAR_EVENTS = [
   { name: 'token_created',          label: 'Token created' },
   { name: 'token_revoked',          label: 'Token revoked' },
   { name: 'secret_created',         label: 'Secret created' },
+  { name: 'secret_updated',         label: 'Secret updated' },
   { name: 'secret_deleted',         label: 'Secret deleted' },
+  { name: 'unseal_failed',          label: 'Failed unseal (channels without credentials only)' },
+  { name: 'rate_limit_triggered',   label: 'Rate limit triggered' },
+  { name: 'shamir_init',            label: 'Shamir initialised' },
+  { name: '2fa_mode_changed',       label: '2FA mode changed' },
+  { name: 'ldap_login',             label: 'LDAP login' },
   { name: 'chain_broken',           label: 'Audit chain integrity broken' },
+  { name: 'notification_channel_failed', label: 'Another channel stopped delivering' },
 ];
+
+function channelStatus(c) {
+  if (c.status === 'failing') {
+    const count = c.consecutive_failures;
+    return `<span class="badge red">failing</span>
+      <div class="small">${esc(c.last_error || '')}</div>
+      <div class="dim small">${count} failure${count === 1 ? '' : 's'} in a row, last ${esc(timeAgo(c.last_failure_at))}</div>`;
+  }
+  if (c.status === 'ok') {
+    return `<span class="badge green">ok</span>
+      <div class="dim small">last sent ${esc(timeAgo(c.last_success_at))}</div>`;
+  }
+  return '<span class="badge grey">untested</span>';
+}
 
 async function renderPulsar(el) {
   if (isSealed()) { el.innerHTML = sealedHtml(); return; }
   try {
     const r = await api('GET', '/notifications/');
-    let html = `<div class="toolbar">
+    const failing = (r.items || []).filter(c => c.enabled && c.status === 'failing');
+    let html = failing.length ? `<div class="card card-danger">
+      <div class="card-title">Alerts are not reaching ${failing.length} channel${failing.length === 1 ? '' : 's'}</div>
+      <p class="dim">Fix the cause shown below, then use Test to confirm delivery.</p>
+    </div>` : '';
+    html += `<div class="toolbar">
       <button class="btn primary small" data-action="showCreateChannel">+ New Channel</button>
     </div>
     <div id="channel-form" class="card form-card hidden"></div>
     <table class="table"><thead><tr>
-      <th>Name</th><th>Type</th><th>Events</th><th>Enabled</th><th>Actions</th>
+      <th>Name</th><th>Type</th><th>Events</th><th>Enabled</th><th>Delivery</th><th>Actions</th>
     </tr></thead><tbody>`;
     for (const c of r.items || []) {
       const evs = Array.isArray(c.events) && c.events.length
@@ -38,6 +64,7 @@ async function renderPulsar(el) {
         <td><span class="tag">${esc(c.channel_type)}</span></td>
         <td>${evs}</td>
         <td><span class="badge ${c.enabled ? 'unsealed' : 'sealed'}">${c.enabled ? 'on' : 'off'}</span></td>
+        <td>${channelStatus(c)}</td>
         <td class="actions">
           <button class="btn tiny" data-action="testChannel" data-arg="${esc(c.id)}">Test</button>
           <button class="btn tiny danger" data-action="deleteChannel" data-arg="${esc(c.id)}" data-arg2="${esc(c.name)}">Del</button>
@@ -51,7 +78,7 @@ async function renderPulsar(el) {
 }
 
 function _eventsCheckboxes() {
-  return PULSAR_EVENTS.map(ev => `
+  return '<p class="dim small">Critical alerts and audit chain breaks always reach every enabled channel.</p>' + PULSAR_EVENTS.map(ev => `
     <label class="event-checkbox">
       <input type="checkbox" name="cc-event" value="${esc(ev.name)}">
       <code>${esc(ev.name)}</code> <span class="dim">${esc(ev.label)}</span>
@@ -177,6 +204,7 @@ async function createChannel() {
 async function testChannel(id) {
   try { await api('POST', `/notifications/${id}/test`); toast('Test sent', true); }
   catch (e) { toast(e.message, false); }
+  renderPulsar(document.getElementById('main'));
 }
 
 async function deleteChannel(id, name) {

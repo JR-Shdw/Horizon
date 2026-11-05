@@ -5,8 +5,14 @@ call. Used by CI runners and one-shot crons that don't need to keep the
 vault unsealed.
 """
 
+import asyncio
+from unittest.mock import AsyncMock, patch
+
 import pytest
+from api.app.database import async_session
+from api.app.main import MaxConcurrencyMiddleware
 from api.app.vault_state import vault as vs
+from sqlalchemy import text
 
 
 @pytest.mark.asyncio
@@ -169,3 +175,84 @@ async def test_oneshot_namespace_isolation(client, master_password, admin_token)
     assert vs.sealed is True
 
     await client.post("/api/v1/vault/unseal", json={"password": master_password})
+
+
+async def _create_then_seal(client, master_password, admin_token, **fields):
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    r = await client.post("/api/v1/vault/secrets/", headers=headers, json=fields)
+    assert r.status_code == 201, r.text
+    return headers
+
+
+@pytest.mark.asyncio
+async def test_oneshot_cannot_read_a_deleted_secret(
+    client, master_password, admin_token
+):
+    headers = await _create_then_seal(
+        client, master_password, admin_token, name="gone", value="old-value"
+    )
+    # The default namespace hard-deletes; soft-delete policies keep the row.
+    async with async_session() as db:
+        await db.execute(
+            text("UPDATE vault_secrets SET deleted_at = NOW() WHERE name = 'gone'")
+        )
+        await db.commit()
+    await client.post("/api/v1/vault/seal", headers=headers)
+
+    r = await client.post(
+        "/api/v1/vault/oneshot", json={"password": master_password, "name": "gone"}
+    )
+    assert r.status_code == 404
+    assert "old-value" not in r.text
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+
+
+@pytest.mark.asyncio
+async def test_oneshot_fires_the_honeytoken_alert(client, master_password, admin_token):
+    headers = await _create_then_seal(
+        client,
+        master_password,
+        admin_token,
+        name="decoy",
+        value="fake",
+        is_honey=True,
+    )
+    await client.post("/api/v1/vault/seal", headers=headers)
+    with patch("api.app.honey.alert_honey_access", new=AsyncMock()) as alert:
+        r = await client.post(
+            "/api/v1/vault/oneshot", json={"password": master_password, "name": "decoy"}
+        )
+    assert r.status_code == 200
+    alert.assert_awaited_once()
+    assert alert.await_args.kwargs["actor"] == "oneshot"
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+
+
+@pytest.mark.asyncio
+async def test_oneshot_queue_is_bounded():
+    release = asyncio.Event()
+
+    async def held(scope, receive, send):
+        await release.wait()
+
+    statuses = []
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            statuses.append(message["status"])
+
+    middleware = MaxConcurrencyMiddleware(held)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/vault/oneshot",
+        "headers": [],
+    }
+    running = [asyncio.create_task(middleware(scope, None, send)) for _ in range(8)]
+    await asyncio.sleep(0)
+    await middleware(scope, None, send)
+    assert statuses == [429]
+    release.set()
+    await asyncio.gather(*running)
+    assert middleware._argon2_inflight["/api/v1/vault/oneshot"] == 0

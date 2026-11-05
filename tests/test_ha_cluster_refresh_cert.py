@@ -23,7 +23,7 @@ import uuid as _uuid
 
 import pytest
 import pytest_asyncio
-from api.app import cluster_ca, cluster_membership
+from api.app import cluster_ca, cluster_membership, cluster_mtls
 from api.app import node_uuid as nu
 from api.app.config import settings
 from api.app.database import async_session
@@ -74,12 +74,19 @@ async def _fresh_cluster(tmp_path, monkeypatch, admin_token, client):
     hp_clear()
 
 
+_NODE_KEYS: dict[bytes, bytes] = {}
+
+
 async def _sign_node_cert(node_uuid: str, source_ip: str = "127.0.0.1"):
     async with async_session() as db:
         pair = await cluster_ca.load_cluster_ca(db)
     assert pair is not None
     ca_cert_pem, ca_key_pem = pair
-    return cluster_ca.sign_node_cert(ca_cert_pem, ca_key_pem, node_uuid, source_ip)
+    cert_pem, key_pem = cluster_ca.sign_node_cert(
+        ca_cert_pem, ca_key_pem, node_uuid, source_ip
+    )
+    _NODE_KEYS[cert_pem] = key_pem
+    return cert_pem, key_pem
 
 
 async def _insert_member(
@@ -109,8 +116,13 @@ async def _insert_member(
         await db.commit()
 
 
-def _hdr(cert_pem: bytes) -> dict:
+def _cert_only(cert_pem: bytes) -> dict:
     return {"X-Client-Cert": urllib.parse.quote(cert_pem.decode("ascii"))}
+
+
+def _hdr(cert_pem: bytes) -> dict:
+    proof = cluster_mtls.build_possession_proof(cert_pem, _NODE_KEYS[cert_pem])
+    return {**_cert_only(cert_pem), "X-Cluster-Proof": proof}
 
 
 @pytest.mark.asyncio
@@ -298,3 +310,49 @@ async def test_refresh_cert_sealed_vault_returns_503_or_500(
     finally:
         # Re-unseal so subsequent tests have a working vault.
         await client.post("/api/v1/vault/unseal", json={"password": master_password})
+
+
+@pytest.mark.asyncio
+async def test_refresh_cert_rejects_public_cert_without_proof(_fresh_cluster, client):
+    """The certificate is public: holding it must not yield a private key."""
+    node_uuid = str(_uuid.uuid4())
+    cert_pem, _key_pem = await _sign_node_cert(node_uuid)
+    await _insert_member(node_uuid, cert_pem)
+    r = await client.post(
+        "/api/v1/vault/cluster/refresh-cert", headers=_cert_only(cert_pem)
+    )
+    assert r.status_code == 401
+    assert "node_cert_key_pem" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_refresh_cert_rejects_proof_from_another_node(_fresh_cluster, client):
+    victim = str(_uuid.uuid4())
+    attacker = str(_uuid.uuid4())
+    victim_cert, _ = await _sign_node_cert(victim)
+    attacker_cert, attacker_key = await _sign_node_cert(attacker)
+    await _insert_member(victim, victim_cert)
+    proof = cluster_mtls.build_possession_proof(attacker_cert, attacker_key)
+    r = await client.post(
+        "/api/v1/vault/cluster/refresh-cert",
+        headers={**_cert_only(victim_cert), "X-Cluster-Proof": proof},
+    )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_cert_rejects_stale_and_malformed_proof(
+    _fresh_cluster, client, monkeypatch
+):
+    node_uuid = str(_uuid.uuid4())
+    cert_pem, key_pem = await _sign_node_cert(node_uuid)
+    await _insert_member(node_uuid, cert_pem)
+    with monkeypatch.context() as past:
+        past.setattr(cluster_mtls.time, "time", lambda: 1_000_000)
+        stale = cluster_mtls.build_possession_proof(cert_pem, key_pem)
+    for proof in (stale, "not-a-proof", "123.@@@", "."):
+        r = await client.post(
+            "/api/v1/vault/cluster/refresh-cert",
+            headers={**_cert_only(cert_pem), "X-Cluster-Proof": proof},
+        )
+        assert r.status_code == 401, proof

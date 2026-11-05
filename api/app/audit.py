@@ -23,6 +23,7 @@ in RHORIZON_AUDIT_DIR. Files are compressed (gzip) after 7 days
 and read-only. Admin can only delete files older than 30 days.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -40,10 +41,39 @@ from .audit_payload import (
 )
 from .config import settings
 from .key_epoch import get_key_epoch
-from .metrics import audit_sign_path, record_audit_event, seal_events
+from .metrics import (
+    audit_sign_path,
+    notification_undelivered,
+    record_audit_event,
+    seal_events,
+)
 from .vault_state import vault
 
 _log = logging.getLogger("rhorizon.audit")
+
+# Audit action -> notification event. `seal` is sent by the seal route, before
+# the keys that open channel credentials are gone.
+_ACTION_EVENTS = {
+    "unseal": "unseal",
+    "unseal_failed": "unseal_failed",
+    "namespace_rate_limit_exceeded": "rate_limit_triggered",
+    "rotate_password": "master_password_rotated",
+    "rotate_password_emergency": "master_password_rotated",
+    "create_token": "token_created",
+    "revoke_token": "token_revoked",
+    "delete_token": "token_revoked",
+    "create_secret": "secret_created",
+    "update_secret": "secret_updated",
+    "delete_secret": "secret_deleted",
+    "soft_delete_secret": "secret_deleted",
+    "shamir_init": "shamir_init",
+    "set_2fa_mode": "2fa_mode_changed",
+    "ldap_login": "ldap_login",
+}
+# Bursts of audited writes must not take over the connection pool.
+_MAX_PENDING_NOTIFICATIONS = 64
+_dispatch_slots = asyncio.Semaphore(4)
+_notification_tasks: set[asyncio.Task[None]] = set()
 
 _AUDIT_BUILD_ID = "34d23b63-2a67-4c01-a5f4-06726f59bf96"
 _BUF_G6BPFNY4GPDK = 4096
@@ -305,6 +335,13 @@ async def log_action(
 
     record_audit_event(action, success=True)
 
+    event = _ACTION_EVENTS.get(action)
+    if event:
+        notify_event(
+            event,
+            f"action={action} actor={actor}" + (f" target={target}" if target else ""),
+        )
+
     if critical:
         # Fire-and-forget background dispatch : opens its own DB
         # session so it survives the calling request's transaction
@@ -439,7 +476,7 @@ async def log_mcp_action(
     )
 
 
-async def _dispatch_critical_event(message: str) -> None:
+async def _dispatch_critical_event(message: str, event: str = "critical") -> None:
     """Open a fresh session for the bg notification dispatch so it survives the
     calling request's transaction lifecycle. Swallows all exceptions: /audit
     emission is the trail of record; a missed Matrix/email is recoverable from
@@ -449,12 +486,31 @@ async def _dispatch_critical_event(message: str) -> None:
         from .database import async_session
         from .routes.notifications import dispatch_event
 
-        async with async_session() as bg_db:
-            await dispatch_event(bg_db, "critical", message)
+        async with _dispatch_slots, async_session() as bg_db:
+            await dispatch_event(bg_db, event, message)
     except Exception:
         _log.warning(
-            "critical notification dispatch failed for: %s", message, exc_info=True
+            "notification dispatch failed: event=%s: %s",
+            event,
+            message,
+            exc_info=True,
         )
+
+
+def notify_event(event: str, message: str) -> asyncio.Task | None:
+    """Schedule a notification off the request path. Never raises."""
+    if len(_notification_tasks) >= _MAX_PENDING_NOTIFICATIONS:
+        notification_undelivered.labels(event=event).inc()
+        _log.warning("notification dropped, queue full: event=%s", event)
+        return None
+    try:
+        task = asyncio.create_task(_dispatch_critical_event(message, event))
+    except RuntimeError:
+        _log.warning("notification could not be scheduled: event=%s", event)
+        return None
+    _notification_tasks.add(task)
+    task.add_done_callback(_notification_tasks.discard)
+    return task
 
 
 def record_seal(trigger: str, *, notify: bool = True) -> None:

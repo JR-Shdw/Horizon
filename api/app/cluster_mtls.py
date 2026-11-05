@@ -38,16 +38,28 @@ presented. So the in-process checks here are the PRIMARY authentication,
 not defence in depth: the cluster-CA signature plus the clientAuth /
 CA:FALSE constraints below are what actually authenticate a member. The
 peer-IP gate only limits who may submit the header, never who is trusted.
+
+A certificate is public, so nginx must never forward a client-supplied header:
+every listener either sets it from the TLS handshake or clears it. Routes that
+issue keys also use :func:`require_cluster_member_proof`, which checks a
+signature made with the node key.
 """
 
+import base64
 import ipaddress
 import logging
+import time
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +71,9 @@ from .vault_state import VaultSealedError, vault
 log = logging.getLogger("rhorizon.cluster_mtls")
 
 _HEADER = "X-Client-Cert"
+_PROOF_HEADER = "X-Cluster-Proof"
+_PROOF_DOMAIN = b"rhorizon-cluster-refresh-cert-v1"
+_PROOF_MAX_SKEW_SECS = 300
 # Skew tolerance on either side of the cert validity window. 5 min
 # matches the slack the CA itself takes when minting (see
 # :func:`cluster_ca.sign_node_cert` ``not_valid_before`` clause).
@@ -78,10 +93,19 @@ class ClusterMemberIdentity:
     node_uuid: str
     cert_fingerprint: str
     source_ip: str
+    public_key: object = None
 
 
 class ClusterMtlsError(HTTPException):
     """Common base -- subclasses pin the HTTP status code."""
+
+
+class MtlsProofError(ClusterMtlsError):
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=401,
+            detail="valid X-Cluster-Proof header is required for this endpoint",
+        )
 
 
 class MtlsUntrustedProxyError(ClusterMtlsError):
@@ -358,6 +382,7 @@ async def authenticate(request: Request, db: AsyncSession) -> ClusterMemberIdent
         node_uuid=node_uuid,
         cert_fingerprint=fingerprint,
         source_ip=source_ip,
+        public_key=client_cert.public_key(),
     )
 
 
@@ -370,6 +395,62 @@ def serialization_encoding():
     from cryptography.hazmat.primitives.serialization import Encoding
 
     return Encoding.PEM
+
+
+def _proof_message(node_uuid: str, fingerprint: str, timestamp: int) -> bytes:
+    return b"\n".join(
+        (
+            _PROOF_DOMAIN,
+            node_uuid.encode(),
+            fingerprint.encode(),
+            str(timestamp).encode(),
+        )
+    )
+
+
+def build_possession_proof(cert_pem: bytes, key_pem: bytes) -> str:
+    """Sign the X-Cluster-Proof value with the node's private key."""
+    cert = x509.load_pem_x509_certificate(cert_pem)
+    key = load_pem_private_key(key_pem, password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError("cluster node key must be Ed25519")
+    timestamp = int(time.time())
+    fingerprint = cluster_ca.compute_fingerprint(
+        cert.public_bytes(serialization_encoding())
+    )
+    signature = key.sign(_proof_message(_extract_cn(cert), fingerprint, timestamp))
+    return f"{timestamp}.{base64.urlsafe_b64encode(signature).decode('ascii')}"
+
+
+def verify_possession_proof(
+    header: str | None, identity: ClusterMemberIdentity
+) -> None:
+    """Prove the caller holds the key: the certificate alone is public."""
+    if not header or not isinstance(identity.public_key, Ed25519PublicKey):
+        raise MtlsProofError()
+    raw_time, _, raw_signature = header.partition(".")
+    try:
+        timestamp = int(raw_time)
+        signature = base64.urlsafe_b64decode(raw_signature.encode("ascii"))
+    except ValueError as exc:
+        raise MtlsProofError() from exc
+    if abs(time.time() - timestamp) > _PROOF_MAX_SKEW_SECS:
+        raise MtlsProofError()
+    message = _proof_message(identity.node_uuid, identity.cert_fingerprint, timestamp)
+    try:
+        identity.public_key.verify(signature, message)
+    except InvalidSignature as exc:
+        raise MtlsProofError() from exc
+
+
+async def require_cluster_member_proof(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ClusterMemberIdentity:
+    """Member identity plus proof of key possession, for key-issuing routes."""
+    identity = await authenticate(request, db)
+    verify_possession_proof(request.headers.get(_PROOF_HEADER), identity)
+    return identity
 
 
 async def require_cluster_member_cert(

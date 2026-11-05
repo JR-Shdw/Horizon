@@ -28,7 +28,7 @@ traceability, not for triage.
 | low | Python heap residual: plaintext secret on create/update | **accepted** | Immutable `str`/`bytes` from the request body cannot be zeroed in CPython. A boundary limitation of any JSON-over-HTTP secrets API, symmetric on reads |
 | info | 6 architectural notes (audit-chain race, audit file/DB divergence, `creation_sql` templates, `require_permission` coupling, wire-format ceilings) | **accepted** | See the 2026-04-29 sections |
 
-**No finding is open.** The last one, a low-severity defence-in-depth item, was closed in `e607483`.
+Findings from the 2026-11-04 review are tracked in the changelog as they ship. Its scope was targeted: it did not cover Rust `unsafe` code or the cryptography.
 
 ## Follow-up (2026-07-07)
 

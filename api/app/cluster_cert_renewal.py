@@ -41,7 +41,7 @@ from pathlib import Path
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import cluster_ca, cluster_cert, cluster_tls, nginx_reload
+from . import cluster_ca, cluster_cert, cluster_mtls, cluster_tls, nginx_reload
 from . import metrics as _metrics
 from .config import settings
 from .database import async_session
@@ -132,10 +132,14 @@ async def _post_refresh(
     # mTLS client cert via an explicit SSLContext (httpx deprecated `cert=`).
     # Server verification stays at the default system trust store; pinning the
     # primary to the cluster CA would be deployment policy, not done here.
+    pair = cluster_cert.load_cluster_cert(cert_path, key_path)
+    if pair is None:
+        raise RuntimeError("cluster cert or key missing on disk")
+    headers = {"X-Cluster-Proof": cluster_mtls.build_possession_proof(*pair)}
     ctx = cluster_tls.server_context(client_cert=cert_path, client_key=key_path)
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, verify=ctx) as client:
         try:
-            r = await client.post(url, json={})
+            r = await client.post(url, json={}, headers=headers)
         except httpx.HTTPError as exc:
             raise RuntimeError(f"refresh-cert transport error: {exc}") from exc
     if r.status_code != 200:

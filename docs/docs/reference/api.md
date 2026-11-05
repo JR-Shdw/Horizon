@@ -226,10 +226,93 @@ that job succeeds. Only one export runs cluster-wide at a time.
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | POST | `/notifications/` | admin:w | Create (Matrix, webhook, email) |
-| GET | `/notifications/` | admin:r | List |
+| GET | `/notifications/` | admin:r | List, with delivery status |
 | PUT | `/notifications/{id}` | admin:w | Update |
 | DELETE | `/notifications/{id}` | admin:w | Remove |
 | POST | `/notifications/{id}/test` | admin:w | Emit a test message |
+
+Each listed channel carries its delivery state:
+
+```json
+{
+  "name": "ops-mail",
+  "status": "failing",
+  "consecutive_failures": 3,
+  "last_error": "TLS certificate of mail.example.com:587 was rejected: self-signed certificate",
+  "last_failure_at": "2026-11-04T08:12:03+00:00",
+  "last_success_at": "2026-11-01T22:40:11+00:00"
+}
+```
+
+`status` is `ok`, `failing` or `untested`. A failed test answers HTTP 502 with
+the same message in `detail`. Changing a channel's `config` clears its failure
+state.
+
+`token`, `password`, `smtp_password`, `url` and `headers` are encrypted at rest
+and never returned; `has_secrets` shows whether a channel holds any. When
+updating `config`, a secret left out or sent as `********` keeps its value, and
+`null` removes it:
+
+```json
+{"config": {"homeserver": "https://matrix.example.com", "room_id": "!new:example.com"}}
+```
+
+| Event | Sent when |
+|---|---|
+| `critical`, `chain_broken` | Always, to every enabled channel |
+| `honey_access` | A decoy is used |
+| `seal` | Just before a manual seal |
+| `unseal`, `unseal_failed` | Unseal succeeds or fails |
+| `master_password_rotated`, `shamir_init`, `2fa_mode_changed` | Vault settings change |
+| `token_created`, `token_revoked` | Token lifecycle |
+| `secret_created`, `secret_updated`, `secret_deleted` | Secret lifecycle |
+| `rate_limit_triggered`, `ldap_login` | Rate limit reached, LDAP login |
+| `notification_channel_failed` | Another channel just started failing |
+
+Channels reach public addresses by default. To alert through a relay on the
+same host or the internal network, list it in the API's environment, then turn
+TLS off on the channel:
+
+```bash
+RH_NOTIFY_INTERNAL_ALLOW=127.0.0.1:25,192.168.10.1:8008
+```
+
+```json
+{
+  "name": "local-mail",
+  "channel_type": "email",
+  "config": {
+    "smtp_host": "127.0.0.1",
+    "smtp_port": 25,
+    "smtp_use_ssl": false,
+    "smtp_use_starttls": false,
+    "from": "vault@example.com",
+    "to": ["ops@example.com"]
+  }
+}
+```
+
+```json
+{
+  "name": "local-matrix",
+  "channel_type": "matrix",
+  "config": {
+    "homeserver": "http://192.168.10.1:8008",
+    "room_id": "!room:example.com",
+    "token": "syt_BOT_TOKEN"
+  }
+}
+```
+
+In a container or a pod, `127.0.0.1` is the API container itself. Use an address
+the container can reach, and list that one. A relay without a login also keeps
+delivering while the vault is sealed.
+
+A sealed vault cannot open encrypted credentials, so it only delivers to
+channels with `has_secrets: false`, such as an SMTP relay without a login.
+Skipped channels are logged, and an event that reaches nothing counts in
+`rhorizon_notification_undelivered_total`. Watch `rhorizon_vault_sealed` for
+seals you did not start.
 
 ## Backup / restore
 

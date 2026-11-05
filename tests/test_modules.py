@@ -232,7 +232,8 @@ async def test_notification_mask_secrets(client, master_password, admin_token):
 
     r = await client.get("/api/v1/vault/notifications/", headers=headers)
     ch = next(c for c in r.json()["items"] if c["name"] == "matrix-mask")
-    assert ch["config"]["token"] == "********"
+    assert "token" not in ch["config"]
+    assert ch["has_secrets"] is True
     assert ch["config"]["homeserver"] == "https://matrix.example.com"
 
     # Cleanup

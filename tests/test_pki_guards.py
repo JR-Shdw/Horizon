@@ -91,3 +91,11 @@ async def test_set_pki_ca_wipes_mutable_blob_on_wrap_error(monkeypatch):
         )
 
     assert key_blob == bytearray(len(key_blob))
+
+
+def test_empty_namespace_claim_stays_a_restriction():
+    from api.app.routes.pki import _allowed_namespaces
+
+    assert _allowed_namespaces({"permissions": {"namespaces": []}}) == []
+    assert _allowed_namespaces({"permissions": {"namespaces": ["a"]}}) == ["a"]
+    assert _allowed_namespaces({"permissions": {}}) is None

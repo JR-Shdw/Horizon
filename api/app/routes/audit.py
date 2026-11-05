@@ -797,7 +797,8 @@ async def verify_chain(
 
                         await _dispatch_critical_event(
                             f"[critical] audit chain broken at #{i} id={r.id} "
-                            f"ts={r.timestamp.isoformat()}"
+                            f"ts={r.timestamp.isoformat()}",
+                            event="chain_broken",
                         )
                     except Exception:
                         pass
@@ -859,7 +860,8 @@ async def verify_chain(
             await _dispatch_critical_event(
                 "[critical] audit-lite Merkle checkpoint broken "
                 f"id={lite_status.get('audit_lite_broken_checkpoint_id')} "
-                f"reason={lite_status.get('audit_lite_broken_reason')}"
+                f"reason={lite_status.get('audit_lite_broken_reason')}",
+                event="chain_broken",
             )
         except Exception:
             pass
@@ -895,7 +897,8 @@ async def verify_chain(
 
             await _dispatch_critical_event(
                 "[critical] audit archive seal broken: "
-                f"{archive_status.get('archive_problems')}"
+                f"{archive_status.get('archive_problems')}",
+                event="chain_broken",
             )
         except Exception:
             pass
@@ -1808,7 +1811,8 @@ async def verify_mcp_chain(
 
                 await _dispatch_critical_event(
                     f"[critical] MCP audit chain broken at #{i} id={r.id} "
-                    f"ts={r.timestamp.isoformat()}"
+                    f"ts={r.timestamp.isoformat()}",
+                    event="chain_broken",
                 )
             except Exception:
                 pass

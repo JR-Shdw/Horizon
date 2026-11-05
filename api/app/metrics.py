@@ -299,6 +299,16 @@ audit_lite_uncheckpointed = Gauge(
 # `kind` distinguishes a honey *secret* (decoy in vault_secrets) from
 # a honey *token* (decoy in vault_tokens) so the responder knows which
 # tripwire fired.
+notification_failures = Counter(
+    "rhorizon_notification_failures_total",
+    "Notification deliveries that failed, per channel type and cause",
+    ["channel_type", "reason"],
+)
+notification_undelivered = Counter(
+    "rhorizon_notification_undelivered_total",
+    "Events that reached no channel: every channel tried has failed",
+    ["event"],
+)
 honey_access = Counter(
     "rhorizon_honey_access_total",
     "Honeytoken trips - a real attacker / automation has read a decoy. "

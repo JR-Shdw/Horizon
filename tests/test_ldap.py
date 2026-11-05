@@ -306,3 +306,15 @@ async def test_ldap_login_admin_group(client, master_password, admin_token):
         await db.execute(text("DELETE FROM vault_config WHERE key = 'ldap_config'"))
         await db.execute(text("DELETE FROM vault_tokens WHERE name = 'ldap:admin'"))
         await db.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [{"username": "alice", "password": ""}, {"username": "", "password": "x"}],
+)
+async def test_ldap_login_rejects_empty_credentials(client, master_password, payload):
+    """An empty password is an unauthenticated bind: never reach the directory."""
+    await client.post("/api/v1/vault/unseal", json={"password": master_password})
+    r = await client.post("/api/v1/vault/auth/ldap", json=payload)
+    assert r.status_code == 422

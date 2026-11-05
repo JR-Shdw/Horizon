@@ -1657,6 +1657,21 @@ async def lifespan(app: FastAPI):
             "or cluster HA is enabled"
         )
 
+    if settings.notify_internal_allow:
+        log.warning(
+            "Notification channels may reach these internal relays, and send "
+            "credentials to them without TLS: %s",
+            settings.notify_internal_allow,
+        )
+
+    from .database import unverified_remote_tls as _unverified_db
+
+    if _unverified_db():
+        log.warning(
+            "database_ssl=require does not verify the PostgreSQL certificate; "
+            "use verify-full with database_ca_cert for a database on another host"
+        )
+
     # Any trusted proxy can supply the client IP used by token ACLs, rate
     # limiting and audit. Wide ranges remain supported for dedicated cloud-LB
     # subnets, but always surface their enlarged trust boundary.
@@ -1950,8 +1965,12 @@ _ADMISSION_PROBE_EXEMPT = (
     "/readiness",
     "/metrics",
 )
-_UNSEAL_PATH = "/api/v1/vault/unseal"
-_UNSEAL_CONCURRENCY_CAP = 1
+# Both run Argon2id before any authentication. Oneshot allows parallel CI
+# runners, but its queue must stay bounded.
+_ARGON2_CONCURRENCY_CAPS = {
+    "/api/v1/vault/unseal": 1,
+    "/api/v1/vault/oneshot": 8,
+}
 
 
 def _retry_after(base: int = 1, spread: int = 2) -> str:
@@ -2018,7 +2037,7 @@ class MaxConcurrencyMiddleware:
     def __init__(self, app):
         self.app = app
         self._inflight = 0
-        self._unseal_inflight = 0
+        self._argon2_inflight = dict.fromkeys(_ARGON2_CONCURRENCY_CAPS, 0)
 
     async def __call__(self, scope, receive, send):
         cap = settings.max_concurrent_requests
@@ -2030,20 +2049,20 @@ class MaxConcurrencyMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if path == _UNSEAL_PATH and scope.get("method") == "POST":
-            if self._unseal_inflight >= _UNSEAL_CONCURRENCY_CAP:
+        if path in _ARGON2_CONCURRENCY_CAPS and scope.get("method") == "POST":
+            if self._argon2_inflight[path] >= _ARGON2_CONCURRENCY_CAPS[path]:
                 _metrics.requests_shed.labels(reason="unseal_concurrency_limit").inc()
                 await _load_shed_response("unseal_concurrency_limit")(
                     scope, receive, send
                 )
                 return
-            self._unseal_inflight += 1
+            self._argon2_inflight[path] += 1
             _metrics.requests_inflight.inc()
             _metrics.requests_by_transport.labels(transport=_req_transport(scope)).inc()
             try:
                 await self.app(scope, receive, send)
             finally:
-                self._unseal_inflight -= 1
+                self._argon2_inflight[path] -= 1
                 _metrics.requests_inflight.dec()
             return
 

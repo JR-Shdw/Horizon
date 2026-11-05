@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import log_action
-from ..auth import actor_display_name, require_permission
+from ..auth import actor_display_name, merge_group_permissions, require_permission
 from ..client_ip import get_client_ip
 from ..crypto import (
     decrypt_secret,
@@ -68,8 +68,9 @@ def _build_group_filter(template: str, user_dn: str) -> str:
 
 
 class LdapLoginRequest(BaseModel):
-    username: str = Field(..., max_length=256)
-    password: SecretStr = Field(..., max_length=8192)
+    username: str = Field(..., min_length=1, max_length=256)
+    # An empty password is an unauthenticated bind, which directories may accept.
+    password: SecretStr = Field(..., min_length=1, max_length=8192)
 
 
 class LdapConfigUpdate(BaseModel):
@@ -166,6 +167,8 @@ async def _ldap_authenticate(
         raise HTTPException(502, "LDAP server unreachable")
 
     # Step 2: bind as user -> verify password + get groups
+    if not password:
+        raise HTTPException(401, "Invalid credentials")
     user_client = bonsai.LDAPClient(config["url"])
     user_client.set_credentials("SIMPLE", user=user_dn, password=password)
     if not config.get("tls_verify", True):
@@ -198,16 +201,7 @@ async def _ldap_authenticate(
 
 def _resolve_permissions(groups: list[str], mappings: dict) -> dict:
     """Merge permissions from all matching groups."""
-    merged: dict = {}
-    for group in groups:
-        perms = mappings.get(group, {})
-        for scope, mode in perms.items():
-            if scope == "namespaces":
-                existing = merged.get("namespaces", [])
-                merged["namespaces"] = list(set(existing + mode))
-            elif scope not in merged or mode == "rw":
-                merged[scope] = mode
-    return merged
+    return merge_group_permissions([mappings[g] for g in groups if mappings.get(g)])
 
 
 @router.post("/ldap")

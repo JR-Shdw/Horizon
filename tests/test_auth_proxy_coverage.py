@@ -36,7 +36,8 @@ def test_merge_permissions_namespaces_union():
         "g2": {"secrets": "rw", "namespaces": ["staging", "dev"]},
     }
     out = _merge_permissions(["g1", "g2"], mappings)
-    assert out["secrets"] == "rw"  # strongest wins
+    # Write was never granted on prod, so it cannot apply to this token.
+    assert out["secrets"] == "r"
     assert out["namespaces"] == ["dev", "prod", "staging"]  # union + tri
 
 
@@ -221,3 +222,47 @@ async def test_put_proxy_mappings(client, master_password, admin_token):
             text("DELETE FROM vault_config WHERE key = 'proxy_group_mappings'")
         )
         await db.commit()
+
+
+@pytest.mark.parametrize(
+    "grants,expected",
+    [
+        # Disjoint scopes never spread to the other group's namespace.
+        (
+            [
+                {"secrets": "rw", "namespaces": ["a"]},
+                {"audit": "r", "namespaces": ["b"]},
+            ],
+            {},
+        ),
+        # Together the groups cover both namespaces for read, not for write.
+        (
+            [
+                {"secrets": "rw", "namespaces": ["a"]},
+                {"secrets": "r", "namespaces": ["b"]},
+            ],
+            {"secrets": "r", "namespaces": ["a", "b"]},
+        ),
+        # Same namespaces: scopes combine.
+        (
+            [
+                {"secrets": "r", "namespaces": ["a"]},
+                {"secrets": "w", "audit": "r", "namespaces": ["a"]},
+            ],
+            {"secrets": "rw", "audit": "r", "namespaces": ["a"]},
+        ),
+        # An unrestricted grant covers any namespace on the token.
+        (
+            [{"audit": "r"}, {"secrets": "r", "namespaces": ["a"]}],
+            {"audit": "r", "secrets": "r", "namespaces": ["a"]},
+        ),
+        # No namespaces anywhere stays unrestricted.
+        ([{"secrets": "r"}, {"audit": "r"}], {"audit": "r", "secrets": "r"}),
+        # Invalid modes grant nothing.
+        ([{"secrets": "admin", "namespaces": ["a"]}], {}),
+    ],
+)
+def test_merge_group_permissions_never_exceeds_a_group(grants, expected):
+    from api.app.auth import merge_group_permissions
+
+    assert merge_group_permissions(grants) == expected

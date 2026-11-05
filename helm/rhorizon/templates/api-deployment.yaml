@@ -87,6 +87,8 @@ spec:
               value: "false"
             - name: RH_PROXY_TRUSTED_IPS
               value: {{ .Values.api.proxyTrustedIps | quote }}
+            - name: RH_NOTIFY_INTERNAL_ALLOW
+              value: {{ .Values.api.notifyInternalAllow | quote }}
             {{- if .Values.api.clusterEnabled }}
             - name: RH_CLUSTER_ADVERTISE_IP
               valueFrom:

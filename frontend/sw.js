@@ -10,7 +10,7 @@
 // the moment the user loads the page after a deploy.
 //
 // Convention : bump on every release that touches frontend/.
-const CACHE = 'rhorizon-v33';
+const CACHE = 'rhorizon-v35';
 const SHELL = [
   '/',
   '/index.html',

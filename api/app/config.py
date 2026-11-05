@@ -17,6 +17,35 @@ def _default_dynamic_modules_file() -> str:
     return "/app/dynamic-engines.ini"
 
 
+def parse_notify_internal_allow(
+    value: str,
+) -> tuple[tuple[ipaddress.IPv4Network, int | None], ...]:
+    """Parse `ip`, `cidr`, `ip:port` or `cidr:port` entries, comma-separated.
+
+    Only private and loopback ranges: public hosts need no entry, and link-local
+    holds the cloud metadata services.
+    """
+    entries = []
+    for raw in value.split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        address, separator, port_text = entry.partition(":")
+        try:
+            network = ipaddress.IPv4Network(address, strict=False)
+            port = int(port_text) if separator else None
+        except ValueError as exc:
+            raise ValueError(f"invalid notify_internal_allow: {entry}") from exc
+        if port is not None and not 0 < port < 65536:
+            raise ValueError(f"invalid notify_internal_allow port: {entry}")
+        if network.is_link_local or not (network.is_private or network.is_loopback):
+            raise ValueError(f"notify_internal_allow must be internal: {entry}")
+        if network.is_unspecified:
+            raise ValueError(f"notify_internal_allow must be internal: {entry}")
+        entries.append((network, port))
+    return tuple(entries)
+
+
 class Settings(BaseSettings):
     # PostgreSQL
     database_url: str = "postgresql+asyncpg://rhorizon:rhorizon@postgres:5432/rhorizon"
@@ -26,12 +55,12 @@ class Settings(BaseSettings):
     #   require      : encrypt, no cert verify -- same-host / loopback only.
     #   verify-full  : encrypt + verify against database_ca_cert (empty path ->
     #                  system trust store). Shipped compose pins a per-instance cert.
-    database_ssl: str = "require"
+    database_ssl: str = "verify-full"
     database_ca_cert: str = ""  # CA/cert bundle pinned under verify-full
 
     # Vault
     auto_seal_minutes: int = 0  # 0 = never auto-seal
-    version: str = "0.9.5-beta"
+    version: str = "0.9.6-beta"
     # Closed-catalog dynamic backend selection. This resolves to the repository
     # root in source and /app in the image, independent of process cwd.
     dynamic_modules_file: str = _default_dynamic_modules_file()
@@ -488,6 +517,10 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_allowed_cidrs: str = "127.0.0.1/32"
 
+    # Internal relays notification channels may reach, and send credentials to
+    # without TLS. Deployment setting on purpose: an admin token cannot widen it.
+    notify_internal_allow: str = ""
+
     # GET /audit/verify while SEALED: bearer auth is impossible when sealed (the
     # hmac_key is gone), but the ed25519-signed portion of the chain can still be
     # verified with public keys. To allow that without a token, the caller must
@@ -529,7 +562,7 @@ class Settings(BaseSettings):
             "0": "disable",
             "no": "disable",
             "off": "disable",
-            "": "require",
+            "": "verify-full",
         }.get(s, s)
         if s not in {"disable", "require", "verify-full"}:
             raise ValueError(
@@ -555,6 +588,12 @@ class Settings(BaseSettings):
                 ipaddress.ip_network(entry, strict=False)
             except ValueError as exc:
                 raise ValueError(f"invalid trusted proxy IP/network: {entry}") from exc
+        return value
+
+    @field_validator("notify_internal_allow")
+    @classmethod
+    def validate_notify_internal_allow(cls, value: str) -> str:
+        parse_notify_internal_allow(value)
         return value
 
     @field_validator("memory_lock_mode", mode="before")

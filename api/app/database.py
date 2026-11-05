@@ -4,6 +4,7 @@ import os
 import socket
 import ssl as _ssl
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -33,6 +34,15 @@ def _pg_ssl_context():
 # application_name "rhorizon:{host}" lets /cluster join pg_locks with
 # pg_stat_activity to identify which host holds an advisory lock.
 _HOSTNAME = os.environ.get("HOSTNAME") or socket.gethostname() or "default"
+
+
+def unverified_remote_tls() -> bool:
+    """True when `require` is used for a database off this host."""
+    if settings.database_ssl != "require":
+        return False
+    host = make_url(settings.database_url).host or ""
+    return host not in {"", "localhost", "127.0.0.1", "::1"}
+
 
 _connect_args = {"ssl": _pg_ssl_context()} if settings.database_ssl != "disable" else {}
 # asyncpg honors `server_settings` to set per-connection PG GUCs at startup.

@@ -24,7 +24,7 @@ Any setting `foo_bar` is set as `RH_FOO_BAR`.
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `RH_DATABASE_URL` | `postgresql+asyncpg://rhorizon:rhorizon@postgres:5432/rhorizon` | asyncpg DSN (host `postgres` = the compose service name) |
-| `RH_DATABASE_SSL` | `require` | PG TLS mode, 3-state: `disable` (plaintext, same-host only), `require` (encrypt, no cert verify), `verify-full` (encrypt + verify against `RH_DATABASE_CA_CERT`). Legacy booleans are coerced: `true`->`require`, `false`->`disable` |
+| `RH_DATABASE_SSL` | `verify-full` | PG TLS mode, 3-state: `disable` (plaintext, same-host only), `require` (encrypt, no cert verify), `verify-full` (encrypt + verify against `RH_DATABASE_CA_CERT`). Legacy booleans are coerced: `true`->`require`, `false`->`disable` |
 | `RH_DATABASE_CA_CERT` | `""` | CA/cert bundle pinned under `verify-full`; empty = system trust store |
 | `RH_WORKERS` | `5` | Public API workers. In `embedded` custody, `1` is the single-worker path and `2`-`4` are floored to 5. In `separated` custody, any value from 1 to 255 is valid. |
 | `RH_CUSTODY_MODE` | `embedded` | `embedded` keeps the compatibility worker model. `separated` starts a fixed UDS-only custodian quorum beside the disposable API pool. Container launcher only in this release. |
@@ -65,6 +65,7 @@ Any setting `foo_bar` is set as `RH_FOO_BAR`.
 | `RH_AUTHFAIL_LOG` | `/var/log/rhorizon/authfail.log` | fail2ban-ready log |
 | `RH_XFF_TRUSTED_IPS` | loopback, RFC 1918 and IPv6 ULA | Proxies allowed to supply `X-Forwarded-For`; does not authorize identity headers |
 | `RH_PROXY_TRUSTED_IPS` | `""` | SSO/mTLS identity proxy CIDRs; required when proxy auth or cluster HA is enabled |
+| `RH_NOTIFY_INTERNAL_ALLOW` | `""` | Internal relays notification channels may reach, as `ip`, `cidr`, `ip:port` or `cidr:port` |
 | `RH_CLUSTER_IDENTITY_PERSISTENT` | `false` | Deployment declaration checked by HA preflight; set only when `/var/lib/rhorizon` survives replacement |
 | `RH_CLUSTER_FROZEN_MAX_SECS` | `30` | Non-serving FROZEN grace before an isolated HA node seals and drops keys; use 45-60s same-region or 90-120s multi-region |
 | `RH_HA_SERVER_CA_FILE` | `""` | Optional private/self-signed CA or leaf pin for outbound HA HTTPS calls; empty uses system trust |

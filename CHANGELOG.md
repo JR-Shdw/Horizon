@@ -6,15 +6,34 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+## 0.9.6-beta - 2026-11-04
+
 ### Added
 
 - Add `tools/rhorizon-git`, a single-file tool that links a repository remote
   to a token in a chosen vault, with interactive and unattended modes.
 - Add `tools/rhorizon-tls`, which creates a private vault certificate from a
   constrained one-time CA and trusts it in the system and browser stores.
+- Show notification delivery status in Pulsar and on the dashboard, and report
+  the exact cause of a failed Matrix, email or webhook delivery in the API log
+  and the Test button. When a channel breaks, the other enabled channels are
+  told. Add `rhorizon_notification_failures_total` and
+  `rhorizon_notification_undelivered_total`.
+- Add `RH_NOTIFY_INTERNAL_ALLOW`, so notification channels can use a relay on
+  the same host or internal network, without TLS if needed.
+- Send every subscribable notification event. Only `honey_access` and
+  `critical` were sent before. `critical` and `chain_broken` now reach every
+  enabled channel, and `seal` leaves just before the vault seals.
 
 ### Security
 
+- Encrypt notification channel credentials at rest with the same envelope as
+  secrets. Existing channels convert after the next unseal. A sealed vault now
+  only delivers to channels without credentials. Upgrade HA nodes together, and
+  rotate Matrix tokens, SMTP passwords and webhook URLs afterwards: earlier
+  database dumps hold them in clear.
+- Stop returning SMTP passwords, webhook URLs and webhook headers from the
+  channel list.
 - Prevent namespace-scoped tokens from escaping their scope through a child
   with `namespaces: []`. Empty claims now remain restricted during delegation,
   token management and listing, and token introspection. Reverse-proxy SSO
@@ -35,8 +54,32 @@ cadence; things ship when they're ready.
   the September 2026 scan. A failed runtime package installation now fails
   the image build instead of being hidden by cleanup commands.
 
+### Changed
+
+- `RH_DATABASE_SSL` now defaults to `verify-full`, matching the Compose default.
+  Set `require` explicitly to keep encrypted but unverified PostgreSQL TLS. The
+  API logs a warning when `require` is used for a database on another host.
+- `POST /cluster/refresh-cert` requires an `X-Cluster-Proof` signature made with
+  the node key. Upgrade all cluster nodes together: a node on an older version
+  cannot renew its certificate until it is upgraded.
+
 ### Fixed
 
+- Clear `X-Client-Cert` on every frontend listener that does not set it, and
+  request client certificates in the Helm proxy-mode TLS listener when
+  application HA is enabled, so node certificate renewal works in that mode.
+- Reject empty LDAP usernames and passwords.
+- Keep an empty namespace claim as a restriction in the PKI list views.
+- Merge LDAP and SSO groups so a mode only applies to namespaces its groups
+  cover. A user in groups with different namespaces can get fewer permissions
+  than before: a mode not granted across all of them is dropped.
+- `/oneshot` no longer reads soft-deleted secrets, fires honeytoken alerts, and
+  caps concurrent requests.
+- Validate notification destinations at connect time, so a name cannot rebind
+  to an internal address. Webhook and Matrix delivery now ignore proxy
+  environment variables.
+- Create `rhorizon-tls` key files with their final mode.
+- Verify SMTP server certificates, and refuse SMTP credentials without TLS.
 - Run the Kubernetes HA live preflight through the API Pod with bounded
   retries, and report its HTTP status and body when it gets no answer.
 - Keep the Kubernetes HA smoke test from aborting with SIGPIPE while selecting

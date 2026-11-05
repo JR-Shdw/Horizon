@@ -10,6 +10,7 @@ Project: Resurgamus Horizon - self-hosted secrets vault.
 License: AGPL-3.0-or-later - closed-source relicensing prohibited.
 """
 
+import asyncio
 import hmac as _hmac
 import os
 from typing import Protocol
@@ -27,7 +28,7 @@ from rhorizon_crypto import shamir_split_bytes as shamir_split
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..audit import log_action
+from ..audit import log_action, notify_event
 from ..audit_keyring import rotate_audit_keyring
 from ..auth import actor_display_name, require_permission
 from ..authfail import log_authfail
@@ -59,6 +60,7 @@ from ..vault_state import vault
 CHALLENGE_TTL = 60  # seconds
 CHALLENGE_BYTES = 32
 _TWO_FACTOR_CONFIG_LOCK = "rhorizon:cluster:2fa_config"
+_SEAL_ALERT_WAIT_SECONDS = 2
 
 
 def _encrypt_2fa(plaintext: bytes | bytearray, aesgcm: AESGCM | DekCipher) -> str:
@@ -1780,6 +1782,12 @@ async def seal(
         ip_address=get_client_ip(request),
     )
     await db.commit()
+
+    # Channel credentials are unreadable once sealed, so alert first. Bounded:
+    # a slow channel must not hold up an emergency seal.
+    alert = notify_event("seal", f"action=seal actor={actor_display_name(token_info)}")
+    if alert:
+        await asyncio.wait({alert}, timeout=_SEAL_ALERT_WAIT_SECONDS)
 
     from .. import metrics as _m
     from ..custody import is_rust_custody_api

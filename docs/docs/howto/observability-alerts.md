@@ -29,6 +29,23 @@ not hours.**
                   could have read alongside the honey."
 ```
 
+### `NotificationUndelivered`
+An event reached no channel, so nobody was told about it. Read the API log for
+`Alert not delivered`, then the `Notification failed` lines just before it.
+
+```yaml
+- alert: NotificationUndelivered
+  expr: increase(rhorizon_notification_undelivered_total[5m]) > 0
+  for: 0s
+  labels:
+    severity: critical
+    team: security
+  annotations:
+    summary: "rhorizon event {{ $labels.event }} reached no channel"
+    description: "Every notification channel failed. Open Pulsar to see the
+                  cause per channel, fix it, then use Test."
+```
+
 ### `MasterPasswordRotated`
 Every master-password rotation must have a ticket / a sec_ops incident report.
 Without one: signal of compromise.
@@ -168,6 +185,31 @@ A service calls the API while the vault is sealed. Either broken automation
 ---
 
 ## Capacity - page the next morning
+
+### `NotificationChannelFailing`
+One channel failed. Others may still deliver, and they receive a
+`notification_channel_failed` message the first time this happens.
+
+```yaml
+- alert: NotificationChannelFailing
+  expr: increase(rhorizon_notification_failures_total[1h]) > 0
+  labels:
+    severity: warning
+  annotations:
+    summary: "{{ $labels.channel_type }} notifications failing: {{ $labels.reason }}"
+    description: "Open Pulsar for the exact error, fix it, then use Test."
+```
+
+| `reason` | Check |
+|---|---|
+| `tls_certificate` | The server certificate is valid and trusted by the API container |
+| `tls` | TLS settings on both sides, `smtp_use_ssl` or `smtp_use_starttls` |
+| `auth` | Matrix token, `smtp_user`, `smtp_password` |
+| `blocked_destination` | The host resolves to a public address, or is listed in `RH_NOTIFY_INTERNAL_ALLOW` |
+| `dns` | The name resolves from the vault, without a proxy |
+| `connection`, `timeout` | Route, firewall and port from the vault |
+| `rejected`, `http_status` | The server's answer: sender, recipients, room, URL |
+| `config` | The channel's settings |
 
 ### `DEKKeyStale`
 The `dek_key` has not been rotated within the configured window. Hygiene, not

@@ -156,8 +156,11 @@ def build_certificates(work: Path, ips: list[str], names: list[str], days: int) 
 def install_file(source: Path, target: Path, default_mode: int, stamp: str) -> None:
     """Replace target atomically, keeping a backup and its owner and mode."""
     staged = target.with_name(f".{target.name}.new")
-    shutil.copyfile(source, staged)
-    os.chmod(staged, default_mode)
+    staged.unlink(missing_ok=True)
+    # Created with its final mode: a private key is never readable under umask.
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, default_mode)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(source.read_bytes())
     if target.exists():
         shutil.copy2(target, target.with_name(f"{target.name}.{stamp}.bak"))
         info = target.stat()

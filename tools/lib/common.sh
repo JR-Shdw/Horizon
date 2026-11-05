@@ -337,7 +337,8 @@ _render_nginx() {
         _ccv='    ssl_verify_client optional_no_ca;\n'
         _cch='        proxy_set_header X-Client-Cert $ssl_client_escaped_cert;\n'
     else
-        _ccv=''; _cch=''
+        # Clear it: nginx forwards client headers by default.
+        _ccv=''; _cch='        proxy_set_header X-Client-Cert "";\n'
     fi
     # "default" means omit ssl_ecdh_curve entirely and let nginx/libssl choose.
     # Needed because the curve NAMES are not portable: LibreSSL rejects even the

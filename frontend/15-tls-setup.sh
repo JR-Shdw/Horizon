@@ -33,7 +33,10 @@ if [ "${RH_CLUSTER_MTLS:-false}" = "true" ]; then
 '
 else
     CLIENT_CERT_VERIFY=""
-    CLIENT_CERT_HEADER=""
+    # Clear it: nginx forwards client headers by default, and this one is an
+    # identity claim.
+    CLIENT_CERT_HEADER='        proxy_set_header X-Client-Cert "";
+'
 fi
 export TLS_CERT TLS_KEY TLS_PORT WEB_ROOT SSL_GROUPS CLIENT_CERT_VERIFY CLIENT_CERT_HEADER
 

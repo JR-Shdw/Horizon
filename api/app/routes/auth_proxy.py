@@ -30,7 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import log_action
-from ..auth import actor_display_name, require_permission
+from ..auth import actor_display_name, merge_group_permissions, require_permission
 from ..client_ip import get_identity_trusted_proxies
 from ..config import settings
 from ..crypto import generate_token
@@ -146,33 +146,8 @@ async def _get_proxy_mappings(db: AsyncSession) -> dict:
 
 
 def _merge_permissions(groups: list[str], mappings: dict) -> dict:
-    """Combine the permissions of every matching group into one perms dict.
-
-    For each scope (secrets/tokens/audit/admin), keep the strongest mode
-    (`rw` > `r`). Namespaces are unioned.
-    """
-    out: dict = {}
-    ns_set: set[str] = set()
-    has_ns_restriction = False
-    for g in groups:
-        perms = mappings.get(g)
-        if not perms:
-            continue
-        for k, v in perms.items():
-            if k == "namespaces":
-                has_ns_restriction = True
-                if isinstance(v, list):
-                    ns_set.update(entry for entry in v if isinstance(entry, str))
-                continue
-            cur = out.get(k)
-            if cur == "rw":
-                continue
-            out[k] = v if (v == "rw" or cur is None) else cur
-    # A present but empty (or malformed) claim denies every namespace. Only
-    # an absent claim is unrestricted, matching auth.namespace_claim.
-    if has_ns_restriction:
-        out["namespaces"] = sorted(ns_set)
-    return out
+    """Combine the permissions of every matching group into one perms dict."""
+    return merge_group_permissions([mappings[g] for g in groups if mappings.get(g)])
 
 
 # ---------------------------------------------------------------------------

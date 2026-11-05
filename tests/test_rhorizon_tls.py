@@ -1,6 +1,8 @@
 """Drive tools/rhorizon-tls against real openssl and stubbed system stores."""
 
 import http.server
+import importlib.machinery
+import importlib.util
 import os
 import shutil
 import ssl
@@ -9,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 TOOL = Path(__file__).resolve().parents[1] / "tools/rhorizon-tls"
@@ -23,6 +26,14 @@ class Quiet(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "2")
         self.end_headers()
         self.wfile.write(b"ok")
+
+
+def load_tool():
+    loader = importlib.machinery.SourceFileLoader("rhorizon_tls", str(TOOL))
+    spec = importlib.util.spec_from_loader("rhorizon_tls", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 class Server(http.server.ThreadingHTTPServer):
@@ -40,7 +51,16 @@ class RhorizonTlsTests(unittest.TestCase):
         self.log = self.root / "commands.log"
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for name in ("sudo", "certutil", "update-ca-trust"):
+        # Every system command is stubbed: CI runs as root, where the tool
+        # skips sudo, and these must never reach the real CA store.
+        for name in (
+            "sudo",
+            "certutil",
+            "install",
+            "rm",
+            "update-ca-certificates",
+            "update-ca-trust",
+        ):
             self.stub(name)
         self.env = {
             **os.environ,
@@ -155,6 +175,41 @@ class RhorizonTlsTests(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), previous)
 
+    def test_private_key_is_never_created_with_umask_permissions(self):
+        module = load_tool()
+        modes = []
+        real_open = os.open
+
+        def recording_open(path, flags, mode=0o777, **kwargs):
+            modes.append((Path(path).name, flags & os.O_CREAT, mode))
+            return real_open(path, flags, mode, **kwargs)
+
+        source = self.root / "source"
+        source.write_text("key")
+        self.certs.mkdir()
+        with unittest.mock.patch.object(module.os, "open", recording_open):
+            module.install_file(source, self.certs / "key.pem", 0o600, "stamp")
+        self.assertIn((".key.pem.new", os.O_CREAT, 0o600), modes)
+        self.assertEqual(stat.S_IMODE((self.certs / "key.pem").stat().st_mode), 0o600)
+
+    def test_system_commands_use_sudo_unless_root(self):
+        module = load_tool()
+        with (
+            unittest.mock.patch.object(module.os, "geteuid", return_value=1000),
+            unittest.mock.patch.object(module, "need"),
+            unittest.mock.patch.object(module.subprocess, "run") as sudo_run,
+        ):
+            sudo_run.return_value.returncode = 0
+            module.privileged("update-ca-trust", "extract")
+        sudo_run.assert_called_once_with(("sudo", "update-ca-trust", "extract"))
+
+        with (
+            unittest.mock.patch.object(module.os, "geteuid", return_value=0),
+            unittest.mock.patch.object(module, "run") as direct_run,
+        ):
+            module.privileged("update-ca-trust", "extract")
+        direct_run.assert_called_once_with("update-ca-trust", "extract")
+
     def test_subnet_is_refused_with_a_useful_message(self):
         result = self.tool(
             "generate", "--ip", "198.51.100.0/24", "--out", str(self.certs)
@@ -169,7 +224,7 @@ class RhorizonTlsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         log = self.log.read_text()
         self.assertIn("rhorizon-v.crt", log)
-        self.assertIn("sudo update-ca-trust extract", log)
+        self.assertIn("update-ca-", log)
         self.assertIn("-t C,, -n v", log)
 
     def test_trust_can_target_one_store(self):
@@ -177,7 +232,9 @@ class RhorizonTlsTests(unittest.TestCase):
         self.tool(
             "trust", str(self.certs / "ca.pem"), "--name", "v", "--yes", "--browser"
         )
-        self.assertNotIn("sudo", self.log.read_text())
+        log = self.log.read_text()
+        self.assertNotIn("rhorizon-v.crt", log)
+        self.assertNotIn("update-ca-", log)
 
     def test_wrong_fingerprint_changes_nothing(self):
         self.generate()

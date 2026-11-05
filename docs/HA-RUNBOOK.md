@@ -330,6 +330,12 @@ ssl_verify_client optional_no_ca;
 proxy_set_header X-Client-Cert $ssl_client_escaped_cert;   # on every /api/ location
 ```
 
+Every other listener that reaches the API must clear the header:
+
+```nginx
+proxy_set_header X-Client-Cert "";
+```
+
 ## 0.2 Upstream keep-alive (prerequisite)
 
 The proxy-to-uvicorn hop is HTTP/1.1 even when clients speak HTTP/2, and it

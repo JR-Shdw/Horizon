@@ -1188,5 +1188,6 @@ class TestAuditDefensivePaths:
         caplog.set_level("WARNING", logger="rhorizon.audit")
         await audit_mod._dispatch_critical_event("test-critical-message")
         assert any(
-            "critical notification dispatch failed" in r.message for r in caplog.records
+            "notification dispatch failed: event=critical" in r.getMessage()
+            for r in caplog.records
         )

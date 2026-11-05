@@ -27,6 +27,8 @@ api:
   clusterEnabled: false
   # Frontend Pod CIDR(s) allowed to forward identity headers. Keep narrow.
   proxyTrustedIps: ""
+  # Internal relays for notification channels, e.g. "10.0.0.5:25,10.0.1.0/24"
+  notifyInternalAllow: ""
   haPrimaryUrl: ""
   # Optional Secret holding the CA that signs the internal HTTPS listener.
   # Leave empty when that certificate chains to the image's public trust store.

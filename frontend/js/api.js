@@ -55,6 +55,14 @@ function clearToken() {
   localStorage.removeItem('rh_token');
 }
 
+// Each tab holds its own copy: follow a clear or replace from another tab.
+window.addEventListener('storage', (e) => {
+  if (e.key !== 'rh_token' && e.key !== null) return;
+  _token = _isValidTokenFormat(e.newValue) ? e.newValue : '';
+  const input = document.getElementById('set-token');
+  if (input) input.value = _token;
+});
+
 async function api(method, path, body) {
   const opts = {
     method,

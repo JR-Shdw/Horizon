@@ -258,7 +258,7 @@ What Resurgamus Horizon does NOT protect against:
 | **No certificate pinning** | No mutual TLS between API clients and vault. TLS via Nginx + operator's VPN, but no client cert pinning. |
 | **No anomaly detection** | Audit logs detect tampering but don't alert on suspicious patterns (e.g., bulk secret reads at 3 AM). Requires external SIEM integration. |
 | **Backup decryption** | age-encrypted backups require the age key. If the age key is lost, the backup is unrecoverable. No key escrow. |
-| **PostgreSQL TLS unverified by default** | `database_ssl` defaults to `require`: encrypted, but the server certificate is not verified, so this stops passive sniffing and not an active MITM on the DB path. `verify-full` **is** supported and pins `database_ca_cert`, so it is opt-in, not absent. The default suits single-host; set `verify-full` for any deployment where the database is reached across a network you do not own. |
+| **PostgreSQL TLS verification** | `database_ssl` defaults to `verify-full`. `require` remains available: it encrypts without verifying the server certificate, and the API logs a warning when it is used for a database on another host. |
 
 ### 3.4 - Agent (rh-inject) Limitations
 
@@ -292,7 +292,6 @@ Resurgamus Horizon's auth model is self-contained: master password + 2FA (WebAut
 | Improvement | Effort | Impact |
 |-------------|--------|--------|
 | Minimum password length enforcement | Low | Prevent trivially weak master passwords |
-| Make `database_ssl=verify-full` the default | Low | The verified mode already exists and is documented; what remains is flipping the default and shipping a CA path, which is a migration question rather than a missing control |
 | Mutual TLS for API clients | Medium | Stronger client authentication |
 | HSM integration (PKCS#11) | High | FIPS 140-2 compliance, hardware key protection |
 | SIEM integration (anomaly alerting) | Medium | Detection of bulk exfiltration patterns |

@@ -97,14 +97,15 @@ class ClusterRotateCaResponse(BaseModel):
 )
 async def cluster_refresh_cert(
     identity: cluster_mtls.ClusterMemberIdentity = Depends(
-        cluster_mtls.require_cluster_member_cert
+        cluster_mtls.require_cluster_member_proof
     ),
     db: AsyncSession = Depends(get_db),
 ):
     """Re-mint the caller's node cert. mTLS-authenticated.
 
-    The dependency authenticates the caller via X-Client-Cert ; the
-    identity carries ``node_uuid`` (= cert CN) which is the SOLE
+    The dependency authenticates the caller via X-Client-Cert and requires
+    X-Cluster-Proof, a signature made with the node key. The identity carries
+    ``node_uuid`` (= cert CN) which is the SOLE
     target of the refresh -- a node can only refresh its own cert.
     The membership row's existing ``source_ip`` is preserved to keep
     the (uuid, ip) binding consistent. If the cluster

@@ -19,7 +19,7 @@ from api.app.config import Settings
         ("false", "disable"),
         ("1", "require"),
         ("0", "disable"),
-        ("", "require"),
+        ("", "verify-full"),
         ("disable", "disable"),
         ("require", "require"),
         ("verify-full", "verify-full"),
@@ -100,3 +100,28 @@ def test_verify_full_missing_ca_fails_closed(monkeypatch):
     )
     with pytest.raises(FileNotFoundError):
         database._pg_ssl_context()
+
+
+def test_default_verifies_the_server_certificate(monkeypatch):
+    monkeypatch.delenv("RHORIZON_DATABASE_SSL", raising=False)
+    monkeypatch.delenv("RH_DATABASE_SSL", raising=False)
+    assert Settings(_env_file=None).database_ssl == "verify-full"
+
+
+@pytest.mark.parametrize(
+    "mode,host,expected",
+    [
+        ("require", "db.example.net", True),
+        ("require", "10.0.0.5", True),
+        ("require", "127.0.0.1", False),
+        ("require", "localhost", False),
+        ("verify-full", "db.example.net", False),
+        ("disable", "db.example.net", False),
+    ],
+)
+def test_unverified_remote_tls(monkeypatch, mode, host, expected):
+    url = f"postgresql+asyncpg://u:p@{host}:5432/rhorizon"
+    monkeypatch.setattr(
+        database, "settings", Settings(database_ssl=mode, database_url=url)
+    )
+    assert database.unverified_remote_tls() is expected

@@ -17,6 +17,23 @@ window._clearSessionToken = function() {
   toast('Token cleared', true);
 };
 
+// Non-admin tokens get a 403 here and simply see no banner.
+async function failingChannelsBanner(sealed) {
+  if (sealed) return '';
+  try {
+    const r = await api('GET', '/notifications/');
+    const failing = (r.items || []).filter(c => c.enabled && c.status === 'failing');
+    if (!failing.length) return '';
+    const rows = failing.map(c =>
+      `<div class="kv"><span>${esc(c.name)}</span><span>${esc(c.last_error || 'delivery failed')}</span></div>`).join('');
+    return `<div class="card card-danger">
+      <div class="card-title">Alerts are not being delivered</div>
+      ${rows}
+      <button class="btn danger small mt-12" data-action="navigate" data-view="pulsar">Open channels</button>
+    </div>`;
+  } catch { return ''; }
+}
+
 async function renderCore(el) {
   const s = window._vaultStatus || {};
   const sealed = isSealed();
@@ -26,6 +43,8 @@ async function renderCore(el) {
   const migrationWindow = Number(s.token_migration_window_days) || 15;
 
   let html = '';
+
+  html += await failingChannelsBanner(sealed);
 
   // Post-restore review banner, only when /backup/restore set the flag
   // and the operator has not dismissed it yet. Lists the tables that the

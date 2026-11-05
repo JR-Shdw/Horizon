@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import pki_ca
 from ..audit import log_action
-from ..auth import actor_display_name, check_namespace, require_permission
+from ..auth import (
+    actor_display_name,
+    check_namespace,
+    namespace_claim,
+    require_permission,
+)
 from ..client_ip import get_client_ip
 from ..database import get_db
 from ..vault_state import vault
@@ -118,8 +123,7 @@ class PkiRotate(BaseModel):
 
 
 def _allowed_namespaces(token_info: dict) -> list[str] | None:
-    allowed = token_info.get("permissions", {}).get("namespaces")
-    return list(allowed) if allowed else None
+    return namespace_claim(token_info)
 
 
 @router.post("/init", status_code=201)

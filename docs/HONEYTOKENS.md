@@ -118,22 +118,22 @@ receive it on Matrix, SMTP or webhook, configure a channel in
 5. Tick `honey_access` in the events checklist
 6. Create -> **Test** to verify it fires
 
-### Direct SQL (one-shot bootstrap)
+### API (scripted bootstrap)
 
-```sql
-INSERT INTO vault_notification_channels
-    (name, channel_type, config, events, enabled)
-VALUES (
-    'matrix-honey',
-    'matrix',
-    jsonb_build_object(
-        'homeserver', 'https://matrix.example.com',
-        'room_id',    '!XXXXXXXX:matrix.example.com',
-        'token',      'syt_BOT_TOKEN'
-    ),
-    jsonb_build_array('honey_access'),
-    true
-);
+```bash
+curl -sS -X POST "$VAULT/api/v1/vault/notifications/" \
+  -H "Authorization: Bearer $RHORIZON_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "matrix-honey",
+    "channel_type": "matrix",
+    "config": {
+      "homeserver": "https://matrix.example.com",
+      "room_id": "!XXXXXXXX:matrix.example.com",
+      "token": "syt_BOT_TOKEN"
+    },
+    "events": ["honey_access"]
+  }'
 ```
 
 ## Threat model

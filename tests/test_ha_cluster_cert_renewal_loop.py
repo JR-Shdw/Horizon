@@ -336,7 +336,7 @@ async def test_post_refresh_wraps_transport_error(_fresh_cluster):
     canonical ``refresh-cert transport error:`` prefix."""
     cert_p, key_p = _fresh_cluster
 
-    async def _boom(self, url, json=None):
+    async def _boom(self, url, json=None, headers=None):
         raise httpx.ConnectError("simulated dial failure")
 
     with patch("httpx.AsyncClient.post", _boom):
@@ -357,7 +357,7 @@ async def test_post_refresh_non_200_raises_with_status_and_body(_fresh_cluster):
         def json(self):
             return {}
 
-    async def _fake_post(self, url, json=None):
+    async def _fake_post(self, url, json=None, headers=None):
         return _Resp()
 
     with patch("httpx.AsyncClient.post", _fake_post):
@@ -378,7 +378,7 @@ async def test_post_refresh_missing_fields_raises(_fresh_cluster):
         def json(self):
             return {"node_cert_pem": "", "node_cert_key_pem": ""}
 
-    async def _fake_post(self, url, json=None):
+    async def _fake_post(self, url, json=None, headers=None):
         return _Resp()
 
     with patch("httpx.AsyncClient.post", _fake_post):
@@ -407,7 +407,7 @@ async def test_post_refresh_returns_four_tuple_with_server_pair(
                 "server_cert_key_pem": new_server_key.decode("ascii"),
             }
 
-    async def _fake_post(self, url, json=None):
+    async def _fake_post(self, url, json=None, headers=None):
         return _Resp()
 
     with patch("httpx.AsyncClient.post", _fake_post):
