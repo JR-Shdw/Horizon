@@ -44,9 +44,13 @@ intervention.
 """
 
 import asyncio
+import contextlib
+import fcntl
 import hashlib
 import hmac
 import logging
+import os
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
@@ -554,6 +558,28 @@ def _parse_issued_at_epoch(iso: str) -> int:
     return int(dt.timestamp())
 
 
+@contextlib.asynccontextmanager
+async def _node_join_lock() -> AsyncIterator[None]:
+    """Hold the per-node JOIN lock, released by the kernel if a worker dies."""
+    path = Path(settings.cluster_cert_path).parent / ".auto-join.lock"
+    try:
+        lock_fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        log.warning("cluster_auto_join: no JOIN lock at %s (%s)", path, exc)
+        yield
+        return
+    try:
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                await asyncio.sleep(1)
+        yield
+    finally:
+        os.close(lock_fd)
+
+
 async def cluster_auto_join_task() -> None:
     """Lifespan-launched background task driving the one-shot JOIN.
 
@@ -585,50 +611,53 @@ async def cluster_auto_join_task() -> None:
 
     node_uuid = get_node_uuid()
 
-    # Step 2 : reconcile any on-disk cert against live membership. If a
-    # cert is present but this node is absent from /cluster/ha (evicted,
-    # half-join, or a cert left from a previous cluster after a DB wipe),
-    # the stale cert is removed so the gate below lets us JOIN fresh. A
-    # genuine member keeps its cert and we return.
-    await _reconcile_stale_cert(node_uuid)
+    # Every worker runs this task. One JOIN per node: each repeat resets the
+    # quarantine and swaps the cert the node is already using.
+    async with _node_join_lock():
+        # Step 2 : reconcile any on-disk cert against live membership. If a
+        # cert is present but this node is absent from /cluster/ha (evicted,
+        # half-join, or a cert left from a previous cluster after a DB wipe),
+        # the stale cert is removed so the gate below lets us JOIN fresh. A
+        # genuine member keeps its cert and we return.
+        await _reconcile_stale_cert(node_uuid)
 
-    # Step 3 : re-check the full gating (now including the cert) -- the
-    # cert could have been provisioned by a parallel admin curl during the
-    # unseal wait, or _reconcile_stale_cert just cleared a stale one.
-    attempt, reason = _should_attempt()
-    if not attempt:
-        log.info("cluster_auto_join: cancelled post-unseal (%s)", reason)
-        return
-
-    max_attempts = settings.ha_auto_join_max_attempts
-    backoff = settings.ha_auto_join_retry_secs
-
-    for attempt_no in range(1, max_attempts + 1):
-        try:
-            await _attempt_join_once(node_uuid)
+        # Step 3 : re-check the full gating (now including the cert) -- the
+        # cert could have been provisioned by a parallel admin curl during the
+        # unseal wait, or _reconcile_stale_cert just cleared a stale one.
+        attempt, reason = _should_attempt()
+        if not attempt:
+            log.info("cluster_auto_join: cancelled post-unseal (%s)", reason)
             return
-        except AutoJoinPermanentError as exc:
-            log.error("cluster_auto_join: permanent failure (%s) -- exiting", exc)
-            return
-        except AutoJoinError as exc:
-            log.warning(
-                "cluster_auto_join: attempt %d/%d failed (%s) ; retrying in %ds",
-                attempt_no,
-                max_attempts,
-                exc,
-                backoff,
-            )
-        except Exception:
-            log.exception(
-                "cluster_auto_join: attempt %d/%d crashed ; retrying in %ds",
-                attempt_no,
-                max_attempts,
-                backoff,
-            )
-        if attempt_no < max_attempts:
-            await asyncio.sleep(backoff)
 
-    log.error(
-        "cluster_auto_join: exhausted %d attempts -- no cert persisted",
-        max_attempts,
-    )
+        max_attempts = settings.ha_auto_join_max_attempts
+        backoff = settings.ha_auto_join_retry_secs
+
+        for attempt_no in range(1, max_attempts + 1):
+            try:
+                await _attempt_join_once(node_uuid)
+                return
+            except AutoJoinPermanentError as exc:
+                log.error("cluster_auto_join: permanent failure (%s) -- exiting", exc)
+                return
+            except AutoJoinError as exc:
+                log.warning(
+                    "cluster_auto_join: attempt %d/%d failed (%s) ; retrying in %ds",
+                    attempt_no,
+                    max_attempts,
+                    exc,
+                    backoff,
+                )
+            except Exception:
+                log.exception(
+                    "cluster_auto_join: attempt %d/%d crashed ; retrying in %ds",
+                    attempt_no,
+                    max_attempts,
+                    backoff,
+                )
+            if attempt_no < max_attempts:
+                await asyncio.sleep(backoff)
+
+        log.error(
+            "cluster_auto_join: exhausted %d attempts -- no cert persisted",
+            max_attempts,
+        )

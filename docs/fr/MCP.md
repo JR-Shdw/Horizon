@@ -396,6 +396,9 @@ donne le bon chemin.
 Pour Cursor / Cline / Continue, la forme JSON est similaire - la
 contrainte chemin-absolu s'applique pareil.
 
+Pour Claude Code, le [skill Horizon](../../integrations/claude-skill/README.md)
+ajoute la procédure d'accès aux identifiants à cette configuration.
+
 ---
 
 ## 6. Transport HTTP - retiré du serveur

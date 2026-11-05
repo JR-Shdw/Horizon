@@ -6,6 +6,22 @@ cadence; things ship when they're ready.
 
 ## Unreleased
 
+### Added
+
+- Add a Claude Code skill for using Horizon credentials through MCP, in
+  `integrations/claude-skill/`.
+
+### Security
+
+- Update `apt` to 3.0.4 in the API and PostgreSQL images for CVE-2026-109518.
+
+### Fixed
+
+- Join a cluster once per node. Each API worker ran its own auto-JOIN, so a
+  temporary `503` from the primary made workers repeat a JOIN that a sibling had
+  already completed. Every repeat restarted the quarantine and replaced the
+  node certificate, which could keep a node in `joining`.
+
 ## 0.9.6-beta - 2026-11-04
 
 ### Added

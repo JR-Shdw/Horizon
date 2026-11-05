@@ -394,6 +394,9 @@ gives you the right path.
 For Cursor / Cline / Continue, the JSON shape is similar - the
 absolute-path constraint applies the same way.
 
+For Claude Code, the [Horizon skill](../integrations/claude-skill/README.md) adds
+the credential workflow on top of this setup.
+
 ---
 
 ## 6. HTTP transport -- removed from the server

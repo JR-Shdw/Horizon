@@ -89,7 +89,8 @@ diagnose_api_pod() {
   echo "[k8s-e2e] describe $pod:" >&2
   "${KUBECTL[@]}" -n "$NS" describe pod "$pod" >&2 2>/dev/null || true
   echo "[k8s-e2e] current logs $pod:" >&2
-  "${KUBECTL[@]}" -n "$NS" logs "$pod" --tail=120 >&2 2>/dev/null || true
+  "${KUBECTL[@]}" -n "$NS" logs "$pod" --tail=2000 2>/dev/null \
+    | grep -v 'dek_key rotation timestamp' | tail -n 400 >&2 || true
   restart_count="$("${KUBECTL[@]}" -n "$NS" get pod "$pod" \
     -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || true)"
   if [ "${restart_count:-0}" -gt 0 ]; then

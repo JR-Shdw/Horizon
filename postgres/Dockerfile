@@ -44,6 +44,8 @@ ARG GZIP_VERSION=1.13-1+deb13u1
 ARG PCRE2_VERSION=10.46-1~deb13u3
 ARG SQLITE_VERSION=3.46.1-7+deb13u2
 ARG PERL_VERSION=5.40.1-6+deb13u1
+# apt: CVE-2026-109518.
+ARG APT_VERSION=3.0.4
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends --only-upgrade \
@@ -65,7 +67,9 @@ RUN set -eux; \
         libperl5.40=${PERL_VERSION} \
         perl=${PERL_VERSION} \
         perl-base=${PERL_VERSION} \
-        perl-modules-5.40=${PERL_VERSION}; \
+        perl-modules-5.40=${PERL_VERSION} \
+        apt=${APT_VERSION} \
+        libapt-pkg7.0=${APT_VERSION}; \
     rm -rf /var/lib/apt/lists/*
 
 # docker-entrypoint.sh only ever calls `gosu postgres <cmd...>`. Replace the
