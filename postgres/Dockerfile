@@ -46,6 +46,8 @@ ARG SQLITE_VERSION=3.46.1-7+deb13u2
 ARG PERL_VERSION=5.40.1-6+deb13u1
 # apt: CVE-2026-109518.
 ARG APT_VERSION=3.0.4
+# zlib: CVE-2026-76844 and CVE-2026-85091. Remove once the base includes the fix.
+ARG ZLIB_VERSION=1:1.3.dfsg+really1.3.1-1+deb13u1
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends --only-upgrade \
@@ -69,7 +71,8 @@ RUN set -eux; \
         perl-base=${PERL_VERSION} \
         perl-modules-5.40=${PERL_VERSION} \
         apt=${APT_VERSION} \
-        libapt-pkg7.0=${APT_VERSION}; \
+        libapt-pkg7.0=${APT_VERSION} \
+        zlib1g=${ZLIB_VERSION}; \
     rm -rf /var/lib/apt/lists/*
 
 # docker-entrypoint.sh only ever calls `gosu postgres <cmd...>`. Replace the

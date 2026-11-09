@@ -154,6 +154,8 @@ ARG SQLITE_VERSION=3.46.1-7+deb13u2
 ARG PERL_VERSION=5.40.1-6+deb13u1
 # apt: CVE-2026-109518.
 ARG APT_VERSION=3.0.4
+# zlib: CVE-2026-76844 and CVE-2026-85091. Remove once the base includes the fix.
+ARG ZLIB_VERSION=1:1.3.dfsg+really1.3.1-1+deb13u1
 
 # Runtime only: libsodium + libldap (no -dev, no gcc)
 RUN set -eux; \
@@ -176,7 +178,8 @@ RUN set -eux; \
         libsqlite3-0=${SQLITE_VERSION} \
         perl-base=${PERL_VERSION} \
         apt=${APT_VERSION} \
-        libapt-pkg7.0=${APT_VERSION}; \
+        libapt-pkg7.0=${APT_VERSION} \
+        zlib1g=${ZLIB_VERSION}; \
     apt-get install -y --no-install-recommends libsodium23 libldap2 libsasl2-2; \
     rm -rf /var/lib/apt/lists/*; \
     # Remove tools an attacker could use
