@@ -10,10 +10,14 @@ cadence; things ship when they're ready.
 
 - Add a Claude Code skill for using Horizon credentials through MCP, in
   `integrations/claude-skill/`.
+- Alert when a node is still sealed after start: set `RH_NOTIFY_BOOT_URL_FILE`
+  to a file holding the URL of an alert relay. One alert per node.
 
 ### Security
 
 - Update `apt` to 3.0.4 in the API and PostgreSQL images for CVE-2026-109518.
+- Update `libxslt` to 1.1.43-r4 in the frontend image for CVE-2026-87636 and
+  CVE-2026-9947.
 
 ### Fixed
 

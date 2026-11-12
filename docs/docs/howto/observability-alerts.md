@@ -146,6 +146,41 @@ reboot before operator unseal).
                   master socket, see SEAL-DIAGNOSIS.md)."
 ```
 
+### Sealed after start
+A node restarted and nobody has unsealed it yet. Unseal it.
+
+Channels cannot send this alert: their credentials need the vault keys. The
+node POSTs instead to a URL read from a file, usually an internal relay that
+holds its own Matrix token. One worker per node sends it, once per start, if
+`/status` still reports `sealed: true` after the grace period.
+
+```yaml
+# docker-compose.override.yml
+services:
+  api:
+    environment:
+      RH_NOTIFY_BOOT_URL_FILE: /run/secrets/rhorizon/boot-alert-url
+      RH_NOTIFY_BOOT_GRACE_SECS: "120"
+      RH_NOTIFY_INTERNAL_ALLOW: "10.0.0.5:8080"
+    volumes:
+      - ./boot-alert-url:/run/secrets/rhorizon/boot-alert-url:ro
+```
+
+```text
+# boot-alert-url
+http://10.0.0.5:8080/alert/rhorizon
+```
+
+The body is the webhook channel format:
+
+```json
+{"event": "started_sealed", "message": "Horizon 0.9.6-beta on api-1 is still sealed 120s after start", "source": "rhorizon"}
+```
+
+An internal relay must be listed in `RH_NOTIFY_INTERNAL_ALLOW`, like any
+channel. Failed sends retry three times, then raise `NotificationUndelivered`
+with `event="started_sealed"`.
+
 ### `VaultSealEventFired`
 Fast complement to the gauge: a *non-operator* seal event just happened
 (defensive/broadcast/failover, NOT a manual `/seal` nor a clean shutdown).

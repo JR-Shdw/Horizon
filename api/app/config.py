@@ -521,6 +521,11 @@ class Settings(BaseSettings):
     # without TLS. Deployment setting on purpose: an admin token cannot widen it.
     notify_internal_allow: str = ""
 
+    # File holding a URL to POST to when a node is still sealed this long after
+    # start. Outside the vault: a sealed node cannot open channel credentials.
+    notify_boot_url_file: str = ""
+    notify_boot_grace_secs: int = 120
+
     # GET /audit/verify while SEALED: bearer auth is impossible when sealed (the
     # hmac_key is gone), but the ed25519-signed portion of the chain can still be
     # verified with public keys. To allow that without a token, the caller must

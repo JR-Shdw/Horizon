@@ -120,7 +120,7 @@ rust-test: ## Tests Rust uniquement (`cargo test` direct marche aussi ; le flag 
 
 rust-test-asan: ## Rust tests sous AddressSanitizer (nightly) -- couvre les paths FFI/socket que miri ne peut PAS atteindre (#[cfg_attr(miri, ignore)])
 	cd api/rust && ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
-		RUSTFLAGS="-Zsanitizer=address -C llvm-args=-asan-force-dynamic-shadow" \
+		RUSTFLAGS="-Zsanitizer=address" \
 		cargo +nightly test --release --no-default-features --target x86_64-unknown-linux-gnu -- --test-threads=1
 
 rust-wheel-install: ## Installe le wheel rhorizon_crypto pre-build dans .venv (skip maturin / rustup)

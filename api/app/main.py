@@ -1809,11 +1809,18 @@ async def lifespan(app: FastAPI):
         cert_renewal_task = asyncio.create_task(cluster_cert_renewal_loop())
         log.info("cert renewal loop scheduled")
 
+    boot_alert_task: asyncio.Task | None = None
+    if settings.notify_boot_url_file and not is_custodian():
+        from .boot_alert import boot_sealed_alert_task
+
+        boot_alert_task = asyncio.create_task(boot_sealed_alert_task())
+
     yield
 
     # Shutdown: wait for every task's cancellation cleanup before tearing down
     # the local RPC services and zeroizing key material.
     background_tasks = [
+        *([boot_alert_task] if boot_alert_task is not None else []),
         *([cert_renewal_task] if cert_renewal_task is not None else []),
         *([auto_join_task] if auto_join_task is not None else []),
         *ha_loop_tasks,

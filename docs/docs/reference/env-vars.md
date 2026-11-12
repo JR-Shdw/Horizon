@@ -66,6 +66,8 @@ Any setting `foo_bar` is set as `RH_FOO_BAR`.
 | `RH_XFF_TRUSTED_IPS` | loopback, RFC 1918 and IPv6 ULA | Proxies allowed to supply `X-Forwarded-For`; does not authorize identity headers |
 | `RH_PROXY_TRUSTED_IPS` | `""` | SSO/mTLS identity proxy CIDRs; required when proxy auth or cluster HA is enabled |
 | `RH_NOTIFY_INTERNAL_ALLOW` | `""` | Internal relays notification channels may reach, as `ip`, `cidr`, `ip:port` or `cidr:port` |
+| `RH_NOTIFY_BOOT_URL_FILE` | `""` | File holding a URL to POST to when a node is still sealed after start; empty = off. See [Sealed after start](../howto/observability-alerts.md#sealed-after-start) |
+| `RH_NOTIFY_BOOT_GRACE_SECS` | `120` | How long a node may stay sealed after start before that alert is sent |
 | `RH_CLUSTER_IDENTITY_PERSISTENT` | `false` | Deployment declaration checked by HA preflight; set only when `/var/lib/rhorizon` survives replacement |
 | `RH_CLUSTER_FROZEN_MAX_SECS` | `30` | Non-serving FROZEN grace before an isolated HA node seals and drops keys; use 45-60s same-region or 90-120s multi-region |
 | `RH_HA_SERVER_CA_FILE` | `""` | Optional private/self-signed CA or leaf pin for outbound HA HTTPS calls; empty uses system trust |

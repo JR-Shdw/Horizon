@@ -76,13 +76,15 @@ RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
 # The pinned nginx 1.30.6 / Alpine 3.24.3 base includes the libuuid,
 # libexpat, libx11, PCRE2 and TIFF security fixes on amd64 and arm64.
 # curl is required at runtime by the compose healthcheck.
-# Require the Brotli, curl and Expat security fixes, including
-# CVE-2026-111497, CVE-2026-92392, CVE-2026-117610 and CVE-2026-118370.
+# Require the Brotli, curl, Expat and libxslt security fixes, including
+# CVE-2026-111497, CVE-2026-92392, CVE-2026-117610, CVE-2026-118370,
+# CVE-2026-87636 and CVE-2026-9947.
 RUN apk add --no-cache \
     'brotli-libs>=1.2.1-r0' \
     'curl>=8.23.0-r0' \
     'libcurl>=8.23.0-r0' \
-    'libexpat>=2.10.0-r0'
+    'libexpat>=2.10.0-r0' \
+    'libxslt>=1.1.43-r4'
 
 ENV MAX_BODY_API=1m
 ENV MAX_BODY_BACKUP=100m
