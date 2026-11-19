@@ -90,11 +90,16 @@ ok "$ARCH opcode parser self-test"
 # ---------------------------------------------------------------------------
 # 1. Build release-mode asm with the asm-gate feature.
 # ---------------------------------------------------------------------------
+# Cargo/rustc may hash or split default assembly filenames, especially with
+# LTO and multiple crate types. Request a fresh, explicit output rather than
+# guessing a filename under target/ (which could also contain stale assembly).
+ASM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rhorizon-gf-ct.XXXXXX")
+trap 'rm -rf -- "$ASM_DIR"' EXIT
+ASM_FILE="$ASM_DIR/rhorizon_crypto.s"
 say "cargo rustc --release --locked --no-default-features --features asm-gate -- --emit asm ($ARCH native)"
 RUSTFLAGS="-C debuginfo=0" cargo +stable rustc --release \
-    --locked --no-default-features --features asm-gate --lib -- --emit asm > /dev/null
-TARGET_DIR=${CARGO_TARGET_DIR:-target}
-ASM_FILE="$TARGET_DIR/release/deps/rhorizon_crypto.s"
+    --locked --no-default-features --features asm-gate --lib -- \
+    "--emit=asm=$ASM_FILE" > /dev/null
 [ -f "$ASM_FILE" ] || fail "asm file not produced at $ASM_FILE"
 ok "asm emitted"
 

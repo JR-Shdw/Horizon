@@ -3,8 +3,10 @@
 //! Compatibility shim for the GF(256) implementation now owned by the
 //! PyO3-free custody core.
 
+#[cfg(test)]
+pub use rhorizon_custody_core::gf256::inv;
 #[cfg(any(test, feature = "asm-gate"))]
-pub use rhorizon_custody_core::gf256::{inv, mul};
+pub use rhorizon_custody_core::gf256::mul;
 
 // These stable symbols remain in the extension crate because the existing
 // assembly gate reads rhorizon_crypto's emitted assembly. Production builds do

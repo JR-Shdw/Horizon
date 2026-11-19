@@ -1,4 +1,4 @@
-FROM docker.io/library/nginx:stable-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951
+FROM docker.io/library/nginx:stable-alpine@sha256:3bc3836dc0be3b811f238210360bf8e7ca8a2d0effdae46160bf1f3578710051
 
 # OCI labels for Docker Hub / GHCR / Gitea registry display.
 ARG VERSION=dev
@@ -73,7 +73,9 @@ COPY js/ /usr/share/nginx/html/js/
 RUN find /usr/share/nginx/html -type f -exec chmod 644 {} + && \
     find /usr/share/nginx/html -type d -exec chmod 755 {} +
 
-# The pinned nginx 1.30.6 / Alpine 3.24.3 base includes the libuuid,
+# nginx 1.30.7 fixes CVE-2026-113425, CVE-2026-121810, CVE-2026-123007,
+# CVE-2026-123633 and CVE-2026-123634.
+# The pinned Alpine base includes the libuuid,
 # libexpat, libx11, PCRE2 and TIFF security fixes on amd64 and arm64.
 # curl is required at runtime by the compose healthcheck.
 # Require the Brotli, curl, Expat and libxslt security fixes, including
